@@ -21,6 +21,9 @@ importers:
       '@eslint/eslintrc':
         specifier: ^3.3.6
         version: 3.3.6
+      '@eslint/js':
+        specifier: ^10.0.1
+        version: 10.0.1(eslint@10.8.0(jiti@2.7.0))
       '@tailwindcss/postcss':
         specifier: ^4.3.3
         version: 4.3.3
@@ -57,6 +60,9 @@ importers:
       typescript:
         specifier: ^5.7.2
         version: 5.7.2
+      typescript-eslint:
+        specifier: ^8.66.0
+        version: 8.66.0(eslint@10.8.0(jiti@2.7.0))(typescript@5.7.2)
       vitest:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.1.2)(@vitest/ui@4.1.10)(vite@8.2.1(@types/node@26.1.2)(jiti@2.7.0))
@@ -177,6 +183,15 @@ packages:
   '@eslint/eslintrc@3.3.6':
     resolution: {integrity: sha512-l2Ul9PrHsPCKcEY/ac7VgFj9D80C7S68sOKc618SyHDPK36s1XcFebXY0iTzUVn4Yq+YbwvSnDmCz9yxjX+QrA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+
+  '@eslint/js@10.0.1':
+    resolution: {integrity: sha512-zeR9k5pd4gxjZ0abRoIaxdc7I3nDktoXZk2qOv9gCNWx3mVwEn32VRhyLaRsDiJjTs0xq/T8mfPtyuXu7GWBcA==}
+    engines: {node: ^20.19.0 || ^22.13.0 || >=24}
+    peerDependencies:
+      eslint: ^10.0.0
+    peerDependenciesMeta:
+      eslint:
+        optional: true
 
   '@eslint/object-schema@3.0.5':
     resolution: {integrity: sha512-vqTaUEgxzm+YDSdElad6PiRoX4t8VGDjCtt05zn4nU810UIx/uNEV7/lZJ6KwFThKZOzOxzXy48da+No7HZaMw==}
@@ -2561,6 +2576,10 @@ snapshots:
       strip-json-comments: 3.1.1
     transitivePeerDependencies:
       - supports-color
+
+  '@eslint/js@10.0.1(eslint@10.8.0(jiti@2.7.0))':
+    optionalDependencies:
+      eslint: 10.8.0(jiti@2.7.0)
 
   '@eslint/object-schema@3.0.5': {}
 
