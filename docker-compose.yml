@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: allset
+      POSTGRES_PASSWORD: allset
+      POSTGRES_DB: allset
+    ports:
+      - "5432:5432"
+    volumes:
+      - allset_db_data:/var/lib/postgresql/data
+volumes:
+  allset_db_data:
