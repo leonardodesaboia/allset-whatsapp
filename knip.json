@@ -27,10 +27,5 @@
     // Usado em tests/integration/test-db.ts (harness Testcontainers da
     // Task 3), fora do escopo "src/**" declarado em "project" acima.
     "@testcontainers/postgresql"
-  ],
-  "ignoreBinaries": [
-    // O script "test:e2e" antecipa a Task 10 (E2E de login), que instalará
-    // @playwright/test; o binário ainda não está presente propositalmente.
-    "playwright"
   ]
 }
