@@ -9,6 +9,21 @@ import { z } from "zod";
  */
 export const BETTER_AUTH_SECRET_PLACEHOLDER = "replace-with-32+-char-random-secret";
 
+/** Variáveis opcionais podem permanecer vazias no template `.env.example`. */
+function optionalEnv<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    schema.optional(),
+  );
+}
+
+function positiveIntegerEnv(defaultValue: number) {
+  return z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.coerce.number().int().positive().max(168).default(defaultValue),
+  );
+}
+
 const envSchema = z.object({
   // Aceita tanto "postgresql://" quanto "postgres://" — ambos os esquemas
   // são válidos para Postgres (usados por libpq, Prisma e por ferramentas
@@ -26,6 +41,24 @@ const envSchema = z.object({
     }),
   BETTER_AUTH_URL: z.string().url(),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  EVOLUTION_BASE_URL: optionalEnv(z.string().url()),
+  EVOLUTION_API_KEY: optionalEnv(z.string().min(1)),
+  EVOLUTION_INSTANCE: optionalEnv(z.string().min(1)),
+  EVOLUTION_WEBHOOK_SECRET: optionalEnv(z.string().min(32)),
+  INTERNAL_JOB_SECRET: optionalEnv(z.string().min(32)),
+  OPENAI_API_KEY: optionalEnv(z.string().min(1)),
+  RECRUITMENT_REENGAGEMENT_AFTER_HOURS: positiveIntegerEnv(24),
+  RECRUITMENT_REENGAGEMENT_MAX_ATTEMPTS: positiveIntegerEnv(2),
+  // Storage S3-compatível (MinIO local ou AWS S3 em produção).
+  // Todas as cinco variáveis abaixo devem ser definidas juntas; deixar vazias
+  // ativa o provider local de desenvolvimento (não funciona com Evolution em prod).
+  S3_ENDPOINT: optionalEnv(z.string().url()),
+  S3_BUCKET: optionalEnv(z.string().min(1).max(63)),
+  S3_REGION: optionalEnv(z.string().min(1).max(63)),
+  S3_ACCESS_KEY_ID: optionalEnv(z.string().min(1)),
+  S3_SECRET_ACCESS_KEY: optionalEnv(z.string().min(1)),
+  // URL pública do MinIO (quando o endpoint interno difere do URL acessível externamente).
+  S3_PUBLIC_URL: optionalEnv(z.string().url()),
 });
 
 export type Env = z.infer<typeof envSchema>;

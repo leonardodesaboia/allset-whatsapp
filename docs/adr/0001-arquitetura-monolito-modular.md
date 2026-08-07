@@ -36,7 +36,8 @@ AllSet é um marketplace de serviços de limpeza doméstica acionado via WhatsAp
 - **Domain:** Entidades e regras de negócio puras (sem frameworks, sem I/O)
 - **Use Cases:** Orquestração de domínio com transações e handlers de eventos
 - **Adapters:** Implementações concretas de interfaces genéricas (Messaging, Payment, Storage, ErrorReporting)
-- **Infra:** Prisma ORM, pg-boss (jobs), observabilidade (Pino)
+- **Infra:** Prisma ORM, worker/cron de outbox (pg-boss continua a evolução
+  planejada), observabilidade (Pino)
 
 ### Messaging Provider-Agnostic
 
@@ -49,16 +50,18 @@ Mensageria não é um serviço de terceiros — é um **adapter**:
 
 Roteamento via `ProviderRouter` (configurável por cliente, tipo de mensagem, contexto).
 
-### Confiabilidade Assíncrona: Outbox + pg-boss
+### Confiabilidade Assíncrona: Outbox + worker
 
 Eventos de domínio são persistidos no **outbox pattern**:
 
 1. Use case escreve: entidade + eventos + outbox em transação atômica
-2. Worker pg-boss lê outbox, executa handlers, marca como processado
-3. Retry automático com backoff exponencial (pg-boss nativo)
+2. Worker/cron autenticado lê a outbox por endpoint interno, executa o adapter
+   e marca o resultado
+3. Retry automático com backoff exponencial e dead letter no próprio registro
 4. Trata falhas transitórias sem perder eventos
 
-Não há filas externas (Redis, Kafka, RabbitMQ) — economiza DevOps na Fase 1.
+Não há filas externas (Redis, Kafka, RabbitMQ). A adoção de pg-boss permanece
+planejada para automações de longa duração, sem mudar o contrato de outbox.
 
 ### Autenticação e Autorização
 

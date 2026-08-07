@@ -12,7 +12,16 @@
     // local-storage-provider.test.ts).
     "src/domain/ports/error-reporter.ts",
     "src/infrastructure/observability/console-error-reporter.ts",
-    "src/infrastructure/storage/in-memory-storage-provider.ts"
+    "src/infrastructure/storage/in-memory-storage-provider.ts",
+    // Casos de uso dos sub-specs 4 e 6–8: a persistência e regras existem,
+    // mas as telas/automação WhatsApp que os acionam ainda são entregas
+    // explícitas do roadmap. Mantê-los fora do grafo evita que o CI confunda
+    // capacidade de domínio pronta com uma rota pública inexistente.
+    "src/application/messaging/record-received-audio.usecase.ts",
+    "src/application/recruitment/documents-terms.usecase.ts",
+    "src/application/recruitment/onboarding-operational-test.usecase.ts",
+    "src/application/recruitment/question-audio-assets.usecase.ts",
+    "src/application/recruitment/validation-activation.usecase.ts"
   ],
   "ignoreDependencies": [
     // Consumido via `@import "tailwindcss"` em src/app/globals.css (sintaxe
