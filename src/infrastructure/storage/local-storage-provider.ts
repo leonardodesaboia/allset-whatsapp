@@ -1,4 +1,4 @@
-import { mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type {
   DeleteFileInput,
@@ -23,6 +23,10 @@ export class LocalStorageProvider implements StorageProvider {
   async getSignedUrl(input: SignedUrlInput): Promise<string> {
     const expires = Date.now() + input.expiresInSeconds * 1000;
     return `local-storage://${input.key}?expires=${expires}`;
+  }
+
+  async get(input: { key: string }): Promise<Uint8Array> {
+    return readFile(join(this.baseDir, input.key));
   }
 
   async delete(input: DeleteFileInput): Promise<void> {
