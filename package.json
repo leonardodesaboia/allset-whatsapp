@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@10.34.5",
   "engines": {
     "node": ">=24.0.0",
     "pnpm": ">=9.0.0"
@@ -13,9 +14,9 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --exclude '**/*.integration.test.ts'",
+    "test": "vitest run --exclude \"**/*.integration.test.ts\"",
     "test:watch": "vitest",
-    "test:integration": "vitest run --testTimeout=60000 -t . --dir src --config vitest.config.ts",
+    "test:integration": "vitest run --testTimeout=60000 integration.test.ts",
     "test:e2e": "playwright test",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

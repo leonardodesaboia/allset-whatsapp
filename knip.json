@@ -1,5 +1,5 @@
 {
-  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": ["src/app/**/{page,layout,route}.tsx", "src/app/**/{page,layout,route}.ts"],
   "project": ["src/**/*.ts", "src/**/*.tsx"],
   "ignore": [
@@ -15,6 +15,11 @@
     "src/infrastructure/storage/in-memory-storage-provider.ts"
   ],
   "ignoreDependencies": [
+    // Consumido via `@import "tailwindcss"` em src/app/globals.css (sintaxe
+    // da v4) e pelo plugin @tailwindcss/postcss — o Knip não segue imports
+    // dentro de .css, então não enxerga esse uso. Não há mais
+    // tailwind.config.ts: na v4 a config vive no próprio CSS.
+    "tailwindcss",
     // Tailwind v4 (@tailwindcss/postcss) já faz autoprefixing via Lightning
     // CSS internamente; pacote mantido do scaffold do Task 1, sem uso direto.
     "autoprefixer",

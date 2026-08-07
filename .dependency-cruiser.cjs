@@ -35,6 +35,13 @@ module.exports = {
   options: {
     tsPreCompilationDeps: true,
     tsConfig: { fileName: "tsconfig.json" },
-    exclude: { path: "node_modules|\\.test\\.ts$|\\.integration\\.test\\.ts$" },
+    // `exclude` remove os módulos do grafo por completo (inclusive as arestas
+    // que apontam para eles) — com "node_modules" ali, a regra
+    // `domain-no-frameworks` nunca conseguia enxergar uma violação. O correto
+    // é `doNotFollow`: mantém node_modules como nós do grafo (então as arestas
+    // src/domain -> node_modules/... existem e são avaliadas pelas regras),
+    // apenas não resolve as dependências *dentro* deles.
+    doNotFollow: { path: "node_modules" },
+    exclude: { path: "\\.test\\.ts$|\\.integration\\.test\\.ts$" },
   },
 };
