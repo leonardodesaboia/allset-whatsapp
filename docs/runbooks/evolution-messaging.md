@@ -26,6 +26,7 @@ EVOLUTION_INSTANCE="allset"
 EVOLUTION_WEBHOOK_SECRET="<ao menos 32 caracteres aleatórios>"
 INTERNAL_JOB_SECRET="<ao menos 32 caracteres aleatórios>"
 OPENAI_API_KEY="<chave de servidor da OpenAI, se a transcrição estiver ativa>"
+CRON_SECRET="<ao menos 32 caracteres aleatórios; usado pelo Vercel Cron>"
 ```
 
 Na Evolution, configure o webhook de mensagens recebidas para:
@@ -115,15 +116,38 @@ O texto transcrito é submetido ao mesmo `ConversationEngine` usado para texto.
 Uma resposta clara como “sim” pode avançar uma pergunta de opção; uma fala que
 não corresponda à opção esperada segue o fallback de revisão manual.
 
-### Limite atual: download da mídia do provider
+### Worker de download e transcrição
 
-O webhook já persiste o evento de áudio e retorna `needsMediaDownload`. O worker
-de download deve obter os bytes da mídia na Evolution, chamar
-`recordReceivedAudio` e só então acionar `/api/internal/messaging/transcribe`.
-Essa separação impede que um payload de webhook grande, inválido ou repetido
-bloqueie o endpoint público. Enquanto esse worker não estiver conectado à API
-da instância Evolution usada em produção, áudios recebidos não chegarão ao
-Whisper automaticamente.
+O webhook persiste os metadados mínimos da mídia e retorna
+`needsMediaDownload`; ele nunca baixa bytes no caminho público. Um worker deve
+chamar o endpoint autenticado abaixo para cada `InboundMessage` de áudio:
+
+```text
+POST /api/internal/messaging/download-media
+x-allset-job-secret: <INTERNAL_JOB_SECRET>
+{ "limit": 10 }
+```
+
+Sem `inboundMessageId`, ele busca e processa até `limit` áudios pendentes; com
+um id explícito, processa somente aquele áudio. O worker usa `EvolutionMediaDownloader` para chamar
+`chat/getBase64FromMediaMessage`, grava o arquivo privado com
+`recordReceivedAudio` e executa a mesma transcrição/conversa usada por
+`POST /api/internal/messaging/transcribe`. As etapas são idempotentes: chamar
+o endpoint novamente não duplica o asset nem avança a conversa duas vezes.
+
+Para produção, configure um scheduler/worker externo que busque inbounds de
+áudio pendentes e chame esse endpoint. O formato exato da Evolution pode variar
+por versão; a homologação deve confirmar que o endpoint retorna `base64`.
+
+### Cron de expiração do marketplace
+
+O arquivo `vercel.json` agenda, a cada cinco minutos,
+`GET /api/cron/marketplace/expire` e
+`GET /api/cron/messaging/download-audio`. A Vercel envia
+`Authorization: Bearer <CRON_SECRET>`; defina o mesmo valor em `CRON_SECRET`
+no projeto. A primeira rota chama diretamente `expireOpportunities`; a segunda
+processa até dez áudios pendentes. A transcrição usa um lease de cinco minutos,
+evitando que execuções concorrentes enviem o mesmo áudio ao Whisper.
 
 ### Segurança, privacidade e retenção
 
