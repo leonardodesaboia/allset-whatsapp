@@ -6,6 +6,11 @@ import { prisma } from "@/infrastructure/db/prisma-client";
 import { SignOutButton } from "./sign-out-button";
 import Link from "next/link";
 
+// Admin pages consult session and PostgreSQL at request time. Static generation
+// would evaluate them during `next build`, where production DATABASE_URL is
+// intentionally unavailable.
+export const dynamic = "force-dynamic";
+
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session?.user.email) {

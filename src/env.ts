@@ -66,6 +66,26 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
+const BUILD_DATABASE_URL = "postgresql://build:build@localhost:5432/build";
+const BUILD_AUTH_SECRET = "build-only-secret-not-valid-for-runtime";
+const BUILD_AUTH_URL = "http://localhost:3000";
+
+/**
+ * Route handlers are evaluated while `next build` collects route metadata.
+ * At that moment production secrets deliberately are not available in CI.
+ * These values exist only in the build process; `next start` evaluates this
+ * module again without NEXT_PHASE and therefore keeps the strict validation.
+ */
+export function sourceForModuleEvaluation(source: Record<string, string | undefined>): Record<string, string | undefined> {
+  if (source.NEXT_PHASE !== "phase-production-build") return source;
+  return {
+    ...source,
+    DATABASE_URL: source.DATABASE_URL ?? BUILD_DATABASE_URL,
+    BETTER_AUTH_SECRET: source.BETTER_AUTH_SECRET ?? BUILD_AUTH_SECRET,
+    BETTER_AUTH_URL: source.BETTER_AUTH_URL ?? BUILD_AUTH_URL,
+  };
+}
+
 export function parseEnv(source: Record<string, string | undefined>): Env {
   const result = envSchema.safeParse(source);
   if (!result.success) {
@@ -78,4 +98,4 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   return result.data;
 }
 
-export const env: Env = parseEnv(process.env);
+export const env: Env = parseEnv(sourceForModuleEvaluation(process.env));

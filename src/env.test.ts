@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BETTER_AUTH_SECRET_PLACEHOLDER, parseEnv } from "@/env";
+import { BETTER_AUTH_SECRET_PLACEHOLDER, parseEnv, sourceForModuleEvaluation } from "@/env";
 
 describe("parseEnv", () => {
   it("aceita um conjunto válido de variáveis", () => {
@@ -73,5 +73,14 @@ describe("parseEnv", () => {
         NODE_ENV: "test",
       }),
     ).toThrow(/BETTER_AUTH_SECRET/);
+  });
+
+  it("permite apenas a avaliação de módulos durante next build sem segredos de runtime", () => {
+    const source = sourceForModuleEvaluation({ NEXT_PHASE: "phase-production-build" });
+    expect(parseEnv(source).DATABASE_URL).toContain("postgresql://build:");
+  });
+
+  it("não injeta valores de build fora do next build", () => {
+    expect(sourceForModuleEvaluation({})).toEqual({});
   });
 });
