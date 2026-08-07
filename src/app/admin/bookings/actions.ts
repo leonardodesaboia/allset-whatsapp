@@ -105,7 +105,7 @@ export async function dispatchOpportunityAction(bookingId: string): Promise<Book
   }
 
   try {
-    const result = await notifyOpportunity(prisma, { bookingId, actor });
+    const result = await notifyOpportunity(prisma, { bookingId });
     revalidatePath("/admin/bookings");
     revalidatePath(`/admin/bookings/${bookingId}/opportunity`);
     return { ok: true, notified: result.notified };
