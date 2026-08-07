@@ -10,10 +10,15 @@ export async function startTestDatabase(): Promise<{
   const container = await new PostgreSqlContainer("postgres:17-alpine").start();
   const databaseUrl = container.getConnectionUri();
 
-  execSync("pnpm exec prisma migrate deploy", {
-    env: { ...process.env, DATABASE_URL: databaseUrl },
-    stdio: "inherit",
-  });
+  try {
+    execSync("pnpm exec prisma migrate deploy", {
+      env: { ...process.env, DATABASE_URL: databaseUrl },
+      stdio: "inherit",
+    });
+  } catch (error) {
+    await container.stop();
+    throw error;
+  }
 
   const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 
@@ -21,8 +26,11 @@ export async function startTestDatabase(): Promise<{
     container,
     prisma,
     stop: async () => {
-      await prisma.$disconnect();
-      await container.stop();
+      try {
+        await prisma.$disconnect();
+      } finally {
+        await container.stop();
+      }
     },
   };
 }
