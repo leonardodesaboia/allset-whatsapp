@@ -3,7 +3,10 @@ import tseslint from "typescript-eslint";
 
 export default [
   {
-    ignores: [".next/**", "node_modules/**", "dist/**", "build/**"],
+    // .dependency-cruiser.cjs precisa ser CommonJS (module.exports) — é a
+    // extensão exigida pela própria ferramenta, mesmo com "type": "module"
+    // no package.json — por isso fica fora do lint de código-fonte.
+    ignores: [".next/**", "node_modules/**", "dist/**", "build/**", ".dependency-cruiser.cjs"],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

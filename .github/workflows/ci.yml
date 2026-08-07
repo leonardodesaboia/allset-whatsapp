@@ -1,0 +1,56 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: allset
+          POSTGRES_PASSWORD: allset
+          POSTGRES_DB: allset
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U allset"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://allset:allset@localhost:5432/allset
+      # Nota: fallback com exatamente 32 caracteres — src/env.ts (Task 2)
+      # exige BETTER_AUTH_SECRET com no mínimo 32 (z.string().min(32)); o
+      # literal do briefing tinha 31 e quebraria "pnpm build"/"pnpm test"
+      # sempre que o secret BETTER_AUTH_SECRET_TEST não estiver configurado.
+      BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET_TEST || 'a-32-char-minimum-test-secret!!!' }}
+      BETTER_AUTH_URL: http://localhost:3000
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm prisma:generate
+      - run: pnpm exec prisma migrate deploy
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm architecture:check
+      - run: pnpm dead-code:check
+      - run: pnpm test
+      - run: pnpm test:integration
+      - run: pnpm build
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ci-failure-logs
+          path: |
+            **/*.log
+            playwright-report/
+          retention-days: 7
