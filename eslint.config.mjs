@@ -7,4 +7,11 @@ export default [
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    rules: {
+      // Convenção: parâmetros intencionalmente não usados (ex.: para satisfazer
+      // uma interface de port) são prefixados com "_".
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+    },
+  },
 ];
