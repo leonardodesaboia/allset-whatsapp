@@ -25,6 +25,7 @@
     "ci:check": "pnpm lint && pnpm typecheck && pnpm architecture:check && pnpm dead-code:check && pnpm test && pnpm build"
   },
   "dependencies": {
+    "@prisma/client": "^6.19.3",
     "next": "^16.3.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -34,6 +35,7 @@
     "@eslint/eslintrc": "^3.3.6",
     "@eslint/js": "^10.0.1",
     "@tailwindcss/postcss": "^4.3.3",
+    "@testcontainers/postgresql": "^12.1.0",
     "@types/node": "^26.1.2",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
@@ -44,9 +46,17 @@
     "eslint-config-next": "^16.3.0",
     "postcss": "^8.5.26",
     "prettier": "^3.9.6",
+    "prisma": "^6.19.3",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.66.0",
     "vitest": "^4.1.10"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma"
+    ]
   }
 }

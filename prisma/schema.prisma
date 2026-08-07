@@ -1,0 +1,163 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  CUSTOMER
+  PROFESSIONAL
+}
+
+model User {
+  id                String             @id @default(uuid())
+  role              UserRole
+  fullName          String
+  phoneE164         String             @unique
+  email             String?            @unique
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  customerProfile   CustomerProfile?
+  professionalProfile ProfessionalProfile?
+  adminProfile      AdminProfile?
+
+  @@index([role])
+}
+
+model CustomerProfile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  blockedAt DateTime?
+  createdAt DateTime @default(now())
+}
+
+model ProfessionalProfile {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id])
+  reviewStatus   String   @default("PENDING_REVIEW")
+  pixKey         String?
+  createdAt      DateTime @default(now())
+}
+
+model AdminProfile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model Address {
+  id           String  @id @default(uuid())
+  neighborhood String
+  street       String
+  number       String
+  complement   String?
+  city         String  @default("Fortaleza")
+  state        String  @default("CE")
+  postalCode   String?
+
+  @@index([neighborhood])
+}
+
+model ServiceArea {
+  id           String   @id @default(uuid())
+  neighborhood String   @unique
+  isActive     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model ServiceDefinition {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+enum BookingStatus {
+  DRAFT
+  COLLECTING_DATA
+  REVIEW_REQUIRED
+  AWAITING_CUSTOMER_CONFIRMATION
+  AWAITING_PAYMENT
+  PAYMENT_FAILED
+  PAID
+  MATCHING
+  PROFESSIONAL_ASSIGNED
+  SCHEDULED
+  PROFESSIONAL_CONFIRMED
+  PROFESSIONAL_EN_ROUTE
+  IN_PROGRESS
+  AWAITING_COMPLETION_CONFIRMATION
+  COMPLETED
+  ISSUE_OPEN
+  CANCELLED
+  REFUND_PENDING
+  REFUNDED
+}
+
+model Booking {
+  id          String        @id @default(uuid())
+  status      BookingStatus @default(DRAFT)
+  version     Int           @default(0)
+  customerId  String
+  serviceId   String
+  totalCents  Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  history     BookingStatusHistory[]
+
+  @@index([status])
+  @@index([customerId])
+}
+
+model BookingStatusHistory {
+  id          String   @id @default(uuid())
+  bookingId   String
+  booking     Booking  @relation(fields: [bookingId], references: [id])
+  fromStatus  BookingStatus?
+  toStatus    BookingStatus
+  actor       String
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  @@index([bookingId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actor      String
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+}
+
+model ExternalReference {
+  id           String   @id @default(uuid())
+  provider     String
+  resourceType String
+  internalId   String
+  externalId   String
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@unique([provider, resourceType, externalId])
+  @@index([internalId])
+}
+
+model FeatureFlag {
+  key       String   @id
+  enabled   Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+}
