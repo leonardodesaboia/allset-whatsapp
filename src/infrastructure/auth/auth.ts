@@ -4,6 +4,7 @@ import { prismaAdapter } from "@better-auth/prisma-adapter";
 import { prisma } from "../db/prisma-client";
 import { env } from "../../env";
 import { logger } from "../observability/logger";
+import { recordAuditLog } from "../../application/audit/record-audit-log.usecase";
 
 /**
  * Instância do Better Auth usada pelo Route Handler (`/api/auth/[...all]`)
@@ -60,14 +61,15 @@ export const auth = betterAuth({
 
       logger.info({ email, success }, "Tentativa de login admin");
 
-      await prisma.auditLog.create({
-        data: {
-          actor: email,
-          action: "ADMIN_LOGIN_ATTEMPT",
-          entityType: "AuthUser",
-          entityId: email,
-          metadata: { success },
-        },
+      // Escrita de auditoria passa pelo caso de uso `recordAuditLog`
+      // (Task 6), o único ponto de escrita em AuditLog — não duplicamos
+      // `prisma.auditLog.create` aqui.
+      await recordAuditLog(prisma, {
+        actor: email,
+        action: "ADMIN_LOGIN_ATTEMPT",
+        entityType: "AuthUser",
+        entityId: email,
+        metadata: { success },
       });
     }),
   },
