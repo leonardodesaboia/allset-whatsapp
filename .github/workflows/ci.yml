@@ -46,6 +46,13 @@ jobs:
       - run: pnpm test
       - run: pnpm test:integration
       - run: pnpm build
+      # E2E (Playwright). O `webServer` do playwright.config.ts sobe o app
+      # com `pnpm build && pnpm start`; `globalSetup` (tests/e2e/seed.ts)
+      # seeda o admin contra o serviço Postgres acima — a trava do seed exige
+      # host local e NODE_ENV != production, ambos satisfeitos pelo `env` do
+      # job. Só o chromium é instalado: é o único projeto configurado.
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

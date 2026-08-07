@@ -1,3 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind v4: um único @import substitui as diretivas
+   `@tailwind base/components/utilities` da v3. Sem isto, o
+   @tailwindcss/postcss não gera nenhuma saída. */
+@import "tailwindcss";
