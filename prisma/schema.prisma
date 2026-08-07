@@ -136,6 +136,19 @@ enum OutboundMessageStatus {
   DEAD_LETTER
 }
 
+enum ServiceOpportunityStatus {
+  OPEN
+  FILLED
+  EXPIRED
+  CANCELLED
+}
+
+enum OpportunityResponseValue {
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
 enum RecruitmentConversationState {
   INTRODUCTION
   CHANNEL_PREFERENCE
@@ -307,6 +320,7 @@ model RecruitmentLead {
   operationalTests            OperationalTest[]
   validationServices          ValidationServiceRecord[]
   validationDecisions         ValidationDecision[]
+  opportunityResponses        OpportunityResponse[]
 
   @@index([status])
   @@index([neighborhood])
@@ -669,17 +683,22 @@ enum BookingStatus {
 }
 
 model Booking {
-  id          String        @id @default(uuid())
-  status      BookingStatus @default(DRAFT)
-  version     Int           @default(0)
-  customerId  String
-  customer    User          @relation(fields: [customerId], references: [id])
-  serviceId   String
-  service     ServiceDefinition @relation(fields: [serviceId], references: [id])
-  totalCents  Int           @default(0)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  history     BookingStatusHistory[]
+  id                       String        @id @default(uuid())
+  status                   BookingStatus @default(DRAFT)
+  version                  Int           @default(0)
+  customerId               String
+  customer                 User          @relation(fields: [customerId], references: [id])
+  serviceId                String
+  service                  ServiceDefinition @relation(fields: [serviceId], references: [id])
+  scheduledAt              DateTime?
+  neighborhood             String?
+  durationMinutes          Int?
+  professionalPaymentCents Int?
+  totalCents               Int           @default(0)
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+  history                  BookingStatusHistory[]
+  opportunities            ServiceOpportunity[]
 
   @@index([status])
   @@index([customerId])
@@ -697,6 +716,37 @@ model BookingStatusHistory {
   createdAt   DateTime @default(now())
 
   @@index([bookingId])
+}
+
+model ServiceOpportunity {
+  id              String                   @id @default(uuid())
+  bookingId       String                   @unique
+  booking         Booking                  @relation(fields: [bookingId], references: [id])
+  neighborhood    String
+  scheduledAt     DateTime
+  durationMinutes Int                      @default(180)
+  paymentCents    Int
+  status          ServiceOpportunityStatus @default(OPEN)
+  expiresAt       DateTime
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  responses       OpportunityResponse[]
+
+  @@index([status, expiresAt])
+}
+
+model OpportunityResponse {
+  id            String                    @id @default(uuid())
+  opportunityId String
+  opportunity   ServiceOpportunity        @relation(fields: [opportunityId], references: [id])
+  leadId        String
+  lead          RecruitmentLead           @relation(fields: [leadId], references: [id])
+  sentAt        DateTime                  @default(now())
+  respondedAt   DateTime?
+  response      OpportunityResponseValue?
+
+  @@unique([opportunityId, leadId])
+  @@index([leadId, response])
 }
 
 model AuditLog {
