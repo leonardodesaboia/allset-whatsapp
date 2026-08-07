@@ -1,4 +1,4 @@
-import { processRecruitmentAnswer } from "@/application/recruitment/conversation-engine.usecase";
+import { processContactConversationText } from "@/application/messaging/process-contact-conversation-text.usecase";
 import { transcribeReceivedAudio } from "@/application/messaging/transcribe-received-audio.usecase";
 import { env } from "@/env";
 import { prisma } from "@/infrastructure/db/prisma-client";
@@ -27,9 +27,16 @@ export async function POST(request: Request) {
   try {
     const transcription = await transcribeReceivedAudio(prisma, createRuntimeStorage(), createAudioTranscriber(), input);
     if (!transcription.ok) return Response.json({ ok: false, error: transcription.error.code }, { status: 404 });
-    const conversation = await processRecruitmentAnswer(prisma, {
+    const inbound = await prisma.inboundMessage.findUnique({
+      where: { id: input.inboundMessageId },
+      select: { sender: true, provider: true },
+    });
+    if (!inbound) return Response.json({ ok: false, error: "INBOUND_NOT_FOUND" }, { status: 404 });
+    const conversation = await processContactConversationText(prisma, {
       inboundMessageId: input.inboundMessageId,
+      phoneE164: inbound.sender,
       text: transcription.value.text,
+      provider: inbound.provider,
     });
     return Response.json({ ok: true, transcription: transcription.value.text, conversation });
   } catch (error) {

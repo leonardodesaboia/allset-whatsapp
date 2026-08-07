@@ -4,6 +4,9 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { notifyOpportunity } from "@/application/marketplace/notify-opportunity.usecase";
+import { validateCustomerBookingCoverage } from "@/application/customer/validate-booking-coverage.usecase";
+import { sendManualCustomerMessage } from "@/application/customer/send-manual-customer-message.usecase";
+import { resumeCustomerBookingConversation } from "@/application/customer/customer-booking-conversation.usecase";
 import { recordAuditLog } from "@/application/audit/record-audit-log.usecase";
 import { auth } from "@/infrastructure/auth/auth";
 import { prisma } from "@/infrastructure/db/prisma-client";
@@ -105,11 +108,75 @@ export async function dispatchOpportunityAction(bookingId: string): Promise<Book
   }
 
   try {
-    const result = await notifyOpportunity(prisma, { bookingId });
+    const result = await notifyOpportunity(prisma, { bookingId, actor });
     revalidatePath("/admin/bookings");
     revalidatePath(`/admin/bookings/${bookingId}/opportunity`);
     return { ok: true, notified: result.notified };
   } catch (error) {
     return { ok: false, error: errorMessage(error, "Não foi possível enviar a oportunidade.") };
+  }
+}
+
+export async function validateBookingCoverageAction(
+  bookingId: string,
+  isCovered: boolean,
+): Promise<BookingActionResult> {
+  const actor = await currentActor();
+  if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
+  if (!z.string().uuid().safeParse(bookingId).success || typeof isCovered !== "boolean") {
+    return { ok: false, error: "Dados de cobertura inválidos." };
+  }
+  try {
+    const result = await validateCustomerBookingCoverage(prisma, { bookingId, isCovered, actor });
+    if (!result.ok) return { ok: false, error: "Este pedido não está aguardando validação de cobertura." };
+    revalidatePath("/admin/bookings");
+    return { ok: true, bookingId };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Não foi possível validar a cobertura.") };
+  }
+}
+
+export async function sendManualCustomerMessageAction(
+  bookingId: string,
+  text: string,
+): Promise<BookingActionResult> {
+  const actor = await currentActor();
+  if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
+  try {
+    const result = await sendManualCustomerMessage(prisma, { bookingId, text, actor });
+    if (!result.ok) return { ok: false, error: "Este pedido não possui conversa ativa com o cliente." };
+    revalidatePath("/admin/bookings");
+    return { ok: true, bookingId };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Não foi possível enviar a mensagem.") };
+  }
+}
+
+export async function sendManualCustomerConversationMessageAction(
+  conversationId: string,
+  text: string,
+): Promise<BookingActionResult> {
+  const actor = await currentActor();
+  if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
+  try {
+    const result = await sendManualCustomerMessage(prisma, { conversationId, text, actor });
+    if (!result.ok) return { ok: false, error: "Conversa não encontrada." };
+    revalidatePath("/admin/customer-conversations");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Não foi possível enviar a mensagem.") };
+  }
+}
+
+export async function resumeCustomerAutomationAction(bookingId: string): Promise<BookingActionResult> {
+  const actor = await currentActor();
+  if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
+  try {
+    const result = await resumeCustomerBookingConversation(prisma, { bookingId, actor });
+    if (!result.ok) return { ok: false, error: "Esta conversa não pode ser retomada automaticamente." };
+    revalidatePath("/admin/bookings");
+    return { ok: true, bookingId };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Não foi possível retomar a automação.") };
   }
 }

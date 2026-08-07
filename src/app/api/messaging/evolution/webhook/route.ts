@@ -1,7 +1,8 @@
 import { env } from "@/env";
-import { processOpportunityResponse } from "@/application/marketplace/process-opportunity-response.usecase";
+import { processOpportunityResponse, requestOpportunityClarification } from "@/application/marketplace/process-opportunity-response.usecase";
+import { processContactConversationText } from "@/application/messaging/process-contact-conversation-text.usecase";
 import { processInboundEvent } from "@/application/messaging/process-inbound-event.usecase";
-import { processRecruitmentAnswer, startRecruitmentConversation } from "@/application/recruitment/conversation-engine.usecase";
+import { parseOpportunityReply } from "@/domain/marketplace/opportunity-reply";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { logger } from "@/infrastructure/observability/logger";
 import { isValidEvolutionWebhook, normalizeEvolutionWebhook } from "@/infrastructure/messaging/evolution-webhook";
@@ -35,14 +36,19 @@ export async function POST(request: Request) {
     // Opportunity responses take precedence over recruitment. This is an
     // adapter concern only: the use case validates ownership and claims the
     // inbound message before performing the state transition.
-    const pendingOpportunityResponse = await prisma.opportunityResponse.findFirst({
+    const pendingOpportunityResponses = await prisma.opportunityResponse.findMany({
       where: {
         lead: { phoneE164: event.sender },
         response: null,
         opportunity: { status: "OPEN" },
       },
       orderBy: { sentAt: "asc" },
+      select: { id: true, responseToken: true },
     });
+    const reply = parseOpportunityReply(event.payload.text);
+    const pendingOpportunityResponse = reply?.responseToken
+      ? pendingOpportunityResponses.find((response) => response.responseToken === reply.responseToken)
+      : pendingOpportunityResponses.length === 1 ? pendingOpportunityResponses[0] : undefined;
     if (pendingOpportunityResponse) {
       const result = await processOpportunityResponse(prisma, {
         responseId: pendingOpportunityResponse.id,
@@ -51,27 +57,21 @@ export async function POST(request: Request) {
       });
       return Response.json({ ok: true, routed: "opportunity", result });
     }
+    if (pendingOpportunityResponses.length > 0) {
+      const result = await requestOpportunityClarification(prisma, {
+        inboundMessageId: received.message.id,
+        responseTokens: pendingOpportunityResponses.map((response) => response.responseToken),
+      });
+      return Response.json({ ok: true, routed: "opportunity", result });
+    }
 
-    const lead = await prisma.recruitmentLead.findUnique({
-      where: { phoneE164: event.sender },
-      include: { conversation: { select: { id: true } } },
+    const result = await processContactConversationText(prisma, {
+      inboundMessageId: received.message.id,
+      phoneE164: event.sender,
+      text: event.payload.text,
+      provider: "evolution",
     });
-    if (!lead) {
-      await startRecruitmentConversation(prisma, { phoneE164: event.sender, provider: "evolution" });
-      return Response.json({ ok: true, started: true }, { status: 202 });
-    }
-    if (!lead.conversation) {
-      // Lead criado manualmente antes do primeiro contato via WhatsApp:
-      // inicia a conversa se ainda estiver no início do funil.
-      if (lead.status === "LEAD" || lead.status === "PRE_CADASTRO") {
-        await startRecruitmentConversation(prisma, { phoneE164: event.sender, provider: "evolution" });
-        return Response.json({ ok: true, started: true }, { status: 202 });
-      }
-      return Response.json({ ok: true, ignored: "NO_RECRUITMENT_CONVERSATION" });
-    }
-
-    const result = await processRecruitmentAnswer(prisma, { inboundMessageId: received.message.id, text: event.payload.text });
-    return Response.json({ ok: true, result });
+    return Response.json({ ok: true, ...result });
   } catch (error) {
     logger.error({ err: error, provider: "evolution", externalId: event.externalId }, "Falha ao processar webhook da Evolution");
     return Response.json({ ok: false, error: "PROCESSING_FAILED" }, { status: 500 });
