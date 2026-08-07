@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEnv } from "@/env";
+import { BETTER_AUTH_SECRET_PLACEHOLDER, parseEnv } from "@/env";
 
 describe("parseEnv", () => {
   it("aceita um conjunto válido de variáveis", () => {
@@ -41,6 +41,27 @@ describe("parseEnv", () => {
         NODE_ENV: "test",
       }),
     ).toThrow(/DATABASE_URL/);
+  });
+
+  it("rejeita o BETTER_AUTH_SECRET de placeholder do .env.example", () => {
+    // `cp .env.example .env` não pode produzir um app funcional: o placeholder
+    // é público (está versionado), então assinar sessão com ele permitiria
+    // forjar um cookie de admin.
+    expect(() =>
+      parseEnv({
+        DATABASE_URL: "postgresql://user:pass@localhost:5432/db",
+        BETTER_AUTH_SECRET: BETTER_AUTH_SECRET_PLACEHOLDER,
+        BETTER_AUTH_URL: "http://localhost:3000",
+        NODE_ENV: "development",
+      }),
+    ).toThrow(/BETTER_AUTH_SECRET/);
+  });
+
+  it("o placeholder tem comprimento suficiente — só a trava explícita o barra", () => {
+    // Guarda de regressão: se o placeholder encurtar para menos de 32 chars,
+    // o teste acima passaria pelo motivo errado (min(32)) e a trava do
+    // literal poderia ser removida sem ninguém perceber.
+    expect(BETTER_AUTH_SECRET_PLACEHOLDER.length).toBeGreaterThanOrEqual(32);
   });
 
   it("rejeita BETTER_AUTH_SECRET curto demais", () => {
