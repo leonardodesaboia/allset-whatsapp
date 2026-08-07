@@ -21,16 +21,4 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   return result.data;
 }
 
-// Validação no startup apenas em modo não-teste
-let envCached: Env | null = null;
-
-export const env: Env = (() => {
-  if (envCached) return envCached;
-  if (process.env.NODE_ENV !== "test") {
-    envCached = parseEnv(process.env);
-    return envCached;
-  }
-  // Em teste, retorna um objeto vazio para permitir imports
-  // O parseEnv será chamado explicitamente nos testes
-  return {} as Env;
-})();
+export const env: Env = parseEnv(process.env);
