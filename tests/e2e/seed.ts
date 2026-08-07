@@ -70,6 +70,26 @@ export default async function globalSetup(): Promise<void> {
         body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD, name: "Admin" },
       });
     }
+    const domainAdmin = await prisma.user.findUnique({ where: { email: ADMIN_EMAIL } });
+    if (!domainAdmin) {
+      const user = await prisma.user.create({ data: { role: "ADMIN", fullName: "Admin", email: ADMIN_EMAIL, phoneE164: "+5585990000000" } });
+      await prisma.adminProfile.create({ data: { userId: user.id } });
+    }
+
+    const seedPhone = "+5585990000001";
+    const lead = await prisma.recruitmentLead.findFirst({ where: { phoneE164: seedPhone } });
+    if (!lead) {
+      await prisma.recruitmentLead.create({
+        data: {
+          origin: "INDICACAO_PROFISSIONAL",
+          status: "PRE_CADASTRO",
+          fullName: "Maria de Sousa",
+          phoneE164: seedPhone,
+          neighborhood: "Parangaba",
+          preferredCommunicationMode: "AUDIO",
+        },
+      });
+    }
   } finally {
     await prisma.$disconnect();
   }

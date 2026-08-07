@@ -1,0 +1,6 @@
+"use client";
+import Link from "next/link";
+import { useDraggable } from "@dnd-kit/core";
+import { QuickNoteModal } from "./quick-note-modal";
+export interface LeadCardData { id: string; fullName: string | null; neighborhood: string | null; origin: string; nextAction: string | null; nextActionAt: string | null; preferredCommunicationMode: string | null; }
+export function LeadCard({ lead }: { lead: LeadCardData }) { const { attributes, listeners, setNodeRef, transform } = useDraggable({ id: lead.id }); const overdue = lead.nextActionAt !== null && new Date(lead.nextActionAt) < new Date(); return <article ref={setNodeRef} {...attributes} style={{ transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined }} data-testid={`card-${lead.id}`}><div {...listeners}><strong>{lead.fullName ?? "(sem nome)"}</strong><div>Bairro: {lead.neighborhood ?? "—"}</div><div>Origem: {lead.origin}</div>{lead.preferredCommunicationMode === "AUDIO" && <div>Prefere áudio</div>}{lead.nextAction && <div className={overdue ? "text-red-700" : ""}>{overdue ? "ATRASADO — " : "Próxima ação: "}{lead.nextAction}</div>}</div><QuickNoteModal leadId={lead.id} /><Link href={`/admin/recruitment/${lead.id}`}>Abrir</Link></article>; }

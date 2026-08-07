@@ -1,0 +1,4 @@
+"use client";
+import { useState } from "react";
+import { addQuickNoteAction } from "./actions";
+export function QuickNoteModal({ leadId }: { leadId: string }) { const [open, setOpen] = useState(false); const [content, setContent] = useState(""); const [error, setError] = useState<string | null>(null); async function save() { const res = await addQuickNoteAction({ leadId, content }); if (!res.ok) return setError(res.error ?? "Não foi possível salvar."); setContent(""); setOpen(false); } return open ? <div role="dialog" aria-label="Nota interna"><textarea aria-label="Escrever nota interna" value={content} onChange={(event) => setContent(event.target.value)} /><button type="button" onClick={save}>Salvar</button><button type="button" onClick={() => setOpen(false)}>Cancelar</button>{error && <p role="alert">{error}</p>}</div> : <button type="button" onClick={() => setOpen(true)} data-testid={`quick-note-${leadId}`}>+ Nota</button>; }
