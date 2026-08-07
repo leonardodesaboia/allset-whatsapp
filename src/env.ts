@@ -49,6 +49,7 @@ const envSchema = z.object({
   OPENAI_API_KEY: optionalEnv(z.string().min(1)),
   RECRUITMENT_REENGAGEMENT_AFTER_HOURS: positiveIntegerEnv(24),
   RECRUITMENT_REENGAGEMENT_MAX_ATTEMPTS: positiveIntegerEnv(2),
+  OPPORTUNITY_EXPIRY_HOURS: positiveIntegerEnv(4),
   // Storage S3-compatível (MinIO local ou AWS S3 em produção).
   // Todas as cinco variáveis abaixo devem ser definidas juntas; deixar vazias
   // ativa o provider local de desenvolvimento (não funciona com Evolution em prod).
