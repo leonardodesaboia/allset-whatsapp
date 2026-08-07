@@ -1,0 +1,3 @@
+import { describe, expect, it } from "vitest";
+import { QUESTIONS, globalCommand, normalizeAnswer, parseAnswer } from "./conversation-definition";
+describe("conversation definition", () => { it("mantém perguntas e comandos normalizados", () => { expect(QUESTIONS.SERVICE_AREA?.options).toContain("NAO"); expect(normalizeAnswer(" Não ")).toBe("NAO"); expect(globalCommand("ligação")).toBe("PHONE"); }); it("converte opções numéricas no estado correto", () => { expect(parseAnswer("CHANNEL_PREFERENCE", "2")).toBe("PHONE"); expect(parseAnswer("PROFESSIONAL_EXPERIENCE", "1")).toBe("SIM"); expect(parseAnswer("SERVICE_AREA", "3")).toBe("NAO"); }); });
