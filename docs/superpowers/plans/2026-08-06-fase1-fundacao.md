@@ -40,6 +40,12 @@ Pino.
   Prisma fora desse serviço.
 - Segredos apenas em variáveis de ambiente, validadas por Zod em
   `src/env.ts`; nunca hardcoded, nunca logados.
+- **Prisma fixado em 6.x** (não 7.x): o Prisma 7 real remove `datasource {
+  url = env(...) }` e `PrismaClient({ datasources: {...} })` em favor de
+  `prisma.config.ts` + driver adapter. Todo código das Tasks 3, 6 e 8 deste
+  plano usa a sintaxe clássica do Prisma 6, de propósito. Ver ADR 0002
+  (`docs/adr/0002-prisma-6-pin.md`). Migração para o padrão de adapter do
+  Prisma 7 é débito técnico explícito da Fase 8.
 - Cada tarefa termina com working tree limpa e um commit isolado.
 - Este plano cobre só a Fase 1. Não implementar mensageria, pagamento real,
   Evolution API, distribuição de profissionais ou dashboard além do shell
