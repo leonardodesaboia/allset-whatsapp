@@ -1,7 +1,12 @@
 import { z } from "zod";
 
 const envSchema = z.object({
-  DATABASE_URL: z.string().url().startsWith("postgresql://"),
+  // Aceita tanto "postgresql://" quanto "postgres://" — ambos os esquemas
+  // são válidos para Postgres (usados por libpq, Prisma e por ferramentas
+  // como Testcontainers, cujo `getConnectionUri()` emite "postgres://").
+  DATABASE_URL: z.string().url().regex(/^postgres(ql)?:\/\//, {
+    message: "Invalid string: must start with \"postgresql://\" or \"postgres://\"",
+  }),
   BETTER_AUTH_SECRET: z.string().min(32),
   BETTER_AUTH_URL: z.string().url(),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),

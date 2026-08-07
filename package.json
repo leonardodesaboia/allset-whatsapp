@@ -25,7 +25,9 @@
     "ci:check": "pnpm lint && pnpm typecheck && pnpm architecture:check && pnpm dead-code:check && pnpm test && pnpm build"
   },
   "dependencies": {
+    "@better-auth/prisma-adapter": "^1.6.26",
     "@prisma/client": "^6.19.3",
+    "better-auth": "^1.6.26",
     "next": "^16.3.0",
     "pino": "^10.3.1",
     "react": "^19.2.8",

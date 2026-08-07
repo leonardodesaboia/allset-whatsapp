@@ -161,3 +161,52 @@ model FeatureFlag {
   enabled   Boolean  @default(false)
   updatedAt DateTime @updatedAt
 }
+
+// Better Auth: modelo de autenticação separado do User de domínio (Task 3).
+// Sessão/credenciais não devem se acoplar a papéis de negócio.
+model AuthUser {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  passwordHash  String?
+  name          String
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      AuthSession[]
+  accounts      AuthAccount[]
+}
+
+model AuthSession {
+  id        String   @id @default(uuid())
+  userId    String
+  user      AuthUser @relation(fields: [userId], references: [id])
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AuthAccount {
+  id                String   @id @default(uuid())
+  userId            String
+  user              AuthUser @relation(fields: [userId], references: [id])
+  providerId        String
+  accountId         String
+  passwordHash      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([providerId, accountId])
+}
+
+model AuthVerification {
+  id         String   @id @default(uuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
