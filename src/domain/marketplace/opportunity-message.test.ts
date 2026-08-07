@@ -9,6 +9,7 @@ describe("formatOpportunityMessage", () => {
     durationMinutes: 180,
     paymentCents: 15000,
     expiresAt: new Date("2026-08-10T17:00:00.000Z"),
+    responseToken: "A1B2C3D4E5",
   };
 
   it("contém o bairro", () => {
@@ -23,9 +24,9 @@ describe("formatOpportunityMessage", () => {
     expect(formatOpportunityMessage(opportunity)).toContain("3h");
   });
 
-  it("contém SIM e NAO em negrito WhatsApp", () => {
+  it("contém SIM, NAO e o código de correlação em negrito WhatsApp", () => {
     const msg = formatOpportunityMessage(opportunity);
-    expect(msg).toContain("*SIM*");
-    expect(msg).toContain("*NAO*");
+    expect(msg).toContain("*SIM A1B2C3D4E5*");
+    expect(msg).toContain("*NAO A1B2C3D4E5*");
   });
 });

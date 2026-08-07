@@ -46,10 +46,12 @@ const envSchema = z.object({
   EVOLUTION_INSTANCE: optionalEnv(z.string().min(1)),
   EVOLUTION_WEBHOOK_SECRET: optionalEnv(z.string().min(32)),
   INTERNAL_JOB_SECRET: optionalEnv(z.string().min(32)),
+  CRON_SECRET: optionalEnv(z.string().min(32)),
   OPENAI_API_KEY: optionalEnv(z.string().min(1)),
   RECRUITMENT_REENGAGEMENT_AFTER_HOURS: positiveIntegerEnv(24),
   RECRUITMENT_REENGAGEMENT_MAX_ATTEMPTS: positiveIntegerEnv(2),
   OPPORTUNITY_EXPIRY_HOURS: positiveIntegerEnv(4),
+  MESSAGING_DEFAULT_PROVIDER: z.string().trim().min(1).max(64).default("evolution"),
   // Storage S3-compatível (MinIO local ou AWS S3 em produção).
   // Todas as cinco variáveis abaixo devem ser definidas juntas; deixar vazias
   // ativa o provider local de desenvolvimento (não funciona com Evolution em prod).

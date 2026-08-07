@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { transitionBookingStatus } from "../../domain/booking/booking-state-machine";
 import type { BookingStatus } from "../../domain/booking/booking-status";
+import { parseOpportunityReply } from "../../domain/marketplace/opportunity-reply";
 import { recordAuditLog } from "../audit/record-audit-log.usecase";
 import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
 
@@ -12,19 +13,8 @@ export type OpportunityResponseOutcome =
   | "ALREADY_FILLED"
   | "INVALID_RESPONSE"
   | "NOT_FOUND"
-  | "DUPLICATE_INBOUND";
-
-function parseResponse(text: string): "ACCEPTED" | "DECLINED" | null {
-  const normalized = text
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-
-  if (normalized === "sim" || normalized === "s") return "ACCEPTED";
-  if (normalized === "nao" || normalized === "n") return "DECLINED";
-  return null;
-}
+  | "DUPLICATE_INBOUND"
+  | "AMBIGUOUS_RESPONSE";
 
 function formatSchedule(scheduledAt: Date): string {
   return new Intl.DateTimeFormat("pt-BR", {
@@ -50,6 +40,39 @@ async function enqueueText(
     idempotencyKey: input.idempotencyKey,
     correlationId: input.correlationId,
     actor: "system:marketplace",
+  });
+}
+
+/** Stops an ambiguous reply from falling into another conversation workflow. */
+export async function requestOpportunityClarification(
+  prisma: PrismaClient,
+  input: { inboundMessageId: string; responseTokens: Array<string | null> },
+): Promise<{ outcome: "AMBIGUOUS_RESPONSE" | "DUPLICATE_INBOUND" | "NOT_FOUND" }> {
+  return prisma.$transaction(async (tx) => {
+    const inbound = await tx.inboundMessage.findUnique({
+      where: { id: input.inboundMessageId },
+      select: { id: true, provider: true, sender: true },
+    });
+    if (!inbound) return { outcome: "NOT_FOUND" as const };
+
+    const claimed = await tx.inboundMessage.updateMany({
+      where: { id: inbound.id, processedAt: null },
+      data: { processedAt: new Date() },
+    });
+    if (!claimed.count) return { outcome: "DUPLICATE_INBOUND" as const };
+
+    const codes = input.responseTokens.filter((token): token is string => token !== null).slice(0, 3);
+    const text = codes.length > 0
+      ? `Você tem mais de uma oportunidade em aberto. Responda SIM seguido do código da oportunidade: ${codes.join(", ")}.`
+      : "Você tem mais de uma oportunidade em aberto. Consulte as mensagens anteriores ou peça ajuda para escolher a oportunidade.";
+    await enqueueText(tx, {
+      provider: inbound.provider,
+      recipient: inbound.sender,
+      text,
+      idempotencyKey: `opportunity:clarification:${inbound.id}`,
+      correlationId: inbound.id,
+    });
+    return { outcome: "AMBIGUOUS_RESPONSE" as const };
   });
 }
 
@@ -91,7 +114,7 @@ export async function processOpportunityResponse(
       return { outcome: "ALREADY_FILLED" as const };
     }
 
-    const parsed = parseResponse(input.text);
+    const parsed = parseOpportunityReply(input.text)?.response;
     if (!parsed) return { outcome: "INVALID_RESPONSE" as const };
 
     const now = new Date();
@@ -146,7 +169,11 @@ export async function processOpportunityResponse(
 
     const updatedBooking = await tx.booking.updateMany({
       where: { id: booking.id, status: booking.status },
-      data: { status: "PROFESSIONAL_ASSIGNED", version: { increment: 1 } },
+      data: {
+        status: "PROFESSIONAL_ASSIGNED",
+        assignedProfessionalLeadId: lead.id,
+        version: { increment: 1 },
+      },
     });
     // Throwing rolls back the opportunity lock too; a retry can safely resolve it.
     if (!updatedBooking.count) throw new Error("Booking alterado concorrentemente");

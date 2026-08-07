@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { env } from "../../env";
 import { isEligibleForOpportunity } from "../../domain/marketplace/opportunity-matching-policy";
 import { formatOpportunityMessage } from "../../domain/marketplace/opportunity-message";
@@ -9,9 +10,10 @@ import type { BookingStatus } from "../../domain/booking/booking-status";
 
 export async function notifyOpportunity(
   prisma: PrismaClient,
-  input: { bookingId: string; now?: Date },
+  input: { bookingId: string; now?: Date; actor?: string },
 ): Promise<{ notified: number }> {
   const now = input.now ?? new Date();
+  const actor = input.actor ?? "system:marketplace";
   const expiresAt = new Date(now.getTime() + env.OPPORTUNITY_EXPIRY_HOURS * 60 * 60 * 1000);
 
   return prisma.$transaction(async (tx) => {
@@ -36,6 +38,7 @@ export async function notifyOpportunity(
         canServeInitialArea: true,
         availabilityDays: true,
         phoneE164: true,
+        conversation: { select: { provider: true } },
         opportunityResponses: {
           where: { response: "ACCEPTED" },
           include: { opportunity: { select: { scheduledAt: true } } },
@@ -60,25 +63,26 @@ export async function notifyOpportunity(
       },
     });
 
-    const messageText = formatOpportunityMessage({
-      neighborhood: opportunity.neighborhood,
-      scheduledAt: opportunity.scheduledAt,
-      durationMinutes: opportunity.durationMinutes,
-      paymentCents: opportunity.paymentCents,
-      expiresAt: opportunity.expiresAt,
-    });
-
     for (const lead of eligible) {
+      const responseToken = randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase();
       await tx.opportunityResponse.create({
-        data: { opportunityId: opportunity.id, leadId: lead.id },
+        data: { opportunityId: opportunity.id, leadId: lead.id, responseToken },
+      });
+      const messageText = formatOpportunityMessage({
+        neighborhood: opportunity.neighborhood,
+        scheduledAt: opportunity.scheduledAt,
+        durationMinutes: opportunity.durationMinutes,
+        paymentCents: opportunity.paymentCents,
+        expiresAt: opportunity.expiresAt,
+        responseToken,
       });
       await enqueueOutboundMessage(tx, {
-        provider: "evolution",
+        provider: lead.conversation?.provider ?? env.MESSAGING_DEFAULT_PROVIDER,
         recipient: lead.phoneE164!,
         payload: { version: 1, type: "TEXT", text: messageText },
         idempotencyKey: `opportunity:${opportunity.id}:${lead.id}:offer`,
         correlationId: opportunity.id,
-        actor: "system:marketplace",
+        actor,
       });
     }
 
@@ -96,12 +100,12 @@ export async function notifyOpportunity(
         bookingId: booking.id,
         fromStatus: booking.status,
         toStatus: "MATCHING",
-        actor: "system:marketplace",
+        actor,
       },
     });
 
     await recordAuditLog(tx, {
-      actor: "system:marketplace",
+      actor,
       action: "OPPORTUNITY_DISPATCHED",
       entityType: "ServiceOpportunity",
       entityId: opportunity.id,

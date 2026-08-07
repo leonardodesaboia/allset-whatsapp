@@ -6,6 +6,7 @@ export interface OpportunityMessageInput {
   durationMinutes: number;
   paymentCents: number;
   expiresAt: Date;
+  responseToken: string;
 }
 
 export function formatOpportunityMessage(
@@ -42,7 +43,7 @@ export function formatOpportunityMessage(
     `Duracao estimada: ${hours}h`,
     `Pagamento: R$ ${payment}`,
     "",
-    "Responda *SIM* para aceitar ou *NAO* para recusar.",
+    `Responda *SIM ${input.responseToken}* para aceitar ou *NAO ${input.responseToken}* para recusar.`,
     `Voce tem ate ${expiresStr} para responder.`,
   ].join("\n");
 }

@@ -74,6 +74,7 @@ describe("notifyOpportunity", () => {
     expect(opportunity.status).toBe("OPEN");
     expect(opportunity.responses).toHaveLength(2);
     expect(opportunity.responses.map((r) => r.leadId).sort()).toEqual([lead1.id, lead2.id].sort());
+    expect(opportunity.responses.every((response) => /^[A-Z0-9]{10}$/.test(response.responseToken ?? ""))).toBe(true);
 
     const outbox = await prisma.outboxMessage.findMany({ where: { correlationId: opportunity.id } });
     expect(outbox).toHaveLength(2);

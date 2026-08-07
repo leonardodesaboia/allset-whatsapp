@@ -79,7 +79,9 @@ describe("processOpportunityResponse", () => {
     })).resolves.toEqual({ outcome: "ACCEPTED" });
 
     expect((await prisma.serviceOpportunity.findUniqueOrThrow({ where: { id: opportunity.id } })).status).toBe("FILLED");
-    expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe("PROFESSIONAL_ASSIGNED");
+    const updatedBooking = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
+    expect(updatedBooking.status).toBe("PROFESSIONAL_ASSIGNED");
+    expect(updatedBooking.assignedProfessionalLeadId).toBe(lead1.id);
     expect((await prisma.opportunityResponse.findUniqueOrThrow({ where: { id: response1.id } })).response).toBe("ACCEPTED");
     expect((await prisma.opportunityResponse.findUniqueOrThrow({ where: { id: response2.id } })).response).toBe("DECLINED");
     expect(await prisma.outboxMessage.count({ where: { correlationId: opportunity.id } })).toBe(2);
