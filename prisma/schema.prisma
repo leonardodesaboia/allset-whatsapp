@@ -25,6 +25,7 @@ model User {
   professionalProfile ProfessionalProfile?
   adminProfile      AdminProfile?
   bookings          Booking[]
+  customerBookingConversations CustomerBookingConversation[]
 
   @@index([role])
 }
@@ -213,6 +214,7 @@ model InboundMessage {
   recipient     String
   type          String
   payload       Json
+  providerMetadata Json?
   correlationId String?
   receivedAt    DateTime @default(now())
   createdAt     DateTime @default(now())
@@ -251,6 +253,7 @@ model ReceivedAudio {
   sizeBytes        Int
   durationMs       Int?
   transcription    String?
+  transcriptionLeaseUntil DateTime?
   createdAt        DateTime       @default(now())
 }
 
@@ -321,6 +324,7 @@ model RecruitmentLead {
   validationServices          ValidationServiceRecord[]
   validationDecisions         ValidationDecision[]
   opportunityResponses        OpportunityResponse[]
+  assignedBookings            Booking[]                 @relation("AssignedProfessional")
 
   @@index([status])
   @@index([neighborhood])
@@ -663,6 +667,8 @@ model ServiceDefinition {
 enum BookingStatus {
   DRAFT
   COLLECTING_DATA
+  QUOTED
+  QUOTE_ACCEPTED
   REVIEW_REQUIRED
   AWAITING_CUSTOMER_CONFIRMATION
   AWAITING_PAYMENT
@@ -682,6 +688,31 @@ enum BookingStatus {
   REFUNDED
 }
 
+enum CustomerBookingConversationState {
+  INTRODUCTION
+  NAME
+  PROPERTY_CHARACTERISTICS
+  SCHEDULE_DATE
+  SCHEDULE_TIME
+  QUOTE
+  QUOTE_ACCEPTANCE
+  ADDRESS
+  FINAL_CONFIRMATION
+  AWAITING_PAYMENT
+  MANUAL_REVIEW
+  PAUSED
+  COMPLETED
+}
+
+// Mantém o contexto mínimo antes de sabermos se o contato quer contratar ou
+// trabalhar. Isso evita assumir que toda mensagem nova é um lead profissional.
+enum ContactIntentConversationState {
+  CHOOSING_INTENT
+  CUSTOMER
+  PROFESSIONAL
+  PAUSED
+}
+
 model Booking {
   id                       String        @id @default(uuid())
   status                   BookingStatus @default(DRAFT)
@@ -694,15 +725,76 @@ model Booking {
   neighborhood             String?
   durationMinutes          Int?
   professionalPaymentCents Int?
+  propertyPricingTierId    String?
+  propertyPricingTier      PropertyPricingTier? @relation(fields: [propertyPricingTierId], references: [id])
+  propertyCharacteristics  Json?
+  addressLine1             String?
+  addressLine2             String?
+  addressReference         String?
+  customerNotes            String?
+  requestedAt              DateTime?
+  quotedAt                 DateTime?
+  coverageValidatedAt      DateTime?
+  outsideCoverageArea      Boolean       @default(false)
   totalCents               Int           @default(0)
   createdAt                DateTime      @default(now())
   updatedAt                DateTime      @updatedAt
   history                  BookingStatusHistory[]
   opportunities            ServiceOpportunity[]
+  customerConversation     CustomerBookingConversation?
+  assignedProfessionalLeadId String?
+  assignedProfessionalLead   RecruitmentLead? @relation("AssignedProfessional", fields: [assignedProfessionalLeadId], references: [id])
 
   @@index([status])
   @@index([customerId])
   @@index([serviceId])
+  @@index([assignedProfessionalLeadId])
+  @@index([propertyPricingTierId])
+}
+
+model PropertyPricingTier {
+  id              String   @id @default(uuid())
+  label           String   @unique
+  characteristics Json
+  priceCents      Int
+  durationMinutes Int
+  sortOrder       Int      @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  bookings        Booking[]
+}
+
+model CustomerBookingConversation {
+  id                  String                         @id @default(uuid())
+  customerId          String
+  customer            User                           @relation(fields: [customerId], references: [id])
+  bookingId           String?                        @unique
+  booking             Booking?                       @relation(fields: [bookingId], references: [id])
+  provider            String
+  state               CustomerBookingConversationState @default(INTRODUCTION)
+  lastQuestionKey     String?
+  pendingScheduleDate String?
+  automationPausedAt  DateTime?
+  lastInboundAt       DateTime?
+  version             Int                            @default(0)
+  createdAt           DateTime                       @default(now())
+  updatedAt           DateTime                       @updatedAt
+
+  @@index([customerId, state])
+  @@index([state, lastInboundAt])
+}
+
+model ContactIntentConversation {
+  id            String                         @id @default(uuid())
+  phoneE164     String                         @unique
+  provider      String
+  state         ContactIntentConversationState @default(CHOOSING_INTENT)
+  lastInboundAt DateTime?
+  createdAt     DateTime                       @default(now())
+  updatedAt     DateTime                       @updatedAt
+
+  @@index([state, lastInboundAt])
 }
 
 model BookingStatusHistory {
@@ -744,8 +836,10 @@ model OpportunityResponse {
   sentAt        DateTime                  @default(now())
   respondedAt   DateTime?
   response      OpportunityResponseValue?
+  responseToken String?
 
   @@unique([opportunityId, leadId])
+  @@unique([responseToken])
   @@index([leadId, response])
 }
 
