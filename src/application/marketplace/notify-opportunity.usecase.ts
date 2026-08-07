@@ -4,6 +4,8 @@ import { isEligibleForOpportunity } from "../../domain/marketplace/opportunity-m
 import { formatOpportunityMessage } from "../../domain/marketplace/opportunity-message";
 import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
 import { recordAuditLog } from "../audit/record-audit-log.usecase";
+import { transitionBookingStatus } from "../../domain/booking/booking-state-machine";
+import type { BookingStatus } from "../../domain/booking/booking-status";
 
 export async function notifyOpportunity(
   prisma: PrismaClient,
@@ -79,6 +81,9 @@ export async function notifyOpportunity(
         actor: "system:marketplace",
       });
     }
+
+    const transition = transitionBookingStatus(booking.status as BookingStatus, "MATCHING");
+    if (!transition.ok) throw new Error(transition.error.message);
 
     const updated = await tx.booking.updateMany({
       where: { id: booking.id, status: booking.status },
