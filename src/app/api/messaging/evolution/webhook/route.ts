@@ -1,4 +1,5 @@
 import { env } from "@/env";
+import { processOpportunityResponse } from "@/application/marketplace/process-opportunity-response.usecase";
 import { processInboundEvent } from "@/application/messaging/process-inbound-event.usecase";
 import { processRecruitmentAnswer, startRecruitmentConversation } from "@/application/recruitment/conversation-engine.usecase";
 import { prisma } from "@/infrastructure/db/prisma-client";
@@ -29,6 +30,26 @@ export async function POST(request: Request) {
     if (event.payload.type === "AUDIO") {
       // A mídia será baixada por um job específico antes de o operador classificá-la.
       return Response.json({ ok: true, needsMediaDownload: true }, { status: 202 });
+    }
+
+    // Opportunity responses take precedence over recruitment. This is an
+    // adapter concern only: the use case validates ownership and claims the
+    // inbound message before performing the state transition.
+    const pendingOpportunityResponse = await prisma.opportunityResponse.findFirst({
+      where: {
+        lead: { phoneE164: event.sender },
+        response: null,
+        opportunity: { status: "OPEN" },
+      },
+      orderBy: { sentAt: "asc" },
+    });
+    if (pendingOpportunityResponse) {
+      const result = await processOpportunityResponse(prisma, {
+        responseId: pendingOpportunityResponse.id,
+        text: event.payload.text,
+        inboundMessageId: received.message.id,
+      });
+      return Response.json({ ok: true, routed: "opportunity", result });
     }
 
     const lead = await prisma.recruitmentLead.findUnique({
