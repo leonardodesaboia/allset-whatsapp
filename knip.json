@@ -15,12 +15,6 @@
     "src/infrastructure/storage/in-memory-storage-provider.ts"
   ],
   "ignoreDependencies": [
-    // Instalados pelo scaffold do Task 1 mas ainda não conectados ao
-    // eslint.config.mjs (flat config) via FlatCompat; gap de lint
-    // pré-existente, fora do escopo da Task 9 (guardrails de
-    // arquitetura/CI, não de configuração de lint).
-    "@eslint/eslintrc",
-    "eslint-config-next",
     // Tailwind v4 (@tailwindcss/postcss) já faz autoprefixing via Lightning
     // CSS internamente; pacote mantido do scaffold do Task 1, sem uso direto.
     "autoprefixer",
