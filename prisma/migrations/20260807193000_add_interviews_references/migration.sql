@@ -1,0 +1,13 @@
+CREATE TYPE "InterviewResult" AS ENUM ('REFERENCIA', 'AGUARDANDO_COMPLEMENTACAO', 'BASE_FUTURA', 'REPROVADA');
+CREATE TYPE "AssessmentLevel" AS ENUM ('POSITIVO', 'NEUTRO', 'ATENCAO');
+CREATE TYPE "ReferenceStatus" AS ENUM ('PENDING', 'CONTACTED', 'CONFIRMED', 'INCONCLUSIVE', 'NEGATIVE');
+CREATE TYPE "WouldHireAgain" AS ENUM ('YES', 'NO', 'UNSURE');
+CREATE TABLE "LeadInterview" ("id" TEXT NOT NULL, "leadId" TEXT NOT NULL, "interviewer" TEXT NOT NULL, "startedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "endedAt" TIMESTAMP(3), "notes" TEXT, "result" "InterviewResult", "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "LeadInterview_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "LeadAssessment" ("id" TEXT NOT NULL, "leadId" TEXT NOT NULL, "author" TEXT NOT NULL, "experience" "AssessmentLevel", "reliability" "AssessmentLevel", "communication" "AssessmentLevel", "availability" "AssessmentLevel", "notes" TEXT, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "LeadAssessment_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "ProfessionalReference" ("id" TEXT NOT NULL, "leadId" TEXT NOT NULL, "name" TEXT NOT NULL, "phoneE164" TEXT, "relationship" TEXT, "status" "ReferenceStatus" NOT NULL DEFAULT 'PENDING', "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "ProfessionalReference_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "ReferenceVerification" ("id" TEXT NOT NULL, "referenceId" TEXT NOT NULL, "verifiedBy" TEXT NOT NULL, "comment" TEXT, "wouldHireAgain" "WouldHireAgain", "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "ReferenceVerification_pkey" PRIMARY KEY ("id"));
+CREATE INDEX "LeadInterview_leadId_idx" ON "LeadInterview"("leadId"); CREATE INDEX "LeadAssessment_leadId_idx" ON "LeadAssessment"("leadId"); CREATE INDEX "ProfessionalReference_leadId_idx" ON "ProfessionalReference"("leadId"); CREATE INDEX "ReferenceVerification_referenceId_idx" ON "ReferenceVerification"("referenceId");
+ALTER TABLE "LeadInterview" ADD CONSTRAINT "LeadInterview_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "RecruitmentLead"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "LeadAssessment" ADD CONSTRAINT "LeadAssessment_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "RecruitmentLead"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "ProfessionalReference" ADD CONSTRAINT "ProfessionalReference_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "RecruitmentLead"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "ReferenceVerification" ADD CONSTRAINT "ReferenceVerification_referenceId_fkey" FOREIGN KEY ("referenceId") REFERENCES "ProfessionalReference"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
