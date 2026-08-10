@@ -1,0 +1,73 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { PrismaClient } from "@prisma/client";
+import { startTestDatabase } from "../../../tests/integration/test-db";
+import { expireOpportunities } from "./expire-opportunities.usecase";
+
+describe("expireOpportunities", () => {
+  let prisma: PrismaClient;
+  let stop: () => Promise<void> = async () => {};
+
+  beforeAll(async () => {
+    const db = await startTestDatabase();
+    prisma = db.prisma;
+    stop = db.stop;
+  }, 60_000);
+
+  afterAll(async () => stop());
+
+  async function seedOpportunity(expiresAt: Date) {
+    const ts = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+    const customer = await prisma.user.create({
+      data: { role: "CUSTOMER", fullName: "Cliente", phoneE164: `+558540${ts}` },
+    });
+    const service = await prisma.serviceDefinition.create({
+      data: { code: `service-${ts}`, name: "Limpeza" },
+    });
+    const booking = await prisma.booking.create({
+      data: {
+        customerId: customer.id,
+        serviceId: service.id,
+        status: "MATCHING",
+        neighborhood: "Aldeota",
+        scheduledAt: new Date(),
+        durationMinutes: 180,
+        professionalPaymentCents: 10_000,
+      },
+    });
+    const lead = await prisma.recruitmentLead.create({
+      data: { origin: "WHATSAPP", status: "ATIVA", phoneE164: `+558541${ts}`, fullName: "Profissional" },
+    });
+    const opportunity = await prisma.serviceOpportunity.create({
+      data: {
+        bookingId: booking.id,
+        neighborhood: "Aldeota",
+        scheduledAt: new Date(),
+        durationMinutes: 180,
+        paymentCents: 10_000,
+        expiresAt,
+      },
+    });
+    await prisma.opportunityResponse.create({ data: { opportunityId: opportunity.id, leadId: lead.id } });
+    return { booking, opportunity };
+  }
+
+  it("expira a oportunidade, as respostas e move o booking para revisão", async () => {
+    const { booking, opportunity } = await seedOpportunity(new Date(Date.now() - 1_000));
+
+    const result = await expireOpportunities(prisma);
+
+    expect(result.expired).toBeGreaterThanOrEqual(1);
+    expect((await prisma.serviceOpportunity.findUniqueOrThrow({ where: { id: opportunity.id } })).status).toBe("EXPIRED");
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe("REVIEW_REQUIRED");
+    const responses = await prisma.opportunityResponse.findMany({ where: { opportunityId: opportunity.id } });
+    expect(responses.every((response) => response.response === "EXPIRED")).toBe(true);
+  });
+
+  it("preserva oportunidades que ainda não venceram", async () => {
+    const { opportunity } = await seedOpportunity(new Date(Date.now() + 60 * 60 * 1_000));
+
+    await expireOpportunities(prisma);
+
+    expect((await prisma.serviceOpportunity.findUniqueOrThrow({ where: { id: opportunity.id } })).status).toBe("OPEN");
+  });
+});

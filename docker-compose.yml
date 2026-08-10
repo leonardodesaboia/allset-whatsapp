@@ -1,0 +1,48 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: allset
+      POSTGRES_PASSWORD: allset
+      POSTGRES_DB: allset
+    ports:
+      - "5432:5432"
+    volumes:
+      - allset_db_data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: allset
+      MINIO_ROOT_PASSWORD: allset1234
+    ports:
+      - "9000:9000"   # API S3-compatível
+      - "9001:9001"   # Console web
+    volumes:
+      - allset_minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  minio-init:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 allset allset1234 &&
+        mc mb --ignore-existing local/allset &&
+        echo 'Bucket allset criado.'
+      "
+    restart: "no"
+
+volumes:
+  allset_db_data:
+  allset_minio_data:

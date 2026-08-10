@@ -1,0 +1,923 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  CUSTOMER
+  PROFESSIONAL
+}
+
+model User {
+  id                String             @id @default(uuid())
+  role              UserRole
+  fullName          String
+  phoneE164         String             @unique
+  email             String?            @unique
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  customerProfile   CustomerProfile?
+  professionalProfile ProfessionalProfile?
+  adminProfile      AdminProfile?
+  bookings          Booking[]
+  customerBookingConversations CustomerBookingConversation[]
+
+  @@index([role])
+}
+
+model CustomerProfile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  blockedAt DateTime?
+  createdAt DateTime @default(now())
+}
+
+model ProfessionalProfile {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id])
+  reviewStatus   String   @default("PENDING_REVIEW")
+  pixKey         String?
+  createdAt      DateTime @default(now())
+  recruitmentLead RecruitmentLead?
+  referredLeads    RecruitmentLead[] @relation("ProfessionalReferrals")
+}
+
+enum RecruitmentStatus {
+  LEAD
+  PRE_CADASTRO
+  TRIAGEM
+  CONVERSA_PENDENTE
+  ENTREVISTA
+  REFERENCIA
+  PRE_APROVADA
+  DOCUMENTACAO
+  ONBOARDING
+  TESTE_OPERACIONAL
+  EM_VALIDACAO
+  ATIVA
+  PREFERENCIAL
+  PRECISA_DE_AJUDA
+  LIGACAO_SOLICITADA
+  BASE_FUTURA
+  AGUARDANDO_COMPLEMENTACAO
+  REPROVADA
+  DESISTIU
+  PAUSADA
+  SUSPENSA
+}
+
+enum LeadOrigin {
+  META_ADS
+  INSTAGRAM
+  FACEBOOK
+  INDICACAO_PROFISSIONAL
+  INDICACAO_CLIENTE
+  IDT
+  PARCEIRO
+  ORGANICO
+  WHATSAPP
+  CADASTRO_MANUAL
+  OUTRO
+}
+
+enum CommunicationMode {
+  TEXT
+  AUDIO
+  PHONE
+  MIXED
+}
+
+enum InitialChannelPreference {
+  WHATSAPP
+  PHONE
+}
+
+enum WhatsappAutonomy {
+  INDEPENDENT
+  OCCASIONAL_SUPPORT
+  UNKNOWN
+}
+
+enum ExperienceDuration {
+  LT_1Y
+  Y1_3
+  GT_3Y
+  BY_AUDIO
+}
+
+enum AreaCompatibility {
+  SIM
+  TALVEZ
+  NAO
+}
+
+enum LeadNoteType {
+  GERAL
+  ENTREVISTA
+  REFERENCIA
+  DOCUMENTACAO
+  OPERACIONAL
+  PAGAMENTO
+  INCIDENTE
+  FOLLOW_UP
+}
+
+enum OutboundMessageStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+  DEAD_LETTER
+}
+
+enum ServiceOpportunityStatus {
+  OPEN
+  FILLED
+  EXPIRED
+  CANCELLED
+}
+
+enum OpportunityResponseValue {
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+enum RecruitmentConversationState {
+  INTRODUCTION
+  CHANNEL_PREFERENCE
+  NAME
+  NEIGHBORHOOD
+  PROFESSIONAL_EXPERIENCE
+  EXPERIENCE_DURATION
+  INFORMAL_EXPERIENCE
+  SERVICE_AREA
+  AVAILABILITY
+  MANUAL_REVIEW
+  PAUSED
+  COMPLETED
+}
+
+enum InterviewResult {
+  REFERENCIA
+  AGUARDANDO_COMPLEMENTACAO
+  BASE_FUTURA
+  REPROVADA
+}
+
+enum AssessmentLevel {
+  POSITIVO
+  NEUTRO
+  ATENCAO
+}
+
+enum ReferenceStatus {
+  PENDING
+  CONTACTED
+  CONFIRMED
+  INCONCLUSIVE
+  NEGATIVE
+}
+
+enum WouldHireAgain {
+  YES
+  NO
+  UNSURE
+}
+
+enum ProfessionalDocumentStatus {
+  PENDING
+  RECEIVED
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum OperationalTestResult {
+  PASSED
+  PASSED_WITH_SUPPORT
+  FAILED
+}
+
+model InboundMessage {
+  id            String   @id @default(uuid())
+  provider      String
+  externalId    String
+  sender        String
+  recipient     String
+  type          String
+  payload       Json
+  providerMetadata Json?
+  correlationId String?
+  receivedAt    DateTime @default(now())
+  createdAt     DateTime @default(now())
+  processedAt   DateTime?
+  receivedAudio ReceivedAudio?
+
+  @@unique([provider, externalId])
+  @@index([sender])
+  @@index([receivedAt])
+}
+
+model QuestionAudioAsset {
+  id          String   @id @default(uuid())
+  questionKey String
+  storageKey  String
+  contentType String
+  sizeBytes   Int
+  durationMs  Int?
+  version     Int
+  language    String   @default("pt-BR")
+  isActive    Boolean  @default(true)
+  createdBy   String
+  createdAt   DateTime @default(now())
+  replacedAt  DateTime?
+
+  @@unique([questionKey, version])
+  @@index([questionKey, isActive])
+}
+
+model ReceivedAudio {
+  id               String         @id @default(uuid())
+  inboundMessageId String         @unique
+  inboundMessage   InboundMessage @relation(fields: [inboundMessageId], references: [id])
+  storageKey       String
+  contentType      String
+  sizeBytes        Int
+  durationMs       Int?
+  transcription    String?
+  transcriptionLeaseUntil DateTime?
+  createdAt        DateTime       @default(now())
+}
+
+model OutboxMessage {
+  id             String                @id @default(uuid())
+  provider       String
+  recipient      String
+  type           String
+  payload        Json
+  status         OutboundMessageStatus @default(PENDING)
+  attempts       Int                   @default(0)
+  availableAt    DateTime              @default(now())
+  sentAt         DateTime?
+  lastError      String?
+  externalId     String?
+  correlationId  String?
+  idempotencyKey String                 @unique
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  leaseExpiresAt DateTime?
+
+  @@index([status, availableAt])
+  @@index([correlationId])
+  @@index([leaseExpiresAt])
+}
+
+model RecruitmentLead {
+  id                          String                   @id @default(uuid())
+  status                      RecruitmentStatus        @default(LEAD)
+  version                     Int                      @default(0)
+  phoneE164                   String?
+  fullName                    String?
+  neighborhood                String?
+  origin                      LeadOrigin
+  campaign                    String?
+  referralCode                String?
+  partnerName                 String?
+  referredByProfessionalId    String?
+  referredByProfessional      ProfessionalProfile?    @relation("ProfessionalReferrals", fields: [referredByProfessionalId], references: [id])
+  originNote                  String?
+  preferredCommunicationMode  CommunicationMode?
+  initialChannelPreference    InitialChannelPreference?
+  whatsappAutonomy            WhatsappAutonomy?        @default(UNKNOWN)
+  hasProfessionalExperience   Boolean?
+  hasInformalExperience       Boolean?
+  experienceDuration          ExperienceDuration?
+  canServeInitialArea         AreaCompatibility?
+  availabilityDays            Json?
+  nextAction                  String?
+  nextActionAt                DateTime?
+  professionalProfileId       String?                  @unique
+  professionalProfile         ProfessionalProfile?     @relation(fields: [professionalProfileId], references: [id])
+  lastInteractionAt           DateTime?
+  createdAt                   DateTime                 @default(now())
+  updatedAt                   DateTime                 @updatedAt
+  history                     RecruitmentStatusHistory[]
+  notes                       LeadNote[]
+  reminders                   LeadReminder[]
+  events                      LeadEvent[]
+  conversation                RecruitmentConversation?
+  interviews                  LeadInterview[]
+  assessments                 LeadAssessment[]
+  references                  ProfessionalReference[]
+  documents                   ProfessionalDocument[]
+  termsAcceptances            TermsAcceptance[]
+  onboardingProgress          LeadOnboardingProgress[]
+  operationalTests            OperationalTest[]
+  validationServices          ValidationServiceRecord[]
+  validationDecisions         ValidationDecision[]
+  opportunityResponses        OpportunityResponse[]
+  assignedBookings            Booking[]                 @relation("AssignedProfessional")
+
+  @@index([status])
+  @@index([neighborhood])
+  @@index([origin])
+  @@index([nextActionAt])
+  @@unique([phoneE164])
+}
+
+model ValidationPolicy {
+  id               String   @id @default(uuid())
+  requiredServices Int      @default(3)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+}
+
+model ValidationServiceRecord {
+  id               String          @id @default(uuid())
+  leadId           String
+  lead             RecruitmentLead @relation(fields: [leadId], references: [id])
+  externalServiceId String         @unique
+  wasOnTime        Boolean?
+  rating           Int?
+  hadIssue         Boolean?
+  wouldHireAgain   WouldHireAgain?
+  notes            String?
+  createdAt        DateTime        @default(now())
+
+  @@index([leadId])
+}
+
+model ValidationDecision {
+  id          String          @id @default(uuid())
+  leadId      String
+  lead        RecruitmentLead @relation(fields: [leadId], references: [id])
+  decision    RecruitmentStatus
+  eligible    Boolean
+  reason      String?
+  decidedBy   String
+  createdAt   DateTime        @default(now())
+
+  @@index([leadId])
+}
+
+model OnboardingContent {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  title       String
+  text        String
+  storageKey  String?
+  position    Int
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  progress    LeadOnboardingProgress[]
+
+  @@unique([position])
+}
+
+model LeadOnboardingProgress {
+  id          String            @id @default(uuid())
+  leadId      String
+  lead        RecruitmentLead   @relation(fields: [leadId], references: [id])
+  contentId   String
+  content     OnboardingContent @relation(fields: [contentId], references: [id])
+  channel     String
+  completedAt DateTime          @default(now())
+
+  @@unique([leadId, contentId])
+  @@index([leadId])
+}
+
+model OperationalTest {
+  id          String                   @id @default(uuid())
+  leadId      String
+  lead        RecruitmentLead          @relation(fields: [leadId], references: [id])
+  result      OperationalTestResult?
+  decidedBy   String?
+  decidedAt   DateTime?
+  supportUsed Boolean                  @default(false)
+  activeKey   String?                  @unique
+  createdAt   DateTime                 @default(now())
+  events      OperationalTestEvent[]
+
+  @@index([leadId])
+}
+
+model OperationalTestEvent {
+  id        String          @id @default(uuid())
+  testId    String
+  test      OperationalTest @relation(fields: [testId], references: [id])
+  type      String
+  actor     String
+  createdAt DateTime        @default(now())
+
+  @@index([testId])
+}
+
+model DocumentRequirement {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  name        String
+  required    Boolean  @default(true)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  documents   ProfessionalDocument[]
+}
+
+model ProfessionalDocument {
+  id            String                     @id @default(uuid())
+  leadId        String
+  lead          RecruitmentLead            @relation(fields: [leadId], references: [id])
+  requirementId String
+  requirement   DocumentRequirement        @relation(fields: [requirementId], references: [id])
+  storageKey    String
+  contentType   String
+  sizeBytes     Int
+  status        ProfessionalDocumentStatus @default(RECEIVED)
+  receivedAt    DateTime                   @default(now())
+  reviews       DocumentReview[]
+
+  @@index([leadId])
+  @@index([requirementId])
+}
+
+model DocumentReview {
+  id          String               @id @default(uuid())
+  documentId  String
+  document    ProfessionalDocument @relation(fields: [documentId], references: [id])
+  reviewer    String
+  status      ProfessionalDocumentStatus
+  reason      String?
+  createdAt   DateTime             @default(now())
+
+  @@index([documentId])
+}
+
+model TermsVersion {
+  id        String   @id @default(uuid())
+  version   String   @unique
+  content   String
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  acceptances TermsAcceptance[]
+}
+
+model TermsAcceptance {
+  id             String          @id @default(uuid())
+  leadId         String
+  lead           RecruitmentLead @relation(fields: [leadId], references: [id])
+  termsVersionId String
+  termsVersion   TermsVersion    @relation(fields: [termsVersionId], references: [id])
+  channel        String
+  phoneE164      String?
+  ipAddress      String?
+  consentId      String          @unique
+  acceptedAt     DateTime        @default(now())
+
+  @@unique([leadId, termsVersionId])
+  @@index([leadId])
+}
+
+model LeadInterview {
+  id          String          @id @default(uuid())
+  leadId      String
+  lead        RecruitmentLead @relation(fields: [leadId], references: [id])
+  interviewer String
+  startedAt   DateTime        @default(now())
+  endedAt     DateTime?
+  notes       String?
+  result      InterviewResult?
+  createdAt   DateTime        @default(now())
+
+  @@index([leadId])
+}
+
+model LeadAssessment {
+  id          String          @id @default(uuid())
+  leadId      String
+  lead        RecruitmentLead @relation(fields: [leadId], references: [id])
+  author      String
+  experience  AssessmentLevel?
+  reliability AssessmentLevel?
+  communication AssessmentLevel?
+  availability AssessmentLevel?
+  notes       String?
+  createdAt   DateTime        @default(now())
+
+  @@index([leadId])
+}
+
+model ProfessionalReference {
+  id          String          @id @default(uuid())
+  leadId      String
+  lead        RecruitmentLead @relation(fields: [leadId], references: [id])
+  name        String
+  phoneE164   String?
+  relationship String?
+  status      ReferenceStatus @default(PENDING)
+  createdAt   DateTime        @default(now())
+  verifications ReferenceVerification[]
+
+  @@index([leadId])
+}
+
+model ReferenceVerification {
+  id          String                @id @default(uuid())
+  referenceId String
+  reference   ProfessionalReference @relation(fields: [referenceId], references: [id])
+  verifiedBy  String
+  comment     String?
+  wouldHireAgain WouldHireAgain?
+  createdAt   DateTime              @default(now())
+
+  @@index([referenceId])
+}
+
+model RecruitmentConversation {
+  id                    String                       @id @default(uuid())
+  leadId                String                       @unique
+  lead                  RecruitmentLead              @relation(fields: [leadId], references: [id])
+  provider              String                       @default("mock")
+  state                 RecruitmentConversationState @default(INTRODUCTION)
+  lastQuestionKey       String?
+  misunderstandingCount Int                          @default(0)
+  automationPausedAt    DateTime?
+  lastInboundAt         DateTime?
+  lastReengagementAt    DateTime?
+  reengagementCount     Int                          @default(0)
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+
+  @@index([state])
+  @@index([state, lastInboundAt])
+}
+
+model RecruitmentStatusHistory {
+  id          String            @id @default(uuid())
+  leadId      String
+  lead        RecruitmentLead   @relation(fields: [leadId], references: [id])
+  fromStatus  RecruitmentStatus?
+  toStatus    RecruitmentStatus
+  actor       String
+  reason      String?
+  override    Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+
+  @@index([leadId])
+}
+
+model LeadNote {
+  id          String             @id @default(uuid())
+  leadId      String
+  lead        RecruitmentLead    @relation(fields: [leadId], references: [id])
+  author      String
+  type        LeadNoteType       @default(GERAL)
+  content     String
+  pinned      Boolean            @default(false)
+  createdAt   DateTime           @default(now())
+  editedAt    DateTime?
+  deletedAt   DateTime?
+  revisions   LeadNoteRevision[]
+
+  @@index([leadId])
+}
+
+model LeadNoteRevision {
+  id                String    @id @default(uuid())
+  noteId            String
+  note              LeadNote  @relation(fields: [noteId], references: [id])
+  previousContent   String
+  editedBy          String
+  editedAt          DateTime  @default(now())
+
+  @@index([noteId])
+}
+
+model LeadReminder {
+  id          String          @id @default(uuid())
+  leadId      String
+  lead        RecruitmentLead @relation(fields: [leadId], references: [id])
+  text        String
+  dueAt       DateTime
+  doneAt      DateTime?
+  createdBy   String
+  createdAt   DateTime        @default(now())
+
+  @@index([leadId])
+  @@index([dueAt])
+}
+
+model LeadEvent {
+  id          String          @id @default(uuid())
+  leadId      String
+  lead        RecruitmentLead @relation(fields: [leadId], references: [id])
+  type        String
+  description String
+  actor       String
+  occurredAt  DateTime        @default(now())
+  metadata    Json?
+
+  @@index([leadId])
+}
+
+model AdminProfile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model Address {
+  id           String  @id @default(uuid())
+  neighborhood String
+  street       String
+  number       String
+  complement   String?
+  city         String  @default("Fortaleza")
+  state        String  @default("CE")
+  postalCode   String?
+
+  @@index([neighborhood])
+}
+
+model ServiceArea {
+  id           String   @id @default(uuid())
+  neighborhood String   @unique
+  isActive     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model ServiceDefinition {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  bookings    Booking[]
+}
+
+enum BookingStatus {
+  DRAFT
+  COLLECTING_DATA
+  QUOTED
+  QUOTE_ACCEPTED
+  REVIEW_REQUIRED
+  AWAITING_CUSTOMER_CONFIRMATION
+  AWAITING_PAYMENT
+  PAYMENT_FAILED
+  PAID
+  MATCHING
+  PROFESSIONAL_ASSIGNED
+  SCHEDULED
+  PROFESSIONAL_CONFIRMED
+  PROFESSIONAL_EN_ROUTE
+  IN_PROGRESS
+  AWAITING_COMPLETION_CONFIRMATION
+  COMPLETED
+  ISSUE_OPEN
+  CANCELLED
+  REFUND_PENDING
+  REFUNDED
+}
+
+enum CustomerBookingConversationState {
+  INTRODUCTION
+  NAME
+  PROPERTY_CHARACTERISTICS
+  SCHEDULE_DATE
+  SCHEDULE_TIME
+  QUOTE
+  QUOTE_ACCEPTANCE
+  ADDRESS
+  FINAL_CONFIRMATION
+  AWAITING_PAYMENT
+  MANUAL_REVIEW
+  PAUSED
+  COMPLETED
+}
+
+// Mantém o contexto mínimo antes de sabermos se o contato quer contratar ou
+// trabalhar. Isso evita assumir que toda mensagem nova é um lead profissional.
+enum ContactIntentConversationState {
+  CHOOSING_INTENT
+  CUSTOMER
+  PROFESSIONAL
+  PAUSED
+}
+
+model Booking {
+  id                       String        @id @default(uuid())
+  status                   BookingStatus @default(DRAFT)
+  version                  Int           @default(0)
+  customerId               String
+  customer                 User          @relation(fields: [customerId], references: [id])
+  serviceId                String
+  service                  ServiceDefinition @relation(fields: [serviceId], references: [id])
+  scheduledAt              DateTime?
+  neighborhood             String?
+  durationMinutes          Int?
+  professionalPaymentCents Int?
+  propertyPricingTierId    String?
+  propertyPricingTier      PropertyPricingTier? @relation(fields: [propertyPricingTierId], references: [id])
+  propertyCharacteristics  Json?
+  addressLine1             String?
+  addressLine2             String?
+  addressReference         String?
+  customerNotes            String?
+  requestedAt              DateTime?
+  quotedAt                 DateTime?
+  coverageValidatedAt      DateTime?
+  outsideCoverageArea      Boolean       @default(false)
+  totalCents               Int           @default(0)
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+  history                  BookingStatusHistory[]
+  opportunities            ServiceOpportunity[]
+  customerConversation     CustomerBookingConversation?
+  assignedProfessionalLeadId String?
+  assignedProfessionalLead   RecruitmentLead? @relation("AssignedProfessional", fields: [assignedProfessionalLeadId], references: [id])
+
+  @@index([status])
+  @@index([customerId])
+  @@index([serviceId])
+  @@index([assignedProfessionalLeadId])
+  @@index([propertyPricingTierId])
+}
+
+model PropertyPricingTier {
+  id              String   @id @default(uuid())
+  label           String   @unique
+  characteristics Json
+  priceCents      Int
+  durationMinutes Int
+  sortOrder       Int      @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  bookings        Booking[]
+}
+
+model CustomerBookingConversation {
+  id                  String                         @id @default(uuid())
+  customerId          String
+  customer            User                           @relation(fields: [customerId], references: [id])
+  bookingId           String?                        @unique
+  booking             Booking?                       @relation(fields: [bookingId], references: [id])
+  provider            String
+  state               CustomerBookingConversationState @default(INTRODUCTION)
+  lastQuestionKey     String?
+  pendingScheduleDate String?
+  automationPausedAt  DateTime?
+  lastInboundAt       DateTime?
+  version             Int                            @default(0)
+  createdAt           DateTime                       @default(now())
+  updatedAt           DateTime                       @updatedAt
+
+  @@index([customerId, state])
+  @@index([state, lastInboundAt])
+}
+
+model ContactIntentConversation {
+  id            String                         @id @default(uuid())
+  phoneE164     String                         @unique
+  provider      String
+  state         ContactIntentConversationState @default(CHOOSING_INTENT)
+  lastInboundAt DateTime?
+  createdAt     DateTime                       @default(now())
+  updatedAt     DateTime                       @updatedAt
+
+  @@index([state, lastInboundAt])
+}
+
+model BookingStatusHistory {
+  id          String   @id @default(uuid())
+  bookingId   String
+  booking     Booking  @relation(fields: [bookingId], references: [id])
+  fromStatus  BookingStatus?
+  toStatus    BookingStatus
+  actor       String
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  @@index([bookingId])
+}
+
+model ServiceOpportunity {
+  id              String                   @id @default(uuid())
+  bookingId       String                   @unique
+  booking         Booking                  @relation(fields: [bookingId], references: [id])
+  neighborhood    String
+  scheduledAt     DateTime
+  durationMinutes Int                      @default(180)
+  paymentCents    Int
+  status          ServiceOpportunityStatus @default(OPEN)
+  expiresAt       DateTime
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  responses       OpportunityResponse[]
+
+  @@index([status, expiresAt])
+}
+
+model OpportunityResponse {
+  id            String                    @id @default(uuid())
+  opportunityId String
+  opportunity   ServiceOpportunity        @relation(fields: [opportunityId], references: [id])
+  leadId        String
+  lead          RecruitmentLead           @relation(fields: [leadId], references: [id])
+  sentAt        DateTime                  @default(now())
+  respondedAt   DateTime?
+  response      OpportunityResponseValue?
+  responseToken String?
+
+  @@unique([opportunityId, leadId])
+  @@unique([responseToken])
+  @@index([leadId, response])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actor      String
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+}
+
+model ExternalReference {
+  id           String   @id @default(uuid())
+  provider     String
+  resourceType String
+  internalId   String
+  externalId   String
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@unique([provider, resourceType, externalId])
+  @@index([internalId])
+}
+
+model FeatureFlag {
+  key       String   @id
+  enabled   Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+}
+
+// Better Auth: modelo de autenticação separado do User de domínio (Task 3).
+// Sessão/credenciais não devem se acoplar a papéis de negócio.
+model AuthUser {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  name          String
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      AuthSession[]
+  accounts      AuthAccount[]
+}
+
+model AuthSession {
+  id        String   @id @default(uuid())
+  userId    String
+  user      AuthUser @relation(fields: [userId], references: [id])
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AuthAccount {
+  id                String   @id @default(uuid())
+  userId            String
+  user              AuthUser @relation(fields: [userId], references: [id])
+  providerId        String
+  accountId         String
+  passwordHash      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([providerId, accountId])
+}
+
+model AuthVerification {
+  id         String   @id @default(uuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}

@@ -1,0 +1,8 @@
+{
+  "crons": [
+    { "path": "/api/cron/marketplace/expire", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/messaging/dispatch", "schedule": "*/1 * * * *" },
+    { "path": "/api/cron/messaging/download-audio", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/recruitment/reengage", "schedule": "0 */6 * * *" }
+  ]
+}

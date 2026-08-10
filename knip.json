@@ -1,0 +1,45 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["src/app/**/{page,layout,route}.tsx", "src/app/**/{page,layout,route}.ts"],
+  "project": ["src/**/*.ts", "src/**/*.tsx"],
+  "ignore": [
+    "**/*.test.ts",
+    "**/*.integration.test.ts",
+    // Ports/implementações da Fase 1 (Task 7) construídos antes de seus
+    // consumidores: serão conectados em tarefas futuras (ErrorReporter nos
+    // casos de uso/rotas de API; InMemoryStorageProvider em testes
+    // unitários rápidos que ainda não existem — hoje só há cobertura via
+    // local-storage-provider.test.ts).
+    "src/domain/ports/error-reporter.ts",
+    "src/infrastructure/observability/console-error-reporter.ts",
+    "src/infrastructure/storage/in-memory-storage-provider.ts",
+    // Casos de uso dos sub-specs 4 e 6–8: a persistência e regras existem,
+    // mas as telas/automação WhatsApp que os acionam ainda são entregas
+    // explícitas do roadmap. Mantê-los fora do grafo evita que o CI confunda
+    // capacidade de domínio pronta com uma rota pública inexistente.
+    "src/application/messaging/record-received-audio.usecase.ts",
+    "src/application/recruitment/documents-terms.usecase.ts",
+    "src/application/recruitment/onboarding-operational-test.usecase.ts",
+    "src/application/recruitment/question-audio-assets.usecase.ts",
+    "src/application/recruitment/validation-activation.usecase.ts"
+  ],
+  "ignoreDependencies": [
+    // Consumido via `@import "tailwindcss"` em src/app/globals.css (sintaxe
+    // da v4) e pelo plugin @tailwindcss/postcss — o Knip não segue imports
+    // dentro de .css, então não enxerga esse uso. Não há mais
+    // tailwind.config.ts: na v4 a config vive no próprio CSS.
+    "tailwindcss",
+    // Tailwind v4 (@tailwindcss/postcss) já faz autoprefixing via Lightning
+    // CSS internamente; pacote mantido do scaffold do Task 1, sem uso direto.
+    "autoprefixer",
+    // Formatação via IDE/editor (.prettierrc.json presente); nenhum script
+    // "format" ainda o invoca diretamente.
+    "prettier",
+    // Referenciado apenas em anotação de tipo JSDoc no postcss.config.mjs;
+    // é dependência transitiva do postcss, não precisa ser listada direto.
+    "postcss-load-config",
+    // Usado em tests/integration/test-db.ts (harness Testcontainers da
+    // Task 3), fora do escopo "src/**" declarado em "project" acima.
+    "@testcontainers/postgresql"
+  ]
+}

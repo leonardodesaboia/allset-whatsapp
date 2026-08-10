@@ -8,13 +8,18 @@
 
 ## Estado atual
 
-Repositório vazio (greenfield). Nenhuma stack, nenhum código, nenhuma
-decisão prévia. Este roadmap fixa as decisões de stack e arquitetura que o
-briefing do produto definiu como recomendadas para projetos novos.
+O repositório deixou de ser greenfield. Fundação, funil, mensageria, conversa,
+assets de áudio, agregados de entrevista/documentos/onboarding/validação e os
+adapters iniciais de Evolution e Whisper foram implementados em etapas
+aditivas. O retrato verificável de implementação, limites e homologações
+pendentes está em
+[estado consolidado da implementação](implementation-status-2026-08-07.md).
 
 ## Diagnóstico de conflitos
 
-Nenhum. Não há decisões anteriores para conflitar com o briefing.
+As decisões do roadmap permanecem válidas. A execução atual usa worker/cron
+interno para consumir a outbox; `pg-boss` continua planejado para automações de
+longa duração e não altera o contrato de mensageria.
 
 ## Stack fixada (greenfield → aplica-se a recomendação padrão do briefing)
 
