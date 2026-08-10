@@ -52,36 +52,36 @@ export function NewLeadForm() {
   return (
     <form
       action={() => void submit()}
-      className="flex items-end gap-2 p-3 rounded-lg border border-blue-200 bg-blue-50 flex-wrap"
+      className="flex flex-col gap-3 w-full p-3 rounded-lg border border-blue-200 bg-blue-50 sm:flex-row sm:items-end sm:flex-wrap"
     >
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-1 sm:w-auto w-full">
         <label className="text-xs font-medium text-slate-600">Nome</label>
         <Input
           aria-label="Nome"
           value={fullName}
           onChange={(e) => setFullName(e.target.value)}
           placeholder="Nome completo"
-          className="w-48"
+          className="w-full sm:w-48"
         />
       </div>
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-1 sm:w-auto w-full">
         <label className="text-xs font-medium text-slate-600">Telefone</label>
         <Input
           aria-label="Telefone"
           value={phoneE164}
           onChange={(e) => setPhone(e.target.value)}
           placeholder="+5585…"
-          className="w-36"
+          className="w-full sm:w-36"
         />
       </div>
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-1 sm:w-auto w-full">
         <label className="text-xs font-medium text-slate-600">Bairro</label>
         <Input
           aria-label="Bairro"
           value={neighborhood}
           onChange={(e) => setNeighborhood(e.target.value)}
           placeholder="Bairro"
-          className="w-36"
+          className="w-full sm:w-36"
         />
       </div>
       <div className="flex gap-1.5">
