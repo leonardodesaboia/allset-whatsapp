@@ -6,6 +6,7 @@ import { auth } from "@/infrastructure/auth/auth";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { NavLinkClient } from "./nav-link-client";
 import { SignOutButton } from "./sign-out-button";
+import { MobileNav } from "./mobile-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -29,8 +30,8 @@ export default async function AdminLayout({ children }: { children: ReactNode })
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
-      {/* Sidebar */}
-      <aside className="flex flex-col w-56 shrink-0 bg-slate-900">
+      {/* Sidebar — desktop only */}
+      <aside className="hidden lg:flex flex-col w-56 shrink-0 bg-slate-900">
         {/* Logo */}
         <div className="flex items-center gap-2.5 px-4 h-14 border-b border-white/10">
           <div className="flex items-center justify-center w-7 h-7 rounded-md bg-blue-600 shrink-0">
@@ -67,7 +68,10 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       </aside>
 
       {/* Content */}
-      <main className="flex-1 overflow-y-auto">{children}</main>
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <MobileNav admin={{ fullName: admin.fullName, email: admin.email ?? "" }} initials={initials} />
+        <main className="flex-1 overflow-y-auto">{children}</main>
+      </div>
     </div>
   );
 }

@@ -31,11 +31,13 @@ export function NavLinkClient({
   label,
   iconName,
   exact,
+  onClick,
 }: {
   href: string;
   label: string;
   iconName: string;
   exact?: boolean;
+  onClick?: () => void;
 }) {
   const pathname = usePathname();
   const isActive = exact ? pathname === href : pathname.startsWith(href);
@@ -44,6 +46,7 @@ export function NavLinkClient({
   return (
     <Link
       href={href}
+      {...(onClick ? { onClick } : {})}
       className={cn(
         "flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors",
         isActive
