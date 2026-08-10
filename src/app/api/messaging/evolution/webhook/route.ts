@@ -2,10 +2,12 @@ import { env } from "@/env";
 import { processOpportunityResponse, requestOpportunityClarification } from "@/application/marketplace/process-opportunity-response.usecase";
 import { processContactConversationText } from "@/application/messaging/process-contact-conversation-text.usecase";
 import { processInboundEvent } from "@/application/messaging/process-inbound-event.usecase";
+import { dispatchNextOutboxMessage } from "@/application/messaging/dispatch-outbox.usecase";
 import { parseOpportunityReply } from "@/domain/marketplace/opportunity-reply";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { logger } from "@/infrastructure/observability/logger";
 import { isValidEvolutionWebhook, normalizeEvolutionWebhook } from "@/infrastructure/messaging/evolution-webhook";
+import { createMessagingGatewayRegistry } from "@/infrastructure/messaging/messaging-runtime";
 
 export const runtime = "nodejs";
 
@@ -71,6 +73,9 @@ export async function POST(request: Request) {
       text: event.payload.text,
       provider: "evolution",
     });
+    dispatchNextOutboxMessage(prisma, createMessagingGatewayRegistry(), "system:webhook-dispatch").catch(
+      (err) => logger.error({ err }, "Falha ao despachar outbox inline no webhook"),
+    );
     return Response.json({ ok: true, ...result });
   } catch (error) {
     logger.error({ err: error, provider: "evolution", externalId: event.externalId }, "Falha ao processar webhook da Evolution");
