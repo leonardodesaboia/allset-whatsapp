@@ -2,6 +2,8 @@ import { RefreshCw, Trash2, AlertCircle, Clock, MessageSquare, RotateCcw } from 
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { ConfirmButton } from "@/components/ui/confirm-button";
+import { SubmitButton, SubmitButtonRaw } from "@/components/ui/submit-button";
 import { retryOutboxMessageAction, retryAllDeadLettersAction, discardOutboxMessageAction } from "./actions";
 
 const fmt = (d: Date) =>
@@ -26,7 +28,7 @@ export default async function OutboxPage() {
     <div className="p-6 space-y-6 max-w-4xl">
       <div>
         <h1 className="text-xl font-bold text-slate-900">Fila de saída</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Mensagens pendentes, com falha e dead letters</p>
+        <p className="text-sm text-slate-500 mt-0.5">Mensagens pendentes, com falha e falhas permanentes</p>
       </div>
 
       {/* KPIs */}
@@ -34,7 +36,7 @@ export default async function OutboxPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>Pendentes</CardTitle>
+              <CardTitle as="p">Pendentes</CardTitle>
               <Clock className="w-4 h-4 text-slate-400" />
             </div>
             <p className="text-3xl font-bold text-slate-900 tabular-nums">{pending}</p>
@@ -43,7 +45,7 @@ export default async function OutboxPage() {
         <Card className={failed.length > 0 ? "border-amber-200" : ""}>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle className={failed.length > 0 ? "text-amber-500" : ""}>Com falha</CardTitle>
+              <CardTitle as="p" className={failed.length > 0 ? "text-amber-500" : ""}>Com falha</CardTitle>
               <AlertCircle className={`w-4 h-4 ${failed.length > 0 ? "text-amber-400" : "text-slate-400"}`} />
             </div>
             <p className={`text-3xl font-bold tabular-nums ${failed.length > 0 ? "text-amber-600" : "text-slate-900"}`}>
@@ -54,8 +56,8 @@ export default async function OutboxPage() {
         <Card className={deadLetters.length > 0 ? "border-red-200" : ""}>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle className={deadLetters.length > 0 ? "text-red-500" : ""}>Dead letters</CardTitle>
-              <MessageSquare className={`w-4 h-4 ${deadLetters.length > 0 ? "text-red-400" : "text-slate-400"}`} />
+              <CardTitle as="p" className={deadLetters.length > 0 ? "text-red-500" : ""}>Falhas permanentes</CardTitle>
+              <MessageSquare className={`w-4 h-4 ${deadLetters.length > 0 ? "text-red-400" : "text-slate-400"}`} aria-hidden />
             </div>
             <p className={`text-3xl font-bold tabular-nums ${deadLetters.length > 0 ? "text-red-600" : "text-slate-900"}`}>
               {deadLetters.length}
@@ -69,18 +71,18 @@ export default async function OutboxPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle className="text-red-500 flex items-center gap-1.5">
-                <AlertCircle className="w-3.5 h-3.5" />
-                Dead letters ({deadLetters.length})
+              <CardTitle as="h2" className="text-red-500 flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5" aria-hidden />
+                Falhas permanentes ({deadLetters.length})
               </CardTitle>
               <form action={retryAllDeadLettersAction}>
-                <button
-                  type="submit"
+                <SubmitButton
                   className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-700 hover:text-blue-900 border border-blue-200 bg-blue-50 hover:bg-blue-100 rounded px-2.5 py-1 transition-colors"
+                  pendingLabel="Recolocando…"
                 >
-                  <RotateCcw className="w-3 h-3" />
+                  <RotateCcw className="w-3 h-3" aria-hidden />
                   Recolocar todas na fila
-                </button>
+                </SubmitButton>
               </form>
             </div>
           </CardHeader>
@@ -129,20 +131,21 @@ export default async function OutboxPage() {
                             <button
                               type="submit"
                               className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900"
-                              title="Recolocar na fila"
+                              aria-label="Recolocar na fila"
                             >
-                              <RefreshCw className="w-3 h-3" />
-                              Retry
+                              <RefreshCw className="w-3 h-3" aria-hidden />
+                              Recolocar
                             </button>
                           </form>
                           <form action={discardOutboxMessageAction.bind(null, msg.id)}>
-                            <button
-                              type="submit"
+                            <ConfirmButton
+                              message="Descartar esta mensagem permanentemente? Esta ação não pode ser desfeita."
                               className="inline-flex items-center gap-1 text-xs font-medium text-red-600 hover:text-red-800"
-                              title="Descartar permanentemente"
+                              aria-label="Descartar permanentemente"
                             >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
+                              <Trash2 className="w-3 h-3" aria-hidden />
+                              Descartar
+                            </ConfirmButton>
                           </form>
                         </div>
                       </td>
@@ -159,9 +162,9 @@ export default async function OutboxPage() {
       {failed.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-amber-600 flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5" />
-              Com falha — aguardando retry ({failed.length})
+            <CardTitle as="h2" className="text-amber-600 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5" aria-hidden />
+              Com falha — aguardando reenvio ({failed.length})
             </CardTitle>
           </CardHeader>
           <CardContent className="px-0 pb-0">
@@ -203,13 +206,13 @@ export default async function OutboxPage() {
                       </td>
                       <td className="px-5 py-3">
                         <form action={retryOutboxMessageAction.bind(null, msg.id)}>
-                          <button
-                            type="submit"
+                          <SubmitButtonRaw
                             className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900"
+                            aria-label="Recolocar na fila agora"
                           >
-                            <RefreshCw className="w-3 h-3" />
-                            Retry agora
-                          </button>
+                            <RefreshCw className="w-3 h-3" aria-hidden />
+                            Recolocar agora
+                          </SubmitButtonRaw>
                         </form>
                       </td>
                     </tr>
@@ -226,7 +229,7 @@ export default async function OutboxPage() {
           <CardContent className="py-12 text-center">
             <RefreshCw className="w-8 h-8 text-slate-300 mx-auto mb-2" />
             <p className="text-sm font-medium text-slate-600">Fila saudável</p>
-            <p className="text-xs text-slate-400 mt-1">Nenhuma mensagem com falha ou dead letter.</p>
+            <p className="text-xs text-slate-400 mt-1">Nenhuma mensagem com falha ou falha permanente.</p>
           </CardContent>
         </Card>
       )}

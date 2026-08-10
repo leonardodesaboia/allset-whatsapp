@@ -3,6 +3,7 @@ import { FileCheck, FileX, FileQuestion, ArrowRight } from "lucide-react";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { ConfirmButton } from "@/components/ui/confirm-button";
 import { reviewDocumentAction } from "../recruitment/actions";
 
 const fmt = (d: Date) =>
@@ -50,7 +51,7 @@ export default async function DocumentsPage() {
         <Card className={pending.length > 0 ? "border-amber-200" : ""}>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle className={pending.length > 0 ? "text-amber-500" : ""}>Pendentes</CardTitle>
+              <CardTitle as="p" className={pending.length > 0 ? "text-amber-500" : ""}>Pendentes</CardTitle>
               <FileQuestion className={`w-4 h-4 ${pending.length > 0 ? "text-amber-400" : "text-slate-400"}`} />
             </div>
             <p className={`text-3xl font-bold tabular-nums ${pending.length > 0 ? "text-amber-600" : "text-slate-900"}`}>
@@ -61,7 +62,7 @@ export default async function DocumentsPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>Aprovados</CardTitle>
+              <CardTitle as="p">Aprovados</CardTitle>
               <FileCheck className="w-4 h-4 text-slate-400" />
             </div>
             <p className="text-3xl font-bold text-slate-900 tabular-nums">{countOf("APPROVED")}</p>
@@ -70,7 +71,7 @@ export default async function DocumentsPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>Rejeitados</CardTitle>
+              <CardTitle as="p">Rejeitados</CardTitle>
               <FileX className="w-4 h-4 text-slate-400" />
             </div>
             <p className="text-3xl font-bold text-slate-900 tabular-nums">{countOf("REJECTED")}</p>
@@ -81,8 +82,8 @@ export default async function DocumentsPage() {
       {/* Pendentes */}
       <Card>
         <CardHeader>
-          <CardTitle className={`flex items-center gap-1.5 ${pending.length > 0 ? "text-amber-600" : ""}`}>
-            <FileQuestion className="w-3.5 h-3.5" />
+          <CardTitle as="h2" className={`flex items-center gap-1.5 ${pending.length > 0 ? "text-amber-600" : ""}`}>
+            <FileQuestion className="w-3.5 h-3.5" aria-hidden />
             {pending.length > 0 ? `${pending.length} aguardando revisão` : "Nenhum documento pendente"}
           </CardTitle>
         </CardHeader>
@@ -129,13 +130,13 @@ export default async function DocumentsPage() {
                           "use server";
                           await reviewDocumentAction({ documentId: doc.id, leadId: doc.leadId, status: "APPROVED" });
                         }}>
-                          <button
-                            type="submit"
+                          <ConfirmButton
+                            message={`Aprovar documento "${doc.requirement.name}" de ${doc.lead.fullName ?? doc.lead.phoneE164}?`}
                             className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
                           >
-                            <FileCheck className="w-3 h-3" />
+                            <FileCheck className="w-3 h-3" aria-hidden />
                             Aprovar
-                          </button>
+                          </ConfirmButton>
                         </form>
                         <RejectDocumentInlineForm documentId={doc.id} leadId={doc.leadId} />
                         <Link
@@ -159,7 +160,7 @@ export default async function DocumentsPage() {
       {recentReviewed.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Revisados recentemente</CardTitle>
+            <CardTitle as="h2">Revisados recentemente</CardTitle>
           </CardHeader>
           <CardContent className="px-0 pb-0">
             <table className="w-full text-sm">

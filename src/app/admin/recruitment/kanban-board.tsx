@@ -13,6 +13,30 @@ export interface KanbanColumnData { status: RecruitmentStatus; label: string; le
 
 function Column({ column }: { column: KanbanColumnData }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.status });
+  const isEmpty = column.leads.length === 0;
+
+  if (isEmpty) {
+    return (
+      <section
+        ref={setNodeRef}
+        data-testid={`column-${column.status}`}
+        title={column.label}
+        className={cn(
+          "flex flex-col items-center min-w-[44px] w-[44px] shrink-0 rounded-lg bg-slate-50 border border-slate-200 py-3 px-1 gap-2 cursor-default",
+          isOver && "bg-blue-50 border-blue-300"
+        )}
+      >
+        <span className="text-[10px] font-bold text-slate-300 tabular-nums">0</span>
+        <span
+          className="text-[9px] font-semibold text-slate-300 uppercase tracking-wide leading-tight select-none"
+          style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+        >
+          {column.label}
+        </span>
+      </section>
+    );
+  }
+
   return (
     <section
       ref={setNodeRef}
@@ -27,11 +51,9 @@ function Column({ column }: { column: KanbanColumnData }) {
           <h2 className="text-xs font-semibold text-slate-600 uppercase tracking-wide leading-tight truncate">
             {column.label}
           </h2>
-          {column.leads.length > 0 && (
-            <span className="text-xs font-bold text-slate-400 tabular-nums shrink-0">
-              {column.leads.length}
-            </span>
-          )}
+          <span className="text-xs font-bold text-slate-400 tabular-nums shrink-0">
+            {column.leads.length}
+          </span>
         </div>
       </header>
 
@@ -39,9 +61,6 @@ function Column({ column }: { column: KanbanColumnData }) {
         {column.leads.map((lead) => (
           <LeadCard key={lead.id} lead={lead} />
         ))}
-        {column.leads.length === 0 && (
-          <p className="text-center text-xs text-slate-300 py-4">Vazio</p>
-        )}
       </div>
     </section>
   );

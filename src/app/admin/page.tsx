@@ -9,6 +9,15 @@ import {
   CheckCircle2,
   Clock,
   XCircle,
+  Star,
+  FileText,
+  BookOpen,
+  Beaker,
+  ShieldCheck,
+  UserCheck,
+  ThumbsUp,
+  Mic,
+  Filter,
 } from "lucide-react";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { Card, CardHeader, CardTitle, CardValue, CardContent } from "@/components/ui/card";
@@ -97,7 +106,7 @@ export default async function AdminHomePage() {
               className="flex items-center gap-2 text-sm text-amber-700 hover:text-amber-900 hover:underline"
             >
               <XCircle className="w-3.5 h-3.5" />
-              {outboxDeadLetter} mensagem{outboxDeadLetter > 1 ? "s" : ""} em dead letter — clique para gerenciar
+              {outboxDeadLetter} mensagem{outboxDeadLetter > 1 ? "s com falha permanente" : " com falha permanente"} — clique para gerenciar
             </Link>
           )}
         </div>
@@ -251,18 +260,18 @@ export default async function AdminHomePage() {
 
 const FUNNEL_STAGES = [
   { status: "LEAD", label: "Novos leads", icon: TrendingUp },
-  { status: "PRE_CADASTRO", label: "Pré-cadastro", icon: Clock },
+  { status: "PRE_CADASTRO", label: "Pré-cadastro", icon: Filter },
   { status: "TRIAGEM", label: "Triagem", icon: Clock },
   { status: "CONVERSA_PENDENTE", label: "Conversa pendente", icon: MessageSquare },
-  { status: "ENTREVISTA", label: "Entrevista", icon: Users },
+  { status: "ENTREVISTA", label: "Entrevista", icon: Mic },
   { status: "REFERENCIA", label: "Referência", icon: Users },
-  { status: "PRE_APROVADA", label: "Pré-aprovada", icon: CheckCircle2 },
-  { status: "DOCUMENTACAO", label: "Documentação", icon: Clock },
-  { status: "ONBOARDING", label: "Onboarding", icon: Clock },
-  { status: "TESTE_OPERACIONAL", label: "Teste operacional", icon: Clock },
-  { status: "EM_VALIDACAO", label: "Em validação", icon: Clock },
+  { status: "PRE_APROVADA", label: "Pré-aprovada", icon: ThumbsUp },
+  { status: "DOCUMENTACAO", label: "Documentação", icon: FileText },
+  { status: "ONBOARDING", label: "Onboarding", icon: BookOpen },
+  { status: "TESTE_OPERACIONAL", label: "Teste operacional", icon: Beaker },
+  { status: "EM_VALIDACAO", label: "Em validação", icon: ShieldCheck },
   { status: "ATIVA", label: "Ativas", icon: CheckCircle2 },
-  { status: "PREFERENCIAL", label: "Preferenciais", icon: CheckCircle2 },
+  { status: "PREFERENCIAL", label: "Preferenciais", icon: Star },
 ] as const;
 
 const BOOKING_STAGES = [
