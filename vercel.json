@@ -1,5 +1,0 @@
-{
-  "crons": [
-    { "path": "/api/cron/recruitment/reengage", "schedule": "0 0 * * *" }
-  ]
-}
