@@ -30,49 +30,85 @@ export default async function CustomerConversationsPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50">
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Cliente</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Etapa</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Última atividade</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Ação</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {conversations.map((conversation) => (
-                <tr key={conversation.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3">
+        <>
+          {/* Desktop table */}
+          <div className="hidden md:block rounded-lg border border-slate-200 bg-white overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50">
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Cliente</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Etapa</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Última atividade</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Ação</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {conversations.map((conversation) => (
+                  <tr key={conversation.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3">
+                      <Link
+                        href={`/admin/customer-conversations/${conversation.id}`}
+                        className="font-semibold text-slate-900 hover:text-blue-700 leading-tight"
+                      >
+                        {conversation.customer.fullName}
+                      </Link>
+                      <p className="text-xs text-slate-500 mt-0.5">{conversation.customer.phoneE164}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge variant="secondary">{conversation.state}</Badge>
+                    </td>
+                    <td className="px-4 py-3 hidden md:table-cell">
+                      <span className="flex items-center gap-1.5 text-xs text-slate-500">
+                        <Clock className="w-3 h-3 shrink-0" />
+                        {conversation.updatedAt.toLocaleString("pt-BR", {
+                          timeZone: "America/Fortaleza",
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        })}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <CustomerConversationMessageForm conversationId={conversation.id} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile cards */}
+          <div className="md:hidden space-y-3">
+            {conversations.map((conversation) => (
+              <div key={conversation.id} className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
                     <Link
                       href={`/admin/customer-conversations/${conversation.id}`}
-                      className="font-semibold text-slate-900 hover:text-blue-700 leading-tight"
+                      className="font-semibold text-slate-900 hover:text-blue-700 leading-tight block truncate"
                     >
                       {conversation.customer.fullName}
                     </Link>
                     <p className="text-xs text-slate-500 mt-0.5">{conversation.customer.phoneE164}</p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge variant="secondary">{conversation.state}</Badge>
-                  </td>
-                  <td className="px-4 py-3 hidden md:table-cell">
-                    <span className="flex items-center gap-1.5 text-xs text-slate-500">
-                      <Clock className="w-3 h-3 shrink-0" />
-                      {conversation.updatedAt.toLocaleString("pt-BR", {
-                        timeZone: "America/Fortaleza",
-                        dateStyle: "short",
-                        timeStyle: "short",
-                      })}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <CustomerConversationMessageForm conversationId={conversation.id} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  </div>
+                  <Badge variant="secondary">{conversation.state}</Badge>
+                </div>
+
+                <span className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <Clock className="w-3 h-3 shrink-0" />
+                  {conversation.updatedAt.toLocaleString("pt-BR", {
+                    timeZone: "America/Fortaleza",
+                    dateStyle: "short",
+                    timeStyle: "short",
+                  })}
+                </span>
+
+                <div className="pt-1 border-t border-slate-100">
+                  <CustomerConversationMessageForm conversationId={conversation.id} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
