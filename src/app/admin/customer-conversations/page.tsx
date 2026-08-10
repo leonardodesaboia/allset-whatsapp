@@ -1,5 +1,9 @@
+import Link from "next/link";
+import { MessageSquare, Clock } from "lucide-react";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { CustomerConversationMessageForm } from "./customer-conversation-message-form";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 
 export default async function CustomerConversationsPage() {
   const conversations = await prisma.customerBookingConversation.findMany({
@@ -8,17 +12,68 @@ export default async function CustomerConversationsPage() {
     include: { customer: { select: { fullName: true, phoneE164: true } } },
     take: 100,
   });
-  return <section>
-    <h1>Conversas de clientes</h1>
-    <p>Converse manualmente ou pause a automação antes da criação do pedido.</p>
-    {conversations.length === 0 ? <p>Nenhuma conversa sem pedido em andamento.</p> : <table>
-      <thead><tr><th>Cliente</th><th>Etapa</th><th>Última atividade</th><th>Ação</th></tr></thead>
-      <tbody>{conversations.map((conversation) => <tr key={conversation.id}>
-        <td>{conversation.customer.fullName}<br />{conversation.customer.phoneE164}</td>
-        <td>{conversation.state}</td>
-        <td>{conversation.updatedAt.toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })}</td>
-        <td><CustomerConversationMessageForm conversationId={conversation.id} /></td>
-      </tr>)}</tbody>
-    </table>}
-  </section>;
+
+  return (
+    <div className="p-6 space-y-5">
+      <div>
+        <h1 className="text-xl font-bold text-slate-900">Conversas de clientes</h1>
+        <p className="text-sm text-slate-500 mt-0.5">
+          Conversas sem pedido em andamento — converse manualmente ou pause a automação.
+        </p>
+      </div>
+
+      {conversations.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <MessageSquare className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+            <p className="text-sm text-slate-400">Nenhuma conversa em andamento.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50">
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Cliente</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Etapa</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Última atividade</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Ação</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {conversations.map((conversation) => (
+                <tr key={conversation.id} className="hover:bg-slate-50">
+                  <td className="px-4 py-3">
+                    <Link
+                      href={`/admin/customer-conversations/${conversation.id}`}
+                      className="font-semibold text-slate-900 hover:text-blue-700 leading-tight"
+                    >
+                      {conversation.customer.fullName}
+                    </Link>
+                    <p className="text-xs text-slate-500 mt-0.5">{conversation.customer.phoneE164}</p>
+                  </td>
+                  <td className="px-4 py-3">
+                    <Badge variant="secondary">{conversation.state}</Badge>
+                  </td>
+                  <td className="px-4 py-3 hidden md:table-cell">
+                    <span className="flex items-center gap-1.5 text-xs text-slate-500">
+                      <Clock className="w-3 h-3 shrink-0" />
+                      {conversation.updatedAt.toLocaleString("pt-BR", {
+                        timeZone: "America/Fortaleza",
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <CustomerConversationMessageForm conversationId={conversation.id} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 }
