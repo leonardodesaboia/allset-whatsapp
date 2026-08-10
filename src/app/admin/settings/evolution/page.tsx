@@ -178,7 +178,6 @@ export default async function EvolutionSettingsPage({
                   <div className="space-y-3">
                     <div className="border border-slate-200 rounded-lg p-3 inline-block bg-white">
                       {/* Evolution returns base64 PNG or a data-uri */}
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={qrResult.code.startsWith("data:") ? qrResult.code : `data:image/png;base64,${qrResult.code}`}
                         alt="QR Code para conectar ao WhatsApp"

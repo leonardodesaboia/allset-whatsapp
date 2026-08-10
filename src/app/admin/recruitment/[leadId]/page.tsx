@@ -21,7 +21,6 @@ import { LeadWorkflowActions } from "../lead-workflow-actions";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { SubmitButton, SubmitButtonRaw } from "@/components/ui/submit-button";
 import { ConversationPanel } from "../conversation-panel";

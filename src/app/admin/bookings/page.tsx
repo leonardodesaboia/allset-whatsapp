@@ -5,7 +5,7 @@ import { dispatchOpportunityAction, resumeCustomerAutomationAction, validateBook
 import { CustomerMessageForm } from "./customer-message-form";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardContent } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 
 const formatDateTime = (date: Date) =>
   new Intl.DateTimeFormat("pt-BR", {

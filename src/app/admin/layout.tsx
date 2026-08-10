@@ -1,31 +1,13 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import type { ReactNode } from "react";
-import {
-  LayoutDashboard,
-  Calendar,
-  Users,
-  MessageSquare,
-  Settings,
-  Sparkles,
-} from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { auth } from "@/infrastructure/auth/auth";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { NavLinkClient } from "./nav-link-client";
 import { SignOutButton } from "./sign-out-button";
 
 export const dynamic = "force-dynamic";
-
-const NAV_ITEMS = [
-  { href: "/admin", label: "Painel", icon: "LayoutDashboard", exact: true },
-  { href: "/admin/bookings", label: "Agendamentos", icon: "Calendar" },
-  { href: "/admin/recruitment", label: "Profissionais", icon: "Users" },
-  { href: "/admin/customer-conversations", label: "Conversas", icon: "MessageSquare" },
-  { href: "/admin/documents", label: "Documentos", icon: "FileCheck" },
-  { href: "/admin/outbox", label: "Fila de saída", icon: "Send" },
-  { href: "/admin/settings/pricing", label: "Preços", icon: "Settings" },
-  { href: "/admin/settings/evolution", label: "Evolution", icon: "Wifi" },
-] as const;
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const session = await auth.api.getSession({ headers: await headers() });

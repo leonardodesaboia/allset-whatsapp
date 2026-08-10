@@ -14,7 +14,6 @@ import {
   BookOpen,
   Beaker,
   ShieldCheck,
-  UserCheck,
   ThumbsUp,
   Mic,
   Filter,
@@ -232,7 +231,7 @@ export default async function AdminHomePage() {
           <CardContent className="pt-3 px-0 pb-0">
             <table className="w-full">
               <tbody>
-                {BOOKING_STAGES.map(({ status, label }) => {
+                {BOOKING_STAGES.map(({ status }) => {
                   const count = bookingCount(status);
                   return (
                     <tr key={status} className="border-t border-slate-100 first:border-0">

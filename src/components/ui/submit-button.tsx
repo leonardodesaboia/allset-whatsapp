@@ -2,7 +2,7 @@
 
 import { useFormStatus } from "react-dom";
 import { Loader2 } from "lucide-react";
-import { Button, buttonVariants, type ButtonProps } from "./button";
+import { Button, type ButtonProps } from "./button";
 import { cn } from "@/lib/utils";
 
 /** Drop-in replacement for `<Button type="submit">` with built-in useFormStatus loading state. */

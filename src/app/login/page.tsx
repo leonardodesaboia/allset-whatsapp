@@ -4,8 +4,6 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Sparkles, Mail, Lock, AlertCircle } from "lucide-react";
 import { createAuthClient } from "better-auth/react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 
 const authClient = createAuthClient();
 
