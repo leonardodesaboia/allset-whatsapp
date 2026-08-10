@@ -1,0 +1,12 @@
+.git
+.next
+node_modules
+.env*
+!.env.example
+*.md
+docs
+tests
+playwright.config.ts
+vitest.config.ts
+vitest.setup.ts
+docker-compose.yml
