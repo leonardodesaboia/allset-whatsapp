@@ -70,6 +70,9 @@
     "typescript-eslint": "^8.66.0",
     "vitest": "^4.1.10"
   },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
   "pnpm": {
     "onlyBuiltDependencies": [
       "@prisma/client",
