@@ -29,15 +29,11 @@ export async function startContactIntentConversation(
         data: { processedAt: new Date() },
       });
     }
-    const existing = await tx.contactIntentConversation.findUnique({ where: { phoneE164: input.phoneE164 } });
-    const conversation = existing
-      ? await tx.contactIntentConversation.update({
-          where: { id: existing.id },
-          data: { lastInboundAt: new Date() },
-        })
-      : await tx.contactIntentConversation.create({
-          data: { phoneE164: input.phoneE164, provider: input.provider, lastInboundAt: new Date() },
-        });
+    const conversation = await tx.contactIntentConversation.upsert({
+      where: { phoneE164: input.phoneE164 },
+      create: { phoneE164: input.phoneE164, provider: input.provider, lastInboundAt: new Date() },
+      update: { lastInboundAt: new Date() },
+    });
 
     if (conversation.state === "CHOOSING_INTENT") await enqueueIntentPrompt(tx, conversation);
     return conversation;

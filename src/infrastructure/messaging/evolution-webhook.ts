@@ -8,6 +8,7 @@ export function normalizeEvolutionWebhook(body: unknown): { externalId: string; 
   if (!data) return null;
   const key = data.key;
   if (!key?.id || !key.remoteJid || key.fromMe) return null;
+  if (key.remoteJid.endsWith("@g.us")) return null;
   const rawPhone = key.remoteJid.replace(/@.+$/, "");
   // Grupos e identificadores internos não podem criar leads. Persistimos o
   // telefone canônico para não duplicar o cadastro manual (que usa E.164).
