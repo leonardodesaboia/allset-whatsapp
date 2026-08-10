@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { createAuthClient } from "better-auth/react";
+import { LogOut } from "lucide-react";
 
 const authClient = createAuthClient();
 
@@ -10,10 +11,7 @@ const authClient = createAuthClient();
  *
  * Desvio deliberado do form HTML puro sugerido no brief: o endpoint
  * `/api/auth/sign-out` do Better Auth responde com JSON (`{ success: true }`)
- * e não redireciona (ver `node_modules/better-auth/dist/api/routes/sign-out.mjs`),
- * então um `<form method="post">` navegaria o browser para a resposta JSON
- * do endpoint em vez de voltar para `/login`. Usamos o mesmo padrão de
- * client component já estabelecido em `src/app/login/page.tsx` (Task 8).
+ * e não redireciona, então usamos o client SDK para fazer logout e redirecionar.
  */
 export function SignOutButton() {
   const router = useRouter();
@@ -24,8 +22,13 @@ export function SignOutButton() {
   }
 
   return (
-    <button type="button" onClick={handleSignOut}>
-      Sair
+    <button
+      type="button"
+      onClick={handleSignOut}
+      className="text-slate-500 hover:text-white transition-colors"
+      title="Sair"
+    >
+      <LogOut className="w-3.5 h-3.5" />
     </button>
   );
 }
