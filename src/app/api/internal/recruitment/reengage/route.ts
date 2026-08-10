@@ -1,7 +1,7 @@
 import { reengageSilentConversations } from "@/application/recruitment/reengage-silent-conversations.usecase";
 import { env } from "@/env";
 import { prisma } from "@/infrastructure/db/prisma-client";
-import { isValidEvolutionWebhook } from "@/infrastructure/messaging/evolution-webhook";
+import { compareSecret } from "@/infrastructure/auth/compare-secret";
 import { logger } from "@/infrastructure/observability/logger";
 import { z } from "zod";
 
@@ -9,9 +9,9 @@ export const runtime = "nodejs";
 
 const bodySchema = z.object({ limit: z.number().int().min(1).max(100).optional() }).default({});
 
-/** Cron-only: reenvia a pergunta pendente para pré-cadastros silenciosos. */
+/** Worker-only: reenvia a pergunta pendente para pré-cadastros silenciosos. */
 export async function POST(request: Request) {
-  if (!isValidEvolutionWebhook(env.INTERNAL_JOB_SECRET, request.headers.get("x-allset-job-secret"))) {
+  if (!compareSecret(env.INTERNAL_JOB_SECRET, request.headers.get("x-allset-job-secret"))) {
     return Response.json({ ok: false, error: "UNAUTHORIZED" }, { status: 401 });
   }
   let body: z.infer<typeof bodySchema>;
