@@ -32,10 +32,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Prisma schema + migrations for `prisma migrate deploy` at startup
 COPY --from=builder /app/prisma ./prisma
 
-# Prisma CLI and engines (needed for migrate deploy)
-COPY --from=builder /app/node_modules/.bin/prisma /usr/local/bin/prisma
-COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+# Full node_modules for the Prisma CLI used by docker-entrypoint.sh at startup.
+# pnpm's node_modules/prisma and node_modules/@prisma/* are symlinks into
+# node_modules/.pnpm/<pkg>@<version>/..., so copying just those two folders
+# leaves dangling symlinks in the runner stage — the .pnpm store itself has
+# to come along too. Copying the whole tree is the simplest way to guarantee that.
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 
 COPY --chown=nextjs:nodejs docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
