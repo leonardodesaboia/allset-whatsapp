@@ -51,12 +51,13 @@ export default function LoginPage() {
           className="space-y-4"
         >
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-400 uppercase tracking-wide">
+            <label htmlFor="email" className="text-xs font-medium text-slate-400 uppercase tracking-wide">
               E-mail
             </label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
               <input
+                id="email"
                 type="email"
                 name="email"
                 autoComplete="username"
@@ -70,12 +71,13 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-400 uppercase tracking-wide">
+            <label htmlFor="password" className="text-xs font-medium text-slate-400 uppercase tracking-wide">
               Senha
             </label>
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
               <input
+                id="password"
                 type="password"
                 name="password"
                 autoComplete="current-password"
