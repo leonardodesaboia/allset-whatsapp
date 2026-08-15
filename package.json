@@ -71,7 +71,7 @@
     "vitest": "^4.1.10"
   },
   "prisma": {
-    "seed": "tsx prisma/seed.ts"
+    "seed": "node prisma/seed.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
