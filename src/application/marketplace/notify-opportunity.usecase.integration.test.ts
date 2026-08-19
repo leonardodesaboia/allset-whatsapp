@@ -5,7 +5,7 @@ import { notifyOpportunity } from "./notify-opportunity.usecase";
 
 describe("notifyOpportunity", () => {
   let prisma: PrismaClient;
-  let stop: () => Promise<void>;
+  let stop: () => Promise<void> = async () => {};
 
   beforeAll(async () => {
     const db = await startTestDatabase();
@@ -67,7 +67,7 @@ describe("notifyOpportunity", () => {
     const result = await notifyOpportunity(prisma, { bookingId: booking.id });
     expect(result.notified).toBe(2);
 
-    const opportunity = await prisma.serviceOpportunity.findUniqueOrThrow({
+    const opportunity = await prisma.serviceOpportunity.findFirstOrThrow({
       where: { bookingId: booking.id },
       include: { responses: true },
     });
@@ -83,14 +83,14 @@ describe("notifyOpportunity", () => {
     expect(updatedBooking.status).toBe("MATCHING");
   });
 
-  it("retorna notified=0 quando nenhum profissional elegível existe", async () => {
+  it("não cria oportunidade nem coloca o booking em matching quando não há profissional elegível", async () => {
     // domingo — nenhum profissional com domingo na disponibilidade
     const booking = await seedBooking({ scheduledAt: new Date("2026-08-09T13:00:00.000Z") });
     const result = await notifyOpportunity(prisma, { bookingId: booking.id });
     expect(result.notified).toBe(0);
-    const opportunity = await prisma.serviceOpportunity.findUniqueOrThrow({ where: { bookingId: booking.id } });
-    expect(opportunity.status).toBe("OPEN");
+    const opportunities = await prisma.serviceOpportunity.findMany({ where: { bookingId: booking.id } });
+    expect(opportunities).toHaveLength(0);
     const updatedBooking = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
-    expect(updatedBooking.status).toBe("MATCHING");
+    expect(updatedBooking.status).toBe("DRAFT");
   });
 });

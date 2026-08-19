@@ -79,6 +79,13 @@ describe("isEligibleForOpportunity", () => {
     expect(isEligibleForOpportunity(baseLead, opportunity, [sameDay])).toBe(false);
   });
 
+  it("usa o dia civil de Fortaleza, não o dia UTC, para disponibilidade e conflito", () => {
+    const mondayFortalezaLate = new Date("2026-08-11T02:30:00.000Z"); // segunda, 23:30 em Fortaleza
+    const mondayFortalezaEarly = new Date("2026-08-10T03:30:00.000Z"); // segunda, 00:30 em Fortaleza
+    expect(isEligibleForOpportunity(baseLead, { ...opportunity, scheduledAt: mondayFortalezaLate }, [])).toBe(true);
+    expect(isEligibleForOpportunity(baseLead, { ...opportunity, scheduledAt: mondayFortalezaLate }, [mondayFortalezaEarly])).toBe(false);
+  });
+
   it("elegível: conflito em dia diferente não bloqueia", () => {
     const otherDay = new Date("2026-08-11T13:00:00.000Z");
     expect(isEligibleForOpportunity(baseLead, opportunity, [otherDay])).toBe(true);

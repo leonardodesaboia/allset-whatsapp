@@ -11,7 +11,7 @@ import type { BookingStatus } from "../../domain/booking/booking-status";
 export async function notifyOpportunity(
   prisma: PrismaClient,
   input: { bookingId: string; now?: Date; actor?: string },
-): Promise<{ notified: number }> {
+): Promise<{ notified: number; dispatched: boolean }> {
   const now = input.now ?? new Date();
   const actor = input.actor ?? "system:marketplace";
   const expiresAt = new Date(now.getTime() + env.OPPORTUNITY_EXPIRY_HOURS * 60 * 60 * 1000);
@@ -51,6 +51,33 @@ export async function notifyOpportunity(
       return isEligibleForOpportunity(lead, opportunityInfo, acceptedSlotDates);
     });
 
+    // A booking in MATCHING without a recipient is operationally invisible: no
+    // professional can accept it and the admin has no reliable recovery path.
+    // Keep the booking in its current state until there is at least one real
+    // candidate to notify.
+    if (eligible.length === 0) {
+      await recordAuditLog(tx, {
+        actor,
+        action: "OPPORTUNITY_NOT_DISPATCHED",
+        entityType: "Booking",
+        entityId: booking.id,
+        metadata: { reason: "NO_ELIGIBLE_CANDIDATES" },
+      });
+      return { notified: 0, dispatched: false };
+    }
+
+    const transition = transitionBookingStatus(booking.status as BookingStatus, "MATCHING");
+    if (!transition.ok) throw new Error(transition.error.message);
+
+    // Claim the status before creating the opportunity. The compare-and-set
+    // makes two simultaneous admin retries harmless: only one transaction can
+    // enter MATCHING and create an open opportunity.
+    const updated = await tx.booking.updateMany({
+      where: { id: booking.id, status: booking.status },
+      data: { status: "MATCHING", version: { increment: 1 } },
+    });
+    if (!updated.count) throw new Error("Booking alterado concorrentemente");
+
     const opportunity = await tx.serviceOpportunity.create({
       data: {
         bookingId: booking.id,
@@ -86,15 +113,6 @@ export async function notifyOpportunity(
       });
     }
 
-    const transition = transitionBookingStatus(booking.status as BookingStatus, "MATCHING");
-    if (!transition.ok) throw new Error(transition.error.message);
-
-    const updated = await tx.booking.updateMany({
-      where: { id: booking.id, status: booking.status },
-      data: { status: "MATCHING", version: { increment: 1 } },
-    });
-    if (!updated.count) throw new Error("Booking alterado concorrentemente");
-
     await tx.bookingStatusHistory.create({
       data: {
         bookingId: booking.id,
@@ -112,6 +130,6 @@ export async function notifyOpportunity(
       metadata: { bookingId: booking.id, eligible: eligible.length },
     });
 
-    return { notified: eligible.length };
+    return { notified: eligible.length, dispatched: true };
   });
 }

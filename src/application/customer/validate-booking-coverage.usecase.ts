@@ -39,6 +39,13 @@ export async function validateCustomerBookingCoverage(
     }
 
     if (!input.isCovered) {
+      const transition = await transitionBookingStatusInTransaction(tx, {
+        bookingId: booking.id,
+        targetStatus: "CANCELLED",
+        actor: input.actor,
+        reason: "Endereço fora da área de cobertura",
+      });
+      if (!transition.ok) throw transition.error;
       const conversation = await tx.customerBookingConversation.update({
         where: { id: booking.customerConversation.id },
         data: { state: "COMPLETED", lastQuestionKey: "COMPLETED", automationPausedAt: new Date(), version: { increment: 1 } },

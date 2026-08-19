@@ -28,10 +28,18 @@ export async function expireOpportunities(
         data: { response: "EXPIRED", respondedAt: now },
       });
 
-      const movedBooking = await tx.booking.updateMany({
-        where: { id: candidate.bookingId, status: "MATCHING" },
-        data: { status: "REVIEW_REQUIRED", version: { increment: 1 } },
+      // A booking can have historical expired opportunities after a recovery.
+      // Only escalate it to manual review when this expiry leaves no other open
+      // offer that a professional can still accept.
+      const openOpportunities = await tx.serviceOpportunity.count({
+        where: { bookingId: candidate.bookingId, status: "OPEN" },
       });
+      const movedBooking = openOpportunities === 0
+        ? await tx.booking.updateMany({
+            where: { id: candidate.bookingId, status: "MATCHING" },
+            data: { status: "REVIEW_REQUIRED", version: { increment: 1 } },
+          })
+        : { count: 0 };
       // The booking may already have advanced through a concurrent operation;
       // never fabricate a status-history entry in that case.
       if (movedBooking.count) {

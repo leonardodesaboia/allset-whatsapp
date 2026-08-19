@@ -43,12 +43,27 @@ function parseDays(raw: unknown): Set<number> | null {
   return days.size > 0 ? days : null;
 }
 
-function sameUTCDay(a: Date, b: Date): boolean {
-  return (
-    a.getUTCFullYear() === b.getUTCFullYear() &&
-    a.getUTCMonth() === b.getUTCMonth() &&
-    a.getUTCDate() === b.getUTCDate()
-  );
+const FORTALEZA_TIME_ZONE = "America/Fortaleza";
+const weekdayByShortName: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+const fortalezaParts = new Intl.DateTimeFormat("en-US", {
+  timeZone: FORTALEZA_TIME_ZONE,
+  weekday: "short",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+function fortalezaDate(date: Date): { weekday: number; year: string; month: string; day: string } {
+  const parts = Object.fromEntries(fortalezaParts.formatToParts(date).map((part) => [part.type, part.value]));
+  const weekday = weekdayByShortName[parts.weekday ?? ""];
+  if (weekday === undefined || !parts.year || !parts.month || !parts.day) throw new Error("Data inválida para matching");
+  return { weekday, year: parts.year, month: parts.month, day: parts.day };
+}
+
+function sameFortalezaDay(a: Date, b: Date): boolean {
+  const left = fortalezaDate(a);
+  const right = fortalezaDate(b);
+  return left.year === right.year && left.month === right.month && left.day === right.day;
 }
 
 export interface OpportunityInfo {
@@ -78,10 +93,10 @@ export function isEligibleForOpportunity(
   if (area === "TALVEZ" && lead.neighborhood !== opportunity.neighborhood) return false;
 
   const days = parseDays(lead.availabilityDays);
-  if (days !== null && !days.has(opportunity.scheduledAt.getUTCDay())) return false;
+  if (days !== null && !days.has(fortalezaDate(opportunity.scheduledAt).weekday)) return false;
 
   for (const slot of acceptedSlotDates) {
-    if (sameUTCDay(slot, opportunity.scheduledAt)) return false;
+    if (sameFortalezaDay(slot, opportunity.scheduledAt)) return false;
   }
 
   return true;
