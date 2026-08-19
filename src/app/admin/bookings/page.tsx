@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { Plus, Clock, CheckCircle2, ArrowRight } from "lucide-react";
 import { prisma } from "@/infrastructure/db/prisma-client";
-import { dispatchOpportunityAction, resumeCustomerAutomationAction, validateBookingCoverageAction } from "./actions";
+import { confirmManualPaymentAction, dispatchOpportunityAction, resumeCustomerAutomationAction, validateBookingCoverageAction } from "./actions";
 import { CustomerMessageForm } from "./customer-message-form";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ActionFeedbackForm } from "@/components/ui/action-feedback-form";
+import { ConfirmButton } from "@/components/ui/confirm-button";
 
 const formatDateTime = (date: Date) =>
   new Intl.DateTimeFormat("pt-BR", {
@@ -88,45 +90,53 @@ export default async function BookingsPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1.5">
-                          {booking.status === "DRAFT" && (
-                            <form action={async () => {
+                          {(booking.status === "DRAFT" || booking.status === "PAID" || (booking.status === "REVIEW_REQUIRED" && opportunity?.status === "EXPIRED")) && (
+                            <ActionFeedbackForm action={async () => {
                               "use server";
-                              await dispatchOpportunityAction(booking.id);
+                              return dispatchOpportunityAction(booking.id);
                             }}>
                               <button
                                 type="submit"
                                 className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900"
                               >
                                 <ArrowRight className="w-3 h-3" />
-                                Enviar para matching
+                                {opportunity?.status === "EXPIRED" ? "Reenviar para matching" : "Enviar para matching"}
                               </button>
-                            </form>
+                            </ActionFeedbackForm>
+                          )}
+
+                          {booking.status === "AWAITING_PAYMENT" && (
+                            <ActionFeedbackForm action={async () => { "use server"; return confirmManualPaymentAction(booking.id); }}>
+                              <ConfirmButton message="Confirmar o pagamento manual? Esta ação registra o pedido como pago e inicia o matching." className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900">
+                                <CheckCircle2 className="w-3 h-3" /> Confirmar pagamento manual
+                              </ConfirmButton>
+                            </ActionFeedbackForm>
                           )}
 
                           {booking.status === "REVIEW_REQUIRED" && booking.customerConversation && booking.addressLine1 && (
                             <div className="space-y-1">
                               <p className="text-xs text-slate-600">{booking.addressLine1}</p>
                               <div className="flex gap-2 flex-wrap">
-                                <form action={async () => { "use server"; await validateBookingCoverageAction(booking.id, true); }}>
+                                <ActionFeedbackForm action={async () => { "use server"; return validateBookingCoverageAction(booking.id, true); }}>
                                   <button type="submit" className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900">
                                     <CheckCircle2 className="w-3 h-3" /> Atendido
                                   </button>
-                                </form>
-                                <form action={async () => { "use server"; await validateBookingCoverageAction(booking.id, false); }}>
+                                </ActionFeedbackForm>
+                                <ActionFeedbackForm action={async () => { "use server"; return validateBookingCoverageAction(booking.id, false); }}>
                                   <button type="submit" className="text-xs font-medium text-amber-700 hover:text-amber-900">
                                     Lista de espera
                                   </button>
-                                </form>
+                                </ActionFeedbackForm>
                               </div>
                             </div>
                           )}
 
                           {booking.customerConversation?.state === "PAUSED" && (
-                            <form action={async () => { "use server"; await resumeCustomerAutomationAction(booking.id); }}>
+                            <ActionFeedbackForm action={async () => { "use server"; return resumeCustomerAutomationAction(booking.id); }}>
                               <button type="submit" className="text-xs font-medium text-slate-600 hover:text-slate-900">
                                 Retomar automação
                               </button>
-                            </form>
+                            </ActionFeedbackForm>
                           )}
 
                           {opportunity && (
@@ -179,45 +189,53 @@ export default async function BookingsPage() {
                   </div>
 
                   <div className="flex flex-col gap-2 pt-1 border-t border-slate-100">
-                    {booking.status === "DRAFT" && (
-                      <form action={async () => {
+                    {(booking.status === "DRAFT" || booking.status === "PAID" || (booking.status === "REVIEW_REQUIRED" && opportunity?.status === "EXPIRED")) && (
+                      <ActionFeedbackForm action={async () => {
                         "use server";
-                        await dispatchOpportunityAction(booking.id);
+                        return dispatchOpportunityAction(booking.id);
                       }}>
                         <button
                           type="submit"
                           className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900"
                         >
                           <ArrowRight className="w-3 h-3" />
-                          Enviar para matching
+                          {opportunity?.status === "EXPIRED" ? "Reenviar para matching" : "Enviar para matching"}
                         </button>
-                      </form>
+                      </ActionFeedbackForm>
+                    )}
+
+                    {booking.status === "AWAITING_PAYMENT" && (
+                      <ActionFeedbackForm action={async () => { "use server"; return confirmManualPaymentAction(booking.id); }}>
+                        <ConfirmButton message="Confirmar o pagamento manual? Esta ação registra o pedido como pago e inicia o matching." className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900">
+                          <CheckCircle2 className="w-3 h-3" /> Confirmar pagamento manual
+                        </ConfirmButton>
+                      </ActionFeedbackForm>
                     )}
 
                     {booking.status === "REVIEW_REQUIRED" && booking.customerConversation && booking.addressLine1 && (
                       <div className="space-y-1">
                         <p className="text-xs text-slate-600">{booking.addressLine1}</p>
                         <div className="flex gap-3 flex-wrap">
-                          <form action={async () => { "use server"; await validateBookingCoverageAction(booking.id, true); }}>
+                          <ActionFeedbackForm action={async () => { "use server"; return validateBookingCoverageAction(booking.id, true); }}>
                             <button type="submit" className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900">
                               <CheckCircle2 className="w-3 h-3" /> Atendido
                             </button>
-                          </form>
-                          <form action={async () => { "use server"; await validateBookingCoverageAction(booking.id, false); }}>
+                          </ActionFeedbackForm>
+                          <ActionFeedbackForm action={async () => { "use server"; return validateBookingCoverageAction(booking.id, false); }}>
                             <button type="submit" className="text-xs font-medium text-amber-700 hover:text-amber-900">
                               Lista de espera
                             </button>
-                          </form>
+                          </ActionFeedbackForm>
                         </div>
                       </div>
                     )}
 
                     {booking.customerConversation?.state === "PAUSED" && (
-                      <form action={async () => { "use server"; await resumeCustomerAutomationAction(booking.id); }}>
+                      <ActionFeedbackForm action={async () => { "use server"; return resumeCustomerAutomationAction(booking.id); }}>
                         <button type="submit" className="text-xs font-medium text-slate-600 hover:text-slate-900">
                           Retomar automação
                         </button>
-                      </form>
+                      </ActionFeedbackForm>
                     )}
 
                     {opportunity && (

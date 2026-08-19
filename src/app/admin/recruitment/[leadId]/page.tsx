@@ -23,15 +23,19 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { SubmitButton, SubmitButtonRaw } from "@/components/ui/submit-button";
+import { ActionFeedbackForm } from "@/components/ui/action-feedback-form";
 import { ConversationPanel } from "../conversation-panel";
 import type { ConversationMessage } from "../conversation-panel";
 import {
   reviewDocumentAction,
   completeOnboardingContentAction,
   startOperationalTestAction,
+  recordOperationalTestEventAction,
   decideOperationalTestAction,
   recordValidationServiceAction,
   decideValidationAction,
+  resumeRecruitmentConversationAction,
+  confirmTermsAcceptanceAction,
 } from "../actions";
 
 const PIPELINE_ORDER = [
@@ -55,10 +59,16 @@ const REFERENCE_LABELS: Record<string, string> = {
   NEGATIVE: "Negativa",
 };
 
+const WOULD_HIRE_AGAIN_LABELS: Record<string, string> = {
+  YES: "Sim",
+  NO: "Não",
+  UNSURE: "Não sabe",
+};
+
 export default async function LeadProfilePage({ params }: { params: Promise<{ leadId: string }> }) {
   const { leadId } = await params;
 
-  const [lead, requirements, onboardingContents, validationPolicy] = await Promise.all([
+  const [lead, requirements, onboardingContents, validationPolicy, activeTerms] = await Promise.all([
     prisma.recruitmentLead.findUnique({
       where: { id: leadId },
       include: {
@@ -68,6 +78,7 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
         assessments: { orderBy: { createdAt: "desc" } },
         references: { include: { verifications: { orderBy: { createdAt: "desc" } } }, orderBy: { createdAt: "desc" } },
         documents: { include: { requirement: true, reviews: { orderBy: { createdAt: "desc" }, take: 1 } }, orderBy: { receivedAt: "desc" } },
+        termsAcceptances: true,
         onboardingProgress: { include: { content: true } },
         operationalTests: { include: { events: { orderBy: { createdAt: "asc" } } }, orderBy: { createdAt: "desc" }, take: 1 },
         validationServices: { orderBy: { createdAt: "desc" } },
@@ -77,9 +88,11 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
     prisma.documentRequirement.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),
     prisma.onboardingContent.findMany({ where: { isActive: true }, orderBy: { position: "asc" } }),
     prisma.validationPolicy.findFirst({ where: { isActive: true }, orderBy: { createdAt: "desc" } }),
+    prisma.termsVersion.findMany({ where: { isActive: true }, orderBy: { createdAt: "desc" } }),
   ]);
 
   if (!lead) notFound();
+  const recruitmentConversation = await prisma.recruitmentConversation.findUnique({ where: { leadId } });
 
   const [inboundMessages, outboundMessages] = lead.phoneE164
     ? await Promise.all([
@@ -99,6 +112,8 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
   const openInterview = lead.interviews.find((i) => !i.endedAt);
   const latestReference = lead.references[0];
   const activeTest = lead.operationalTests[0];
+  const lastTestEvent = activeTest?.events.at(-1)?.type;
+  const nextTestEvent = lastTestEvent === "STARTED" ? "ACCEPTED" : lastTestEvent === "ACCEPTED" ? "EN_ROUTE" : lastTestEvent === "EN_ROUTE" ? "ARRIVED" : lastTestEvent === "ARRIVED" ? "COMPLETED" : null;
   const completedContentIds = new Set(lead.onboardingProgress.map((p) => p.contentId));
   const latestDecision = lead.validationDecisions[0];
   const overdue = lead.nextActionAt != null && lead.nextActionAt < new Date();
@@ -185,9 +200,31 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
         </div>
       )}
 
+      {recruitmentConversation && (recruitmentConversation.state === "PAUSED" || recruitmentConversation.state === "MANUAL_REVIEW") && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+          <p className="text-sm text-blue-900">
+            {recruitmentConversation.state === "MANUAL_REVIEW"
+              ? "A conversa precisa de revisão humana antes de continuar."
+              : "A automação de pré-cadastro está pausada."}
+          </p>
+          <ActionFeedbackForm
+            className="shrink-0"
+            action={async () => {
+              "use server";
+              return resumeRecruitmentConversationAction(leadId);
+            }}
+          >
+            <SubmitButtonRaw className="shrink-0 rounded border border-blue-200 bg-white px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100">
+              Retomar conversa
+            </SubmitButtonRaw>
+          </ActionFeedbackForm>
+        </div>
+      )}
+
       {/* Ações de recrutamento */}
       <LeadWorkflowActions
         leadId={lead.id}
+        status={lead.status}
         {...(openInterview ? { openInterviewId: openInterview.id } : {})}
         {...(latestReference ? { latestReferenceId: latestReference.id } : {})}
       />
@@ -285,7 +322,7 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
                       )}
                       {r.verifications[0]?.wouldHireAgain != null && (
                         <p className="text-xs text-slate-400 mt-0.5">
-                          Recontrataria: {r.verifications[0].wouldHireAgain ? "Sim" : "Não"}
+                          Recontrataria: {WOULD_HIRE_AGAIN_LABELS[r.verifications[0].wouldHireAgain]}
                         </p>
                       )}
                     </div>
@@ -344,9 +381,9 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
                           </Badge>
                           {doc.status === "RECEIVED" && (
                             <div className="flex gap-1">
-                              <form action={async () => {
+                              <ActionFeedbackForm action={async () => {
                                 "use server";
-                                await reviewDocumentAction({ documentId: doc.id, leadId, status: "APPROVED" });
+                                return reviewDocumentAction({ documentId: doc.id, leadId, status: "APPROVED" });
                               }}>
                                 <ConfirmButton
                                   message={`Aprovar "${req.name}"?`}
@@ -354,7 +391,7 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
                                 >
                                   <CheckCircle2 className="w-3 h-3" aria-hidden /> Aprovar
                                 </ConfirmButton>
-                              </form>
+                              </ActionFeedbackForm>
                               <RejectDocumentForm documentId={doc.id} leadId={leadId} reqName={req.name} />
                             </div>
                           )}
@@ -367,6 +404,32 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
                 })}
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {showDocuments && activeTerms.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle>Termos ativos</CardTitle></CardHeader>
+          <CardContent className="divide-y divide-slate-100">
+            {activeTerms.map((terms) => {
+              const accepted = lead.termsAcceptances.some((acceptance) => acceptance.termsVersionId === terms.id);
+              return (
+                <div key={terms.id} className="flex items-center gap-3 py-2.5 text-sm">
+                  <div className="flex-1"><p className="font-semibold text-slate-900">Versão {terms.version}</p></div>
+                  {accepted ? <Badge variant="success">Aceito</Badge> : (
+                    <ActionFeedbackForm action={async () => {
+                      "use server";
+                      return confirmTermsAcceptanceAction({ leadId, termsVersionId: terms.id });
+                    }}>
+                      <ConfirmButton message={`Confirmar que a profissional aceitou os termos ${terms.version}?`} className="rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100">
+                        Registrar aceite confirmado
+                      </ConfirmButton>
+                    </ActionFeedbackForm>
+                  )}
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}
@@ -405,9 +468,9 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
                         )}
                       </div>
                       {!done && (
-                        <form action={async () => {
+                        <ActionFeedbackForm action={async () => {
                           "use server";
-                          await completeOnboardingContentAction({ leadId, contentId: content.id });
+                          return completeOnboardingContentAction({ leadId, contentId: content.id });
                         }}>
                           <SubmitButtonRaw
                             className="shrink-0 inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200"
@@ -415,7 +478,7 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
                           >
                             <CheckCircle2 className="w-3 h-3" aria-hidden /> Concluído
                           </SubmitButtonRaw>
-                        </form>
+                        </ActionFeedbackForm>
                       )}
                     </div>
                   );
@@ -438,9 +501,12 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
           <CardContent>
             {!activeTest ? (
               lead.status === "TESTE_OPERACIONAL" ? (
-                <form action={async () => { "use server"; await startOperationalTestAction(leadId); }}>
+                <ActionFeedbackForm action={async () => {
+                  "use server";
+                  return startOperationalTestAction(leadId);
+                }}>
                   <SubmitButton variant="secondary" size="sm" pendingLabel="Iniciando…">Iniciar teste</SubmitButton>
-                </form>
+                </ActionFeedbackForm>
               ) : (
                 <p className="text-sm text-slate-400">Nenhum teste registrado.</p>
               )
@@ -469,15 +535,40 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
 
                 {!activeTest.result && (
                   <div className="flex flex-wrap gap-2">
-                    <form action={async () => { "use server"; await decideOperationalTestAction({ testId: activeTest.id, leadId, result: "PASSED" }); }}>
+                    {nextTestEvent && (
+                      <ActionFeedbackForm action={async () => {
+                        "use server";
+                        return recordOperationalTestEventAction({ testId: activeTest.id, leadId, type: nextTestEvent });
+                      }}>
+                        <SubmitButton variant="secondary" size="sm" pendingLabel="Salvando…">Registrar: {nextTestEvent}</SubmitButton>
+                      </ActionFeedbackForm>
+                    )}
+                    {lastTestEvent !== "COMPLETED" && (
+                      <ActionFeedbackForm action={async () => {
+                        "use server";
+                        return recordOperationalTestEventAction({ testId: activeTest.id, leadId, type: "HELP" });
+                      }}>
+                        <SubmitButton variant="outline" size="sm" pendingLabel="Salvando…">Registrar suporte</SubmitButton>
+                      </ActionFeedbackForm>
+                    )}
+                    <ActionFeedbackForm action={async () => {
+                      "use server";
+                      return decideOperationalTestAction({ testId: activeTest.id, leadId, result: "PASSED" });
+                    }}>
                       <SubmitButton variant="success" size="sm" pendingLabel="Salvando…">Aprovado</SubmitButton>
-                    </form>
-                    <form action={async () => { "use server"; await decideOperationalTestAction({ testId: activeTest.id, leadId, result: "PASSED_WITH_SUPPORT" }); }}>
+                    </ActionFeedbackForm>
+                    <ActionFeedbackForm action={async () => {
+                      "use server";
+                      return decideOperationalTestAction({ testId: activeTest.id, leadId, result: "PASSED_WITH_SUPPORT" });
+                    }}>
                       <SubmitButton variant="secondary" size="sm" pendingLabel="Salvando…">Aprovado c/ suporte</SubmitButton>
-                    </form>
-                    <form action={async () => { "use server"; await decideOperationalTestAction({ testId: activeTest.id, leadId, result: "FAILED" }); }}>
+                    </ActionFeedbackForm>
+                    <ActionFeedbackForm action={async () => {
+                      "use server";
+                      return decideOperationalTestAction({ testId: activeTest.id, leadId, result: "FAILED" });
+                    }}>
                       <SubmitButton variant="destructive" size="sm" pendingLabel="Salvando…">Reprovado</SubmitButton>
-                    </form>
+                    </ActionFeedbackForm>
                   </div>
                 )}
               </div>
@@ -596,12 +687,12 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
 
 function RejectDocumentForm({ documentId, leadId, reqName }: { documentId: string; leadId: string; reqName: string }) {
   return (
-    <form
+    <ActionFeedbackForm
       className="inline-flex items-center gap-1"
-      action={async (data: FormData) => {
+      action={async (data) => {
         "use server";
         const reason = data.get("reason") as string | null;
-        await reviewDocumentAction({ documentId, leadId, status: "REJECTED", ...(reason ? { reason } : {}) });
+        return reviewDocumentAction({ documentId, leadId, status: "REJECTED", ...(reason ? { reason } : {}) });
       }}
     >
       <label htmlFor={`reject-reason-${documentId}`} className="sr-only">
@@ -620,18 +711,18 @@ function RejectDocumentForm({ documentId, leadId, reqName }: { documentId: strin
       >
         <XCircle className="w-3 h-3" aria-hidden /> Rejeitar
       </SubmitButtonRaw>
-    </form>
+    </ActionFeedbackForm>
   );
 }
 
 function RecordValidationServiceForm({ leadId }: { leadId: string }) {
   return (
-    <form
+    <ActionFeedbackForm
       className="flex items-center gap-2 flex-wrap"
-      action={async (data: FormData) => {
+      action={async (data) => {
         "use server";
         const ratingRaw = data.get("rating") as string | null;
-        await recordValidationServiceAction({
+        return recordValidationServiceAction({
           leadId,
           externalServiceId: data.get("externalServiceId") as string,
           ...(ratingRaw ? { rating: Number(ratingRaw) } : {}),
@@ -660,26 +751,29 @@ function RecordValidationServiceForm({ leadId }: { leadId: string }) {
       <label className="flex items-center gap-1 text-sm text-slate-600">
         <input type="checkbox" name="wasOnTime" value="true" className="rounded" /> Pontual
       </label>
-      <label className="flex items-center gap-1 text-sm text-slate-600">
-        <input type="checkbox" name="hadIssue" value="true" className="rounded" /> Problema
-      </label>
+      <label htmlFor="val-had-issue" className="sr-only">Ocorrência</label>
+      <select id="val-had-issue" name="hadIssue" required defaultValue="" className="rounded border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+        <option value="" disabled>Ocorrência?</option>
+        <option value="false">Sem ocorrência</option>
+        <option value="true">Com ocorrência</option>
+      </select>
       <SubmitButtonRaw
         className="rounded px-2 py-1 text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200"
         pendingLabel="Salvando…"
       >
         Registrar serviço
       </SubmitButtonRaw>
-    </form>
+    </ActionFeedbackForm>
   );
 }
 
 function ValidationDecisionForm({ leadId }: { leadId: string }) {
   return (
-    <form
+    <ActionFeedbackForm
       className="flex items-center gap-2 flex-wrap"
-      action={async (data: FormData) => {
+      action={async (data) => {
         "use server";
-        await decideValidationAction({
+        return decideValidationAction({
           leadId,
           decision: data.get("decision") as "ATIVA" | "PAUSADA" | "REPROVADA" | "PREFERENCIAL",
           ...((((data.get("reason") as string | null) ?? "").trim()) ? { reason: (data.get("reason") as string).trim() } : {}),
@@ -712,6 +806,6 @@ function ValidationDecisionForm({ leadId }: { leadId: string }) {
       >
         Confirmar decisão
       </SubmitButtonRaw>
-    </form>
+    </ActionFeedbackForm>
   );
 }

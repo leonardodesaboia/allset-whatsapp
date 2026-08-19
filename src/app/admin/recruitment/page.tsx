@@ -58,7 +58,7 @@ export default async function RecruitmentPage({
   }
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="space-y-4 p-4 sm:p-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-xl font-bold text-slate-900">Profissionais</h1>
@@ -102,9 +102,9 @@ function LeadList({
                 {lead.fullName ?? <span className="text-slate-400 italic">(sem nome)</span>}
               </p>
               {lead.neighborhood && (
-                <p className="flex items-center gap-1 text-xs text-slate-500 mt-0.5">
+                <p className="flex min-w-0 items-center gap-1 text-xs text-slate-500 mt-0.5">
                   <MapPin className="w-3 h-3 shrink-0" />
-                  {lead.neighborhood}
+                  <span className="truncate">{lead.neighborhood}</span>
                 </p>
               )}
             </div>

@@ -18,17 +18,25 @@ export function PricingTierForm() {
     event.preventDefault();
     setSaving(true);
     setError(null);
-    const result = await createPricingTierAction({
-      label,
-      description,
-      priceCents: Math.round(Number(price) * 100),
-      durationMinutes: Number(duration),
-    });
-    setSaving(false);
-    if (!result.ok) return setError(result.error);
-    setLabel("");
-    setDescription("");
-    setPrice("");
+    try {
+      const result = await createPricingTierAction({
+        label,
+        description,
+        priceCents: Math.round(Number(price) * 100),
+        durationMinutes: Number(duration),
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setLabel("");
+      setDescription("");
+      setPrice("");
+    } catch {
+      setError("Não foi possível salvar a faixa de preço. Tente novamente.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (

@@ -1,5 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const e2ePort = Number(process.env.E2E_PORT ?? "3000");
+const e2eBaseUrl = `http://localhost:${e2ePort}`;
+
 /**
  * Configuração do Playwright para o E2E de login admin (Task 10).
  *
@@ -20,7 +23,7 @@ export default defineConfig({
   ...(process.env.CI ? { workers: 1 } : {}),
   reporter: "html",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: e2eBaseUrl,
     trace: "on-first-retry",
     // Nesta versão do Playwright (1.62), `screenshot` não aceita o literal
     // "on-first-retry" (só `trace`/`video` aceitam) — `ScreenshotMode` é
@@ -39,8 +42,8 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: "pnpm build && pnpm start",
-    url: "http://localhost:3000",
+    command: `pnpm build --webpack && mkdir -p .next/standalone/.next/static .next/standalone/public && cp -R .next/static/. .next/standalone/.next/static/ && cp -R public/. .next/standalone/public/ && BETTER_AUTH_URL=${e2eBaseUrl} PORT=${e2ePort} node .next/standalone/server.js`,
+    url: e2eBaseUrl,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
   },

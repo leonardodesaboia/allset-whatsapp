@@ -40,14 +40,22 @@ export function BookingForm({ services }: { services: { id: string; name: string
     event.preventDefault();
     setLoading(true);
     setError(null);
-    const result = await createBookingAction({
-      ...form,
-      durationMinutes: Number(form.durationMinutes),
-      professionalPaymentCents: Number(form.professionalPaymentCents),
-    });
-    setLoading(false);
-    if (!result.ok) return setError(result.error);
-    router.push("/admin/bookings");
+    try {
+      const result = await createBookingAction({
+        ...form,
+        durationMinutes: Number(form.durationMinutes),
+        professionalPaymentCents: Number(form.professionalPaymentCents),
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      router.push("/admin/bookings");
+    } catch {
+      setError("Não foi possível criar o agendamento. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (services.length === 0) {

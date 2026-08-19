@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { MessageSquare, X } from "lucide-react";
 import { sendManualCustomerMessageAction } from "./actions";
 import { Button } from "@/components/ui/button";
+import { ModalDialog } from "@/components/ui/modal-dialog";
 
 export function CustomerMessageForm({ bookingId }: { bookingId: string }) {
   const [open, setOpen] = useState(false);
@@ -15,11 +16,19 @@ export function CustomerMessageForm({ bookingId }: { bookingId: string }) {
     event.preventDefault();
     setSending(true);
     setError(null);
-    const result = await sendManualCustomerMessageAction(bookingId, text);
-    setSending(false);
-    if (!result.ok) return setError(result.error);
-    setText("");
-    setOpen(false);
+    try {
+      const result = await sendManualCustomerMessageAction(bookingId, text);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setText("");
+      setOpen(false);
+    } catch {
+      setError("Não foi possível enviar a mensagem. Tente novamente.");
+    } finally {
+      setSending(false);
+    }
   }
 
   if (!open) {
@@ -36,25 +45,21 @@ export function CustomerMessageForm({ bookingId }: { bookingId: string }) {
   }
 
   return (
-    <div
-      role="dialog"
-      aria-label="Enviar mensagem ao cliente"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
-    >
+    <ModalDialog ariaLabel="Enviar mensagem ao cliente" onClose={() => setOpen(false)}>
       <form
         onSubmit={(e) => void submit(e)}
         className="bg-white rounded-xl shadow-xl border border-slate-200 p-5 w-96 space-y-3"
       >
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-slate-900">Mensagem para o cliente</h3>
-          <button type="button" onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-700">
+          <button type="button" onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-700" aria-label="Fechar mensagem ao cliente">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <textarea
           value={text}
+          data-autofocus
           onChange={(e) => setText(e.target.value)}
           maxLength={2000}
           required
@@ -72,6 +77,6 @@ export function CustomerMessageForm({ bookingId }: { bookingId: string }) {
           </Button>
         </div>
       </form>
-    </div>
+    </ModalDialog>
   );
 }

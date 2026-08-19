@@ -51,7 +51,8 @@ export async function createPricingTierAction(input: z.infer<typeof tierSchema>)
 export async function setPricingTierActiveAction(id: string, isActive: boolean) {
   if (!await isAdmin()) return { ok: false as const, error: "Sessão expirada ou sem permissão." };
   if (!z.string().uuid().safeParse(id).success || typeof isActive !== "boolean") return { ok: false as const, error: "Faixa inválida." };
-  await prisma.propertyPricingTier.update({ where: { id }, data: { isActive } });
+  const updated = await prisma.propertyPricingTier.updateMany({ where: { id }, data: { isActive } });
+  if (!updated.count) return { ok: false as const, error: "Faixa não encontrada." };
   revalidatePath("/admin/settings/pricing");
   return { ok: true as const };
 }

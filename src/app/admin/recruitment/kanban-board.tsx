@@ -70,16 +70,25 @@ export function KanbanBoard({ columns }: { columns: KanbanColumnData[] }) {
   const router = useRouter();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const [error, setError] = useState<string | null>(null);
+  const [isMoving, setIsMoving] = useState(false);
 
   async function onDragEnd(event: DragEndEvent) {
+    if (isMoving) return;
     const targetStatus = event.over?.id as RecruitmentStatus | undefined;
     if (!targetStatus) return;
-    const moved = await moveLeadAction({ leadId: String(event.active.id), targetStatus });
-    if (!moved.ok) {
-      setError(moved.error ?? "Movimento não permitido.");
-    } else {
+    setIsMoving(true);
+    try {
+      const moved = await moveLeadAction({ leadId: String(event.active.id), targetStatus });
+      if (!moved.ok) {
+        setError(moved.error ?? "Movimento não permitido.");
+        return;
+      }
       setError(null);
       router.refresh();
+    } catch {
+      setError("Não foi possível mover a profissional. Tente novamente.");
+    } finally {
+      setIsMoving(false);
     }
   }
 

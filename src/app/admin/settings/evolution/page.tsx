@@ -6,11 +6,11 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertTriangle,
-  QrCode,
 } from "lucide-react";
 import { env } from "@/env";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { QrCodePanel } from "./qr-code-panel";
 
 async function fetchEvolutionState(): Promise<{
   ok: boolean;
@@ -38,41 +38,8 @@ async function fetchEvolutionState(): Promise<{
   }
 }
 
-async function fetchQrCode(): Promise<{ code?: string; error?: string }> {
-  if (!env.EVOLUTION_BASE_URL || !env.EVOLUTION_API_KEY || !env.EVOLUTION_INSTANCE) {
-    return { error: "NOT_CONFIGURED" };
-  }
-  try {
-    const base = env.EVOLUTION_BASE_URL.replace(/\/$/, "");
-    const res = await fetch(
-      `${base}/instance/connect/${encodeURIComponent(env.EVOLUTION_INSTANCE)}`,
-      {
-        headers: { apikey: env.EVOLUTION_API_KEY },
-        cache: "no-store",
-        signal: AbortSignal.timeout(10_000),
-      }
-    );
-    if (!res.ok) return { error: `HTTP_${res.status}` };
-    const data = await res.json() as { code?: string; base64?: string; pairingCode?: string };
-    const code = data.base64 ?? data.code ?? data.pairingCode;
-    return code ? { code } : { error: "NO_CODE_IN_RESPONSE" };
-  } catch (err) {
-    return { error: String(err instanceof Error ? err.message : err) };
-  }
-}
-
-export default async function EvolutionSettingsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ qr?: string }>;
-}) {
-  const params = await searchParams;
-  const showQr = params.qr === "1";
-
-  const [stateResult, qrResult] = await Promise.all([
-    fetchEvolutionState(),
-    showQr ? fetchQrCode() : Promise.resolve(null),
-  ]);
+export default async function EvolutionSettingsPage() {
+  const stateResult = await fetchEvolutionState();
 
   const configured = env.EVOLUTION_BASE_URL && env.EVOLUTION_API_KEY && env.EVOLUTION_INSTANCE;
   const connected = stateResult.ok && stateResult.state === "open";
@@ -151,49 +118,7 @@ export default async function EvolutionSettingsPage({
             )}
 
             {/* QR Code section */}
-            {!connected && (
-              <div className="border-t border-slate-100 pt-4">
-                <p className="text-sm text-slate-600 mb-3">
-                  Para conectar, escaneie o QR Code com o WhatsApp do número que será usado pelo bot.
-                </p>
-
-                {!showQr ? (
-                  <form action={async () => {
-                    "use server";
-                    revalidatePath("/admin/settings/evolution");
-                  }}>
-                    <a
-                      href="/admin/settings/evolution?qr=1"
-                      className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-700 hover:text-blue-900"
-                    >
-                      <QrCode className="w-4 h-4" />
-                      Gerar QR Code
-                    </a>
-                  </form>
-                ) : qrResult?.error ? (
-                  <div className="text-xs text-red-600 font-mono bg-red-50 rounded px-2 py-1">
-                    Erro ao obter QR Code: {qrResult.error}
-                  </div>
-                ) : qrResult?.code ? (
-                  <div className="space-y-3">
-                    <div className="border border-slate-200 rounded-lg p-3 inline-block bg-white">
-                      {/* Evolution returns base64 PNG or a data-uri */}
-                      <img
-                        src={qrResult.code.startsWith("data:") ? qrResult.code : `data:image/png;base64,${qrResult.code}`}
-                        alt="QR Code para conectar ao WhatsApp"
-                        className="w-48 h-48"
-                      />
-                    </div>
-                    <p className="text-xs text-slate-500">
-                      QR Code expira em ~60 segundos.{" "}
-                      <a href="/admin/settings/evolution?qr=1" className="text-blue-600 hover:underline">
-                        Gerar novo
-                      </a>
-                    </p>
-                  </div>
-                ) : null}
-              </div>
-            )}
+            {!connected && <QrCodePanel />}
 
             {/* Connected info */}
             {connected && (

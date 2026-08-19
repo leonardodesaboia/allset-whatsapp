@@ -2,6 +2,7 @@ import { Tag } from "lucide-react";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { PricingTierForm } from "./pricing-tier-form";
 import { setPricingTierActiveAction } from "./actions";
+import { ActionFeedbackForm } from "@/components/ui/action-feedback-form";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 
@@ -11,7 +12,7 @@ export default async function PricingSettingsPage() {
   });
 
   return (
-    <div className="p-6 max-w-2xl space-y-6">
+    <div className="max-w-2xl space-y-6 p-4 sm:p-6">
       <div>
         <h1 className="text-xl font-bold text-slate-900">Preços</h1>
         <p className="text-sm text-slate-500 mt-0.5">
@@ -28,11 +29,11 @@ export default async function PricingSettingsPage() {
             Faixas cadastradas
           </CardTitle>
         </CardHeader>
-        <CardContent className="px-0 pb-0">
+        <CardContent className="overflow-x-auto px-0 pb-0">
           {tiers.length === 0 ? (
             <p className="text-sm text-slate-400 px-5 pb-5">Nenhuma faixa cadastrada.</p>
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[32rem] text-sm">
               <thead>
                 <tr className="border-t border-slate-100 bg-slate-50">
                   <th className="text-left px-5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Opção</th>
@@ -63,9 +64,9 @@ export default async function PricingSettingsPage() {
                       </Badge>
                     </td>
                     <td className="px-5 py-3 text-right">
-                      <form action={async () => {
+                      <ActionFeedbackForm action={async () => {
                         "use server";
-                        await setPricingTierActiveAction(tier.id, !tier.isActive);
+                        return setPricingTierActiveAction(tier.id, !tier.isActive);
                       }}>
                         <button
                           type="submit"
@@ -73,7 +74,7 @@ export default async function PricingSettingsPage() {
                         >
                           {tier.isActive ? "Desativar" : "Ativar"}
                         </button>
-                      </form>
+                      </ActionFeedbackForm>
                     </td>
                   </tr>
                 ))}

@@ -14,7 +14,7 @@ export default async function CustomerConversationsPage() {
   });
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="space-y-5 p-4 sm:p-6">
       <div>
         <h1 className="text-xl font-bold text-slate-900">Conversas de clientes</h1>
         <p className="text-sm text-slate-500 mt-0.5">

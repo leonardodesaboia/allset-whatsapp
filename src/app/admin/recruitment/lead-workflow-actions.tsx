@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { InterviewResult, ReferenceStatus } from "@prisma/client";
+import type { RecruitmentStatus } from "@/domain/recruitment/recruitment-status";
 import { PlayCircle, CheckCircle, UserCheck, ClipboardList, AlertCircle } from "lucide-react";
 import {
   addAssessmentAction,
@@ -15,10 +16,12 @@ import { Input } from "@/components/ui/input";
 
 export function LeadWorkflowActions({
   leadId,
+  status,
   openInterviewId,
   latestReferenceId,
 }: {
   leadId: string;
+  status: RecruitmentStatus;
   openInterviewId?: string;
   latestReferenceId?: string;
 }) {
@@ -29,9 +32,14 @@ export function LeadWorkflowActions({
 
   const execute = async (action: () => Promise<{ ok: boolean; error?: string }>) => {
     setPending(true);
-    const result = await action();
-    setPending(false);
-    setError(result.ok ? null : (result.error ?? "Não foi possível concluir a ação."));
+    try {
+      const result = await action();
+      setError(result.ok ? null : (result.error ?? "Não foi possível concluir a ação."));
+    } catch {
+      setError("Não foi possível concluir a ação. Tente novamente.");
+    } finally {
+      setPending(false);
+    }
   };
 
   return (
@@ -42,33 +50,38 @@ export function LeadWorkflowActions({
       </h2>
 
       <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={pending}
-          onClick={() => void execute(() => startInterviewAction(leadId))}
-        >
-          <PlayCircle className="w-3.5 h-3.5 mr-1.5" />
-          Iniciar entrevista
-        </Button>
-
-        {openInterviewId && (
+        {status === "CONVERSA_PENDENTE" && (
           <Button
             type="button"
-            variant="success"
+            variant="secondary"
             size="sm"
             disabled={pending}
-            onClick={() => void execute(() =>
-              completeInterviewAction({ interviewId: openInterviewId, result: "REFERENCIA" as InterviewResult })
-            )}
+            onClick={() => void execute(() => startInterviewAction(leadId))}
           >
-            <CheckCircle className="w-3.5 h-3.5 mr-1.5" />
-            Concluir entrevista
+            <PlayCircle className="w-3.5 h-3.5 mr-1.5" />
+            Iniciar entrevista
           </Button>
         )}
 
-        {latestReferenceId && (
+        {status === "ENTREVISTA" && openInterviewId && (
+          <>
+            <Button type="button" variant="success" size="sm" disabled={pending} onClick={() => void execute(() => completeInterviewAction({ interviewId: openInterviewId, result: "REFERENCIA" as InterviewResult }))}>
+              <CheckCircle className="w-3.5 h-3.5 mr-1.5" />
+              Seguir para referências
+            </Button>
+            <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => void execute(() => completeInterviewAction({ interviewId: openInterviewId, result: "AGUARDANDO_COMPLEMENTACAO" as InterviewResult }))}>
+              Pedir complementação
+            </Button>
+            <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => void execute(() => completeInterviewAction({ interviewId: openInterviewId, result: "BASE_FUTURA" as InterviewResult }))}>
+              Mover para base futura
+            </Button>
+            <Button type="button" variant="destructive" size="sm" disabled={pending} onClick={() => void execute(() => completeInterviewAction({ interviewId: openInterviewId, result: "REPROVADA" as InterviewResult }))}>
+              Reprovar
+            </Button>
+          </>
+        )}
+
+        {status === "REFERENCIA" && latestReferenceId && (
           <Button
             type="button"
             variant="success"
@@ -84,6 +97,7 @@ export function LeadWorkflowActions({
         )}
       </div>
 
+      {status === "REFERENCIA" && (
       <form
         action={() => void execute(async () => {
           const result = await addReferenceAction({ leadId, name: referenceName });
@@ -104,6 +118,7 @@ export function LeadWorkflowActions({
           Adicionar referência
         </Button>
       </form>
+      )}
 
       <form
         action={() => void execute(() => addAssessmentAction({ leadId, ...(notes.trim() ? { notes } : {}) }))}

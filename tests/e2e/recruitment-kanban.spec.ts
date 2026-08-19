@@ -5,22 +5,24 @@ test.beforeEach(async ({ page }) => {
   await page.getByLabel("E-mail").fill("admin@allset.test");
   await page.getByLabel("Senha").fill("senha-super-segura-1");
   await page.getByRole("button", { name: "Entrar" }).click();
+  await expect(page).toHaveURL(/\/admin$/);
 });
 
 test("kanban exibe lead e permite nota rápida", async ({ page }) => {
   await page.goto("/admin/recruitment");
   const column = page.getByTestId("column-PRE_CADASTRO");
   await expect(column.getByText("Maria de Sousa")).toBeVisible();
-  await column.getByText("+ Nota").click();
+  await column.getByRole("button", { name: "Nota" }).click();
   await page.getByLabel("Escrever nota interna").fill("Retornar após 14h");
   await page.getByRole("button", { name: "Salvar" }).click();
 });
 
 test("cadastro manual inclui lead nos novos leads", async ({ page }) => {
+  const leadName = `Joana E2E ${Date.now()}`;
   await page.goto("/admin/recruitment");
   await page.getByTestId("new-lead").click();
-  await page.getByLabel("Nome").fill("Joana Teste");
+  await page.getByLabel("Nome").fill(leadName);
   await page.getByLabel("Bairro").fill("Meireles");
   await page.getByRole("button", { name: "Salvar" }).click();
-  await expect(page.getByTestId("column-LEAD").getByText("Joana Teste")).toBeVisible();
+  await expect(page.getByTestId("column-LEAD").getByText(leadName)).toBeVisible();
 });

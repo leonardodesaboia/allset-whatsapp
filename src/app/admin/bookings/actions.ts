@@ -8,6 +8,10 @@ import { validateCustomerBookingCoverage } from "@/application/customer/validate
 import { sendManualCustomerMessage } from "@/application/customer/send-manual-customer-message.usecase";
 import { resumeCustomerBookingConversation } from "@/application/customer/customer-booking-conversation.usecase";
 import { recordAuditLog } from "@/application/audit/record-audit-log.usecase";
+import { transitionBookingStatusInTransaction } from "@/application/booking/transition-booking-status.usecase";
+import { enqueueOutboundMessage } from "@/application/messaging/enqueue-outbound-message.usecase";
+import { textPayload } from "@/domain/messaging/message";
+import { DomainError } from "@/domain/shared/domain-error";
 import { auth } from "@/infrastructure/auth/auth";
 import { prisma } from "@/infrastructure/db/prisma-client";
 
@@ -21,6 +25,8 @@ const createBookingSchema = z.object({
   customerName: z.string().trim().min(2).max(160),
   customerPhone: z.string().trim().regex(/^\+[1-9]\d{7,14}$/),
 });
+const bookingIdSchema = z.string().uuid();
+const conversationIdSchema = z.string().uuid();
 
 export type BookingActionResult =
   | { ok: true; bookingId?: string; notified?: number }
@@ -36,7 +42,7 @@ async function currentActor(): Promise<string | null> {
 
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof z.ZodError) return "Revise os dados informados.";
-  return error instanceof Error ? error.message : fallback;
+  return error instanceof DomainError ? error.message : fallback;
 }
 
 export async function createBookingAction(input: {
@@ -57,6 +63,9 @@ export async function createBookingAction(input: {
     const scheduledAt = new Date(`${data.scheduledDate}T${data.scheduledTime}:00-03:00`);
     if (Number.isNaN(scheduledAt.getTime())) {
       return { ok: false, error: "Data ou horário inválido." };
+    }
+    if (scheduledAt <= new Date()) {
+      return { ok: false, error: "O agendamento precisa estar em uma data e horário futuros." };
     }
 
     const booking = await prisma.$transaction(async (tx) => {
@@ -109,6 +118,9 @@ export async function dispatchOpportunityAction(bookingId: string): Promise<Book
 
   try {
     const result = await notifyOpportunity(prisma, { bookingId, actor });
+    if (!result.dispatched) {
+      return { ok: false, error: "Nenhuma profissional elegível está disponível para este agendamento." };
+    }
     revalidatePath("/admin/bookings");
     revalidatePath(`/admin/bookings/${bookingId}/opportunity`);
     return { ok: true, notified: result.notified };
@@ -142,6 +154,9 @@ export async function sendManualCustomerMessageAction(
 ): Promise<BookingActionResult> {
   const actor = await currentActor();
   if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
+  if (!bookingIdSchema.safeParse(bookingId).success || typeof text !== "string") {
+    return { ok: false, error: "Dados da mensagem inválidos." };
+  }
   try {
     const result = await sendManualCustomerMessage(prisma, { bookingId, text, actor });
     if (!result.ok) return { ok: false, error: "Este pedido não possui conversa ativa com o cliente." };
@@ -158,6 +173,9 @@ export async function sendManualCustomerConversationMessageAction(
 ): Promise<BookingActionResult> {
   const actor = await currentActor();
   if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
+  if (!conversationIdSchema.safeParse(conversationId).success || typeof text !== "string") {
+    return { ok: false, error: "Dados da mensagem inválidos." };
+  }
   try {
     const result = await sendManualCustomerMessage(prisma, { conversationId, text, actor });
     if (!result.ok) return { ok: false, error: "Conversa não encontrada." };
@@ -171,6 +189,9 @@ export async function sendManualCustomerConversationMessageAction(
 export async function resumeCustomerAutomationAction(bookingId: string): Promise<BookingActionResult> {
   const actor = await currentActor();
   if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
+  if (!bookingIdSchema.safeParse(bookingId).success) {
+    return { ok: false, error: "Identificador de agendamento inválido." };
+  }
   try {
     const result = await resumeCustomerBookingConversation(prisma, { bookingId, actor });
     if (!result.ok) return { ok: false, error: "Esta conversa não pode ser retomada automaticamente." };
@@ -178,5 +199,46 @@ export async function resumeCustomerAutomationAction(bookingId: string): Promise
     return { ok: true, bookingId };
   } catch (error) {
     return { ok: false, error: errorMessage(error, "Não foi possível retomar a automação.") };
+  }
+}
+
+/** Records an off-platform payment until a real PaymentProvider is configured. */
+export async function confirmManualPaymentAction(bookingId: string): Promise<BookingActionResult> {
+  const actor = await currentActor();
+  if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
+  if (!z.string().uuid().safeParse(bookingId).success) return { ok: false, error: "Identificador de agendamento inválido." };
+  try {
+    await prisma.$transaction(async (tx) => {
+      const booking = await tx.booking.findUnique({
+        where: { id: bookingId },
+        include: { customer: { select: { phoneE164: true } }, customerConversation: true },
+      });
+      if (!booking) throw new Error("Agendamento não encontrado.");
+      const transition = await transitionBookingStatusInTransaction(tx, {
+        bookingId,
+        targetStatus: "PAID",
+        actor,
+        reason: "Pagamento confirmado manualmente",
+      });
+      if (!transition.ok) throw transition.error;
+      if (booking.customerConversation) {
+        const conversation = await tx.customerBookingConversation.update({
+          where: { id: booking.customerConversation.id },
+          data: { state: "COMPLETED", lastInboundAt: new Date() },
+        });
+        await enqueueOutboundMessage(tx, {
+          provider: conversation.provider,
+          recipient: booking.customer.phoneE164,
+          payload: textPayload("Pagamento confirmado! Agora vamos buscar a profissional ideal para seu atendimento."),
+          idempotencyKey: `customer-booking:${conversation.id}:payment-confirmed`,
+          correlationId: conversation.id,
+          actor,
+        });
+      }
+    });
+    revalidatePath("/admin/bookings");
+    return { ok: true, bookingId };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Não foi possível confirmar o pagamento.") };
   }
 }

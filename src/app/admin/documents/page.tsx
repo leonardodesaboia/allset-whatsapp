@@ -4,6 +4,7 @@ import { prisma } from "@/infrastructure/db/prisma-client";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ConfirmButton } from "@/components/ui/confirm-button";
+import { ActionFeedbackForm } from "@/components/ui/action-feedback-form";
 import { reviewDocumentAction } from "../recruitment/actions";
 
 const fmt = (d: Date) =>
@@ -40,14 +41,14 @@ export default async function DocumentsPage() {
     stats.find((s) => s.status === status)?._count._all ?? 0;
 
   return (
-    <div className="p-6 space-y-6 max-w-4xl">
+    <div className="max-w-4xl space-y-6 p-4 sm:p-6">
       <div>
         <h1 className="text-xl font-bold text-slate-900">Documentos</h1>
         <p className="text-sm text-slate-500 mt-0.5">Revisão centralizada de documentos recebidos</p>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
         <Card className={pending.length > 0 ? "border-amber-200" : ""}>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -88,8 +89,8 @@ export default async function DocumentsPage() {
           </CardTitle>
         </CardHeader>
         {pending.length > 0 && (
-          <CardContent className="px-0 pb-0">
-            <table className="w-full text-sm">
+          <CardContent className="overflow-x-auto px-0 pb-0">
+            <table className="w-full min-w-[38rem] text-sm">
               <thead>
                 <tr className="border-t border-slate-100 bg-slate-50">
                   <th className="text-left px-5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Profissional</th>
@@ -125,10 +126,10 @@ export default async function DocumentsPage() {
                       {fmt(doc.receivedAt)}
                     </td>
                     <td className="px-5 py-3">
-                      <div className="flex items-center gap-2 justify-end">
-                        <form action={async () => {
+                      <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+                        <ActionFeedbackForm action={async () => {
                           "use server";
-                          await reviewDocumentAction({ documentId: doc.id, leadId: doc.leadId, status: "APPROVED" });
+                          return reviewDocumentAction({ documentId: doc.id, leadId: doc.leadId, status: "APPROVED" });
                         }}>
                           <ConfirmButton
                             message={`Aprovar documento "${doc.requirement.name}" de ${doc.lead.fullName ?? doc.lead.phoneE164}?`}
@@ -137,7 +138,7 @@ export default async function DocumentsPage() {
                             <FileCheck className="w-3 h-3" aria-hidden />
                             Aprovar
                           </ConfirmButton>
-                        </form>
+                        </ActionFeedbackForm>
                         <RejectDocumentInlineForm documentId={doc.id} leadId={doc.leadId} />
                         <Link
                           href={`/admin/recruitment/${doc.lead.id}`}
@@ -162,8 +163,8 @@ export default async function DocumentsPage() {
           <CardHeader>
             <CardTitle as="h2">Revisados recentemente</CardTitle>
           </CardHeader>
-          <CardContent className="px-0 pb-0">
-            <table className="w-full text-sm">
+          <CardContent className="overflow-x-auto px-0 pb-0">
+            <table className="w-full min-w-[32rem] text-sm">
               <thead>
                 <tr className="border-t border-slate-100 bg-slate-50">
                   <th className="text-left px-5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Profissional</th>
@@ -205,12 +206,12 @@ export default async function DocumentsPage() {
 
 function RejectDocumentInlineForm({ documentId, leadId }: { documentId: string; leadId: string }) {
   return (
-    <form
+    <ActionFeedbackForm
       className="inline-flex items-center gap-1"
-      action={async (data: FormData) => {
+      action={async (data) => {
         "use server";
         const reason = data.get("reason") as string | null;
-        await reviewDocumentAction({
+        return reviewDocumentAction({
           documentId,
           leadId,
           status: "REJECTED",
@@ -231,6 +232,6 @@ function RejectDocumentInlineForm({ documentId, leadId }: { documentId: string; 
         <FileX className="w-3 h-3" />
         Rejeitar
       </button>
-    </form>
+    </ActionFeedbackForm>
   );
 }

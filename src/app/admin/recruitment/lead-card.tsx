@@ -23,7 +23,6 @@ export function LeadCard({ lead }: { lead: LeadCardData }) {
   return (
     <article
       ref={setNodeRef}
-      {...attributes}
       style={{ transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined }}
       data-testid={`card-${lead.id}`}
       className={cn(
@@ -32,7 +31,7 @@ export function LeadCard({ lead }: { lead: LeadCardData }) {
         overdue && "border-l-2 border-l-red-400"
       )}
     >
-      <div {...listeners} className="cursor-grab active:cursor-grabbing">
+      <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing">
         <p className="text-sm font-semibold text-slate-900 leading-tight mb-1.5">
           {lead.fullName ?? <span className="text-slate-400 italic">(sem nome)</span>}
         </p>
