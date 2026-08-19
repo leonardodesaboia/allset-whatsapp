@@ -26,7 +26,7 @@ async function enqueueQuestion(tx: Prisma.TransactionClient, conversation: Recru
 async function transitionStatus(
   tx: Prisma.TransactionClient,
   leadId: string,
-  target: "PRE_CADASTRO" | "TRIAGEM" | "CONVERSA_PENDENTE" | "BASE_FUTURA" | "LIGACAO_SOLICITADA" | "AGUARDANDO_COMPLEMENTACAO",
+  target: "PRE_CADASTRO" | "TRIAGEM" | "CONVERSA_PENDENTE" | "BASE_FUTURA" | "LIGACAO_SOLICITADA" | "PRECISA_DE_AJUDA" | "AGUARDANDO_COMPLEMENTACAO" | "PAUSADA",
   reason?: string,
 ) {
   const transition = await transitionLeadStatusInTransaction(tx, {
@@ -41,9 +41,15 @@ async function transitionStatus(
 
 export async function startRecruitmentConversation(
   prisma: PrismaClient,
-  input: { phoneE164: string; provider: string; fullName?: string },
+  input: { phoneE164: string; provider: string; fullName?: string; inboundMessageId?: string },
 ) {
   return prisma.$transaction(async (tx) => {
+    if (input.inboundMessageId) {
+      await tx.inboundMessage.updateMany({
+        where: { id: input.inboundMessageId, processedAt: null },
+        data: { processedAt: new Date() },
+      });
+    }
     let lead = await tx.recruitmentLead.upsert({
       where: { phoneE164: input.phoneE164 },
       create: { origin: "WHATSAPP", phoneE164: input.phoneE164, ...(input.fullName ? { fullName: input.fullName } : {}) },
@@ -78,6 +84,47 @@ export async function startRecruitmentConversation(
     }
 
     return { lead, conversation };
+  });
+}
+
+/** Lets an administrator return a paused/manual conversation to its last real question. */
+export async function resumeRecruitmentConversation(
+  prisma: PrismaClient,
+  input: { leadId: string; actor: string },
+) {
+  return prisma.$transaction(async (tx) => {
+    const conversation = await tx.recruitmentConversation.findUnique({
+      where: { leadId: input.leadId },
+      include: { lead: true },
+    });
+    if (!conversation || !conversation.lead.phoneE164) throw new Error("Conversa de recrutamento não encontrada");
+    if (conversation.state !== "PAUSED" && conversation.state !== "MANUAL_REVIEW") {
+      throw new Error("A conversa não está pausada nem aguardando revisão");
+    }
+
+    const state = conversation.lastQuestionKey as ConversationState | null;
+    if (!state || !QUESTIONS[state]) throw new Error("Não há uma pergunta válida para retomar");
+
+    if (conversation.lead.status === "PAUSADA" || conversation.lead.status === "LIGACAO_SOLICITADA" || conversation.lead.status === "PRECISA_DE_AJUDA") {
+      const transition = await transitionLeadStatusInTransaction(tx, {
+        leadId: conversation.leadId,
+        targetStatus: "PRE_CADASTRO",
+        actor: input.actor,
+        reason: "Automação de pré-cadastro retomada",
+      });
+      if (!transition.ok) throw transition.error;
+    }
+
+    const resumed = await tx.recruitmentConversation.update({
+      where: { id: conversation.id },
+      data: { state, automationPausedAt: null, misunderstandingCount: 0, lastInboundAt: new Date() },
+    });
+    await tx.recruitmentLead.update({
+      where: { id: conversation.leadId },
+      data: { nextAction: null, nextActionAt: null },
+    });
+    await enqueueQuestion(tx, resumed, conversation.lead.phoneE164, state);
+    return resumed;
   });
 }
 
@@ -126,9 +173,14 @@ export async function processRecruitmentAnswer(
     }
 
     if (command === "STOP") {
+      const status = await transitionStatus(tx, lead.id, "PAUSADA", "Automação pausada pela profissional");
       await tx.recruitmentConversation.update({
         where: { id: conversation.id },
         data: { state: "PAUSED", automationPausedAt: new Date() },
+      });
+      await tx.recruitmentLead.update({
+        where: { id: status.id },
+        data: { nextAction: "Retomar pré-cadastro quando a profissional solicitar", nextActionAt: null },
       });
       return { advanced: false, reason: "STOPPED" as const };
     }
@@ -175,14 +227,31 @@ export async function processRecruitmentAnswer(
         },
       });
       if (needsManual) {
+        const status = await transitionStatus(tx, lead.id, "PRECISA_DE_AJUDA", "Respostas não estruturadas repetidas");
         await tx.recruitmentLead.update({
-          where: { id: lead.id },
+          where: { id: status.id },
           data: { nextAction: "Revisar resposta não estruturada", nextActionAt: new Date() },
         });
       } else {
         await enqueueQuestion(tx, updated, phoneE164, current);
       }
       return { advanced: false, reason: needsManual ? ("MANUAL_REVIEW" as const) : ("INVALID_ANSWER" as const) };
+    }
+
+    // Escolher ligação no próprio menu é uma solicitação explícita de atendimento
+    // humano, não apenas uma pausa da automação. Sem este encaminhamento o lead
+    // ficava em PRE_CADASTRO e deixava de aparecer na fila para ligação.
+    if (current === "CHANNEL_PREFERENCE" && answer === "PHONE") {
+      await transitionStatus(tx, lead.id, "LIGACAO_SOLICITADA", "Ligação escolhida no pré-cadastro");
+      await tx.recruitmentLead.update({
+        where: { id: lead.id },
+        data: { nextAction: "Ligar para profissional", nextActionAt: new Date() },
+      });
+      await tx.recruitmentConversation.update({
+        where: { id: conversation.id },
+        data: { state: "PAUSED", automationPausedAt: new Date(), lastInboundAt: new Date(), misunderstandingCount: 0 },
+      });
+      return { advanced: true, completed: false, state: "PAUSED" as const };
     }
 
     const next = nextState(current, answer);

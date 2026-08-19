@@ -812,7 +812,7 @@ model BookingStatusHistory {
 
 model ServiceOpportunity {
   id              String                   @id @default(uuid())
-  bookingId       String                   @unique
+  bookingId       String
   booking         Booking                  @relation(fields: [bookingId], references: [id])
   neighborhood    String
   scheduledAt     DateTime
@@ -825,6 +825,7 @@ model ServiceOpportunity {
   responses       OpportunityResponse[]
 
   @@index([status, expiresAt])
+  @@index([bookingId])
 }
 
 model OpportunityResponse {

@@ -1,6 +1,11 @@
 import type { PrismaClient, RecruitmentLead } from "@prisma/client";
 import type { RecruitmentStatus } from "../../domain/recruitment/recruitment-status";
-const KANBAN_COLUMNS: RecruitmentStatus[] = ["LEAD", "PRE_CADASTRO", "TRIAGEM", "CONVERSA_PENDENTE", "LIGACAO_SOLICITADA", "ENTREVISTA", "PRE_APROVADA", "REFERENCIA", "DOCUMENTACAO", "ONBOARDING", "TESTE_OPERACIONAL", "EM_VALIDACAO", "ATIVA", "BASE_FUTURA"];
+const KANBAN_COLUMNS: RecruitmentStatus[] = [
+  "LEAD", "PRE_CADASTRO", "TRIAGEM", "CONVERSA_PENDENTE", "ENTREVISTA", "REFERENCIA", "PRE_APROVADA",
+  "DOCUMENTACAO", "ONBOARDING", "TESTE_OPERACIONAL", "EM_VALIDACAO", "ATIVA", "PREFERENCIAL",
+  "LIGACAO_SOLICITADA", "PRECISA_DE_AJUDA", "AGUARDANDO_COMPLEMENTACAO", "PAUSADA", "SUSPENSA",
+  "BASE_FUTURA", "REPROVADA", "DESISTIU",
+];
 const KANBAN_COLUMN_LABELS: Record<RecruitmentStatus, string> = { LEAD: "Novos leads", PRE_CADASTRO: "Pré-cadastro", TRIAGEM: "Triagem", CONVERSA_PENDENTE: "Conversa pendente", ENTREVISTA: "Entrevista", REFERENCIA: "Referência", PRE_APROVADA: "Pré-aprovada", DOCUMENTACAO: "Documentação", ONBOARDING: "Onboarding", TESTE_OPERACIONAL: "Teste", EM_VALIDACAO: "Em validação", ATIVA: "Ativas", PREFERENCIAL: "Preferenciais", PRECISA_DE_AJUDA: "Precisa de ajuda", LIGACAO_SOLICITADA: "Ligação solicitada", BASE_FUTURA: "Base futura", AGUARDANDO_COMPLEMENTACAO: "Aguardando complementação", REPROVADA: "Reprovadas", DESISTIU: "Desistiu", PAUSADA: "Pausadas", SUSPENSA: "Suspensas" };
 export async function getKanbanBoard(prisma: PrismaClient) { const leads = await prisma.recruitmentLead.findMany({ where: { status: { in: KANBAN_COLUMNS } }, orderBy: { updatedAt: "desc" } }); return KANBAN_COLUMNS.map((status) => ({ status, label: KANBAN_COLUMN_LABELS[status], leads: leads.filter((lead) => lead.status === status) })); }
 export async function getNeedsMeLeads(prisma: PrismaClient): Promise<RecruitmentLead[]> { return prisma.recruitmentLead.findMany({ where: { OR: [{ status: "LIGACAO_SOLICITADA" }, { status: "PRECISA_DE_AJUDA" }, { status: "AGUARDANDO_COMPLEMENTACAO" }, { nextActionAt: { lt: new Date() } }] }, orderBy: { nextActionAt: "asc" } }); }
