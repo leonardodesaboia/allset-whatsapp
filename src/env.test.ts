@@ -75,6 +75,28 @@ describe("parseEnv", () => {
     ).toThrow(/BETTER_AUTH_SECRET/);
   });
 
+  it("exige segredos dos jobs em produção", () => {
+    expect(() =>
+      parseEnv({
+        DATABASE_URL: "postgresql://user:pass@localhost:5432/db",
+        BETTER_AUTH_SECRET: "a".repeat(32),
+        BETTER_AUTH_URL: "https://allset.example",
+        NODE_ENV: "production",
+      }),
+    ).toThrow(/INTERNAL_JOB_SECRET.*CRON_SECRET/);
+  });
+
+  it("aceita segredos dos jobs em produção", () => {
+    expect(parseEnv({
+      DATABASE_URL: "postgresql://user:pass@localhost:5432/db",
+      BETTER_AUTH_SECRET: "a".repeat(32),
+      BETTER_AUTH_URL: "https://allset.example",
+      NODE_ENV: "production",
+      INTERNAL_JOB_SECRET: "b".repeat(32),
+      CRON_SECRET: "c".repeat(32),
+    }).CRON_SECRET).toBe("c".repeat(32));
+  });
+
   it("permite apenas a avaliação de módulos durante next build sem segredos de runtime", () => {
     const source = sourceForModuleEvaluation({ NEXT_PHASE: "phase-production-build" });
     expect(parseEnv(source).DATABASE_URL).toContain("postgresql://build:");

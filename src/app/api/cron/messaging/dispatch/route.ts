@@ -7,7 +7,9 @@ import { env } from "@/env";
 
 export const runtime = "nodejs";
 
-const batchLimit = 50;
+// Evolution calls may each take seconds. Keep cron invocations below typical
+// serverless time limits; the next minute continues draining the outbox.
+const batchLimit = 10;
 
 export async function GET(request: Request) {
   const supplied = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? null;

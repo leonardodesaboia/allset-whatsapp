@@ -149,6 +149,19 @@ no projeto. A primeira rota chama diretamente `expireOpportunities`; a segunda
 processa até dez áudios pendentes. A transcrição usa um lease de cinco minutos,
 evitando que execuções concorrentes enviem o mesmo áudio ao Whisper.
 
+### Monitoramento de disponibilidade
+
+O monitor de infraestrutura deve verificar periodicamente a prontidão da aplicação:
+
+```text
+GET /api/internal/health
+x-allset-job-secret: <INTERNAL_JOB_SECRET>
+```
+
+`200 { "ok": true }` confirma que a aplicação consegue consultar o banco.
+`503` exige investigação imediata do banco ou da conectividade da aplicação.
+O endpoint não expõe segredos, configuração ou detalhes do banco.
+
 ### Segurança, privacidade e retenção
 
 - Use segredos independentes, com ao menos 32 caracteres, para webhook e jobs.

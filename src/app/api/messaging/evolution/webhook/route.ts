@@ -1,15 +1,15 @@
 import { env } from "@/env";
-import { processOpportunityResponse, requestOpportunityClarification } from "@/application/marketplace/process-opportunity-response.usecase";
-import { processContactConversationText } from "@/application/messaging/process-contact-conversation-text.usecase";
 import { processInboundEvent } from "@/application/messaging/process-inbound-event.usecase";
 import { dispatchNextOutboxMessage } from "@/application/messaging/dispatch-outbox.usecase";
-import { parseOpportunityReply } from "@/domain/marketplace/opportunity-reply";
+import { routeInboundText } from "@/application/messaging/route-inbound-text.usecase";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { logger } from "@/infrastructure/observability/logger";
 import { isValidEvolutionWebhook, normalizeEvolutionWebhook } from "@/infrastructure/messaging/evolution-webhook";
 import { createMessagingGatewayRegistry } from "@/infrastructure/messaging/messaging-runtime";
+import { PayloadTooLargeError, parseJsonBody } from "@/infrastructure/http/parse-json-body";
 
 export const runtime = "nodejs";
+const MAX_WEBHOOK_BYTES = 1_048_576;
 
 /** A configuração da Evolution deve enviar este valor em `x-allset-webhook-secret`. */
 export async function POST(request: Request) {
@@ -17,10 +17,18 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "UNAUTHORIZED" }, { status: 401 });
   }
 
+  const contentLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > MAX_WEBHOOK_BYTES) {
+    return Response.json({ ok: false, error: "PAYLOAD_TOO_LARGE" }, { status: 413 });
+  }
+
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
+    body = await parseJsonBody(request, MAX_WEBHOOK_BYTES);
+  } catch (error) {
+    if (error instanceof PayloadTooLargeError) {
+      return Response.json({ ok: false, error: "PAYLOAD_TOO_LARGE" }, { status: 413 });
+    }
     return Response.json({ ok: false, error: "INVALID_JSON" }, { status: 400 });
   }
 
@@ -29,45 +37,13 @@ export async function POST(request: Request) {
 
   try {
     const received = await processInboundEvent(prisma, { ...event, provider: "evolution", actor: "evolution:webhook" });
-    if (received.duplicate) return Response.json({ ok: true, duplicate: true });
+    if (received.duplicate && received.message.processedAt) return Response.json({ ok: true, duplicate: true });
     if (event.payload.type === "AUDIO") {
       // A mídia será baixada por um job específico antes de o operador classificá-la.
       return Response.json({ ok: true, needsMediaDownload: true }, { status: 202 });
     }
 
-    // Opportunity responses take precedence over recruitment. This is an
-    // adapter concern only: the use case validates ownership and claims the
-    // inbound message before performing the state transition.
-    const pendingOpportunityResponses = await prisma.opportunityResponse.findMany({
-      where: {
-        lead: { phoneE164: event.sender },
-        response: null,
-        opportunity: { status: "OPEN" },
-      },
-      orderBy: { sentAt: "asc" },
-      select: { id: true, responseToken: true },
-    });
-    const reply = parseOpportunityReply(event.payload.text);
-    const pendingOpportunityResponse = reply?.responseToken
-      ? pendingOpportunityResponses.find((response) => response.responseToken === reply.responseToken)
-      : pendingOpportunityResponses.length === 1 ? pendingOpportunityResponses[0] : undefined;
-    if (pendingOpportunityResponse) {
-      const result = await processOpportunityResponse(prisma, {
-        responseId: pendingOpportunityResponse.id,
-        text: event.payload.text,
-        inboundMessageId: received.message.id,
-      });
-      return Response.json({ ok: true, routed: "opportunity", result });
-    }
-    if (pendingOpportunityResponses.length > 0) {
-      const result = await requestOpportunityClarification(prisma, {
-        inboundMessageId: received.message.id,
-        responseTokens: pendingOpportunityResponses.map((response) => response.responseToken),
-      });
-      return Response.json({ ok: true, routed: "opportunity", result });
-    }
-
-    const result = await processContactConversationText(prisma, {
+    const result = await routeInboundText(prisma, {
       inboundMessageId: received.message.id,
       phoneE164: event.sender,
       text: event.payload.text,
@@ -76,7 +52,7 @@ export async function POST(request: Request) {
     dispatchNextOutboxMessage(prisma, createMessagingGatewayRegistry(), "system:webhook-dispatch").catch(
       (err) => logger.error({ err }, "Falha ao despachar outbox inline no webhook"),
     );
-    return Response.json({ ok: true, ...result });
+    return Response.json({ ok: true, ...(received.duplicate ? { recovered: true } : {}), ...result });
   } catch (error) {
     logger.error({ err: error, provider: "evolution", externalId: event.externalId }, "Falha ao processar webhook da Evolution");
     return Response.json({ ok: false, error: "PROCESSING_FAILED" }, { status: 500 });

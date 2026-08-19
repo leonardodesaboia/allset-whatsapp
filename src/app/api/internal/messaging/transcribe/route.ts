@@ -1,4 +1,4 @@
-import { processContactConversationText } from "@/application/messaging/process-contact-conversation-text.usecase";
+import { routeInboundText } from "@/application/messaging/route-inbound-text.usecase";
 import { transcribeReceivedAudio } from "@/application/messaging/transcribe-received-audio.usecase";
 import { env } from "@/env";
 import { prisma } from "@/infrastructure/db/prisma-client";
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       select: { sender: true, provider: true },
     });
     if (!inbound) return Response.json({ ok: false, error: "INBOUND_NOT_FOUND" }, { status: 404 });
-    const conversation = await processContactConversationText(prisma, {
+    const conversation = await routeInboundText(prisma, {
       inboundMessageId: input.inboundMessageId,
       phoneE164: inbound.sender,
       text: transcription.value.text,

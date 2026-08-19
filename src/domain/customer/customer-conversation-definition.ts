@@ -15,7 +15,7 @@ export type CustomerConversationState =
   | "PAUSED"
   | "COMPLETED";
 
-export type CustomerChoice = { value: string; label: string };
+type CustomerChoice = { value: string; label: string };
 export type CustomerQuestion = { key: CustomerConversationState; text: string; choices?: readonly CustomerChoice[] };
 
 export const CUSTOMER_QUESTIONS: Partial<Record<CustomerConversationState, CustomerQuestion>> = {

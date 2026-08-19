@@ -48,4 +48,9 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
+# The route checks both the authenticated application boundary and database
+# readiness. INTERNAL_JOB_SECRET is required by env validation in production.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget -q -O /dev/null --header="x-allset-job-secret: ${INTERNAL_JOB_SECRET}" http://127.0.0.1:3000/api/internal/health || exit 1
+
 ENTRYPOINT ["./docker-entrypoint.sh"]

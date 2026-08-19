@@ -2,7 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { AudioTranscriber } from "../../domain/ports/audio-transcriber";
 import type { InboundMediaDownloader } from "../../domain/ports/inbound-media-downloader";
 import type { StorageProvider } from "../../domain/ports/storage-provider";
-import { processContactConversationText } from "./process-contact-conversation-text.usecase";
+import { routeInboundText } from "./route-inbound-text.usecase";
 import { downloadReceivedAudio } from "./download-received-audio.usecase";
 import { transcribeReceivedAudio } from "./transcribe-received-audio.usecase";
 
@@ -26,7 +26,7 @@ export async function processPendingReceivedAudio(prisma: PrismaClient, storage:
         results.push({ inboundMessageId, ok: false, error: "INBOUND_NOT_FOUND" });
         continue;
       }
-      await processContactConversationText(prisma, {
+      await routeInboundText(prisma, {
         inboundMessageId,
         phoneE164: inbound.sender,
         text: transcription.value.text,

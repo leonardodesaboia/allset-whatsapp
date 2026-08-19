@@ -10,4 +10,12 @@ describe("EvolutionMediaDownloader", () => {
     await expect(downloader.download({ externalId: "msg-1", contentType: "audio/ogg", providerMetadata: { key: { id: "msg-1" } } })).resolves.toEqual({ data: new Uint8Array([1, 2, 3]), contentType: "audio/ogg" });
     expect(fetchMock).toHaveBeenCalledWith("https://evolution.test/chat/getBase64FromMediaMessage/allset", expect.objectContaining({ method: "POST", headers: expect.objectContaining({ apikey: "secret" }) }));
   });
+
+  it("rejeita base64 maior que o limite antes de decodificar", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ base64: "A".repeat(28 * 1024 * 1024) }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const downloader = new EvolutionMediaDownloader({ baseUrl: "https://evolution.test", apiKey: "secret", instance: "allset" });
+
+    await expect(downloader.download({ externalId: "msg-1", contentType: "audio/ogg", providerMetadata: {} })).rejects.toThrow("excede o tamanho máximo");
+  });
 });

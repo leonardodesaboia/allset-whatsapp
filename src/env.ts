@@ -62,6 +62,11 @@ const envSchema = z.object({
   S3_SECRET_ACCESS_KEY: optionalEnv(z.string().min(1)),
   // URL pública do MinIO (quando o endpoint interno difere do URL acessível externamente).
   S3_PUBLIC_URL: optionalEnv(z.string().url()),
+}).superRefine((value, context) => {
+  if (value.NODE_ENV !== "production") return;
+  for (const key of ["INTERNAL_JOB_SECRET", "CRON_SECRET"] as const) {
+    if (!value[key]) context.addIssue({ code: "custom", path: [key], message: "é obrigatório em produção" });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -69,6 +74,8 @@ export type Env = z.infer<typeof envSchema>;
 const BUILD_DATABASE_URL = "postgresql://build:build@localhost:5432/build";
 const BUILD_AUTH_SECRET = "build-only-secret-not-valid-for-runtime";
 const BUILD_AUTH_URL = "http://localhost:3000";
+const BUILD_INTERNAL_JOB_SECRET = "build-only-internal-job-secret-not-valid-for-runtime";
+const BUILD_CRON_SECRET = "build-only-cron-secret-not-valid-for-runtime";
 
 /**
  * Route handlers are evaluated while `next build` collects route metadata.
@@ -83,6 +90,8 @@ export function sourceForModuleEvaluation(source: Record<string, string | undefi
     DATABASE_URL: source.DATABASE_URL ?? BUILD_DATABASE_URL,
     BETTER_AUTH_SECRET: source.BETTER_AUTH_SECRET ?? BUILD_AUTH_SECRET,
     BETTER_AUTH_URL: source.BETTER_AUTH_URL ?? BUILD_AUTH_URL,
+    INTERNAL_JOB_SECRET: source.INTERNAL_JOB_SECRET ?? BUILD_INTERNAL_JOB_SECRET,
+    CRON_SECRET: source.CRON_SECRET ?? BUILD_CRON_SECRET,
   };
 }
 
