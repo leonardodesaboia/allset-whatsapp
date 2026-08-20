@@ -1,0 +1,35 @@
+FROM node:24-alpine AS base
+RUN corepack enable pnpm
+
+# ── deps ──────────────────────────────────────────────────────────────────────
+FROM base AS deps
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+# ── runner ────────────────────────────────────────────────────────────────────
+FROM node:24-alpine AS runner
+WORKDIR /app
+RUN corepack enable pnpm
+
+ENV NODE_ENV=production
+
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 worker
+
+# Dependencies (includes tsx, bullmq, ioredis, prisma)
+COPY --from=deps /app/node_modules ./node_modules
+
+# Source files (tsx compiles TypeScript at runtime)
+COPY --chown=worker:nodejs src ./src
+COPY --chown=worker:nodejs prisma ./prisma
+COPY package.json tsconfig.json ./
+
+# Generate Prisma client from the already-copied schema
+RUN pnpm prisma generate
+
+USER worker
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD pgrep -f "tsx.*worker/main" > /dev/null || exit 1
+
+CMD ["pnpm", "worker"]

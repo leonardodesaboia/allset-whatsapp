@@ -13,7 +13,13 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm prisma generate
-RUN pnpm build
+RUN DATABASE_URL=postgresql://build:build@localhost:5432/build \
+    BETTER_AUTH_SECRET=build-only-secret-not-valid-for-runtime \
+    BETTER_AUTH_URL=http://localhost:3000 \
+    EVOLUTION_WEBHOOK_SECRET=build-only-webhook-secret-not-valid-for-runtime \
+    INTERNAL_JOB_SECRET=build-only-internal-job-secret-not-valid-for-runtime \
+    CRON_SECRET=build-only-cron-secret-not-valid-for-runtime \
+    pnpm build
 
 # ── runner ────────────────────────────────────────────────────────────────────
 FROM node:24-alpine AS runner
