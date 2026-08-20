@@ -28,13 +28,23 @@ export function LeadWorkflowActions({
   const [referenceName, setReferenceName] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  const execute = async (action: () => Promise<{ ok: boolean; error?: string }>) => {
+  const execute = async (action: () => Promise<{ ok: boolean; error?: string }>, successMessage?: string) => {
     setPending(true);
+    setError(null);
+    setSuccess(null);
     try {
       const result = await action();
-      setError(result.ok ? null : (result.error ?? "Não foi possível concluir a ação."));
+      if (result.ok) {
+        if (successMessage) {
+          setSuccess(successMessage);
+          setTimeout(() => setSuccess(null), 3000);
+        }
+      } else {
+        setError(result.error ?? "Não foi possível concluir a ação.");
+      }
     } catch {
       setError("Não foi possível concluir a ação. Tente novamente.");
     } finally {
@@ -56,7 +66,7 @@ export function LeadWorkflowActions({
             variant="secondary"
             size="sm"
             disabled={pending}
-            onClick={() => void execute(() => startInterviewAction(leadId))}
+            onClick={() => void execute(() => startInterviewAction(leadId), "Entrevista iniciada.")}
           >
             <PlayCircle className="w-3.5 h-3.5 mr-1.5" />
             Iniciar entrevista
@@ -65,17 +75,17 @@ export function LeadWorkflowActions({
 
         {status === "ENTREVISTA" && openInterviewId && (
           <>
-            <Button type="button" variant="success" size="sm" disabled={pending} onClick={() => void execute(() => completeInterviewAction({ interviewId: openInterviewId, result: "REFERENCIA" as InterviewResult }))}>
+            <Button type="button" variant="success" size="sm" disabled={pending} onClick={() => void execute(() => completeInterviewAction({ interviewId: openInterviewId, result: "REFERENCIA" as InterviewResult }), "Avançado para referências.")}>
               <CheckCircle className="w-3.5 h-3.5 mr-1.5" />
               Seguir para referências
             </Button>
-            <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => void execute(() => completeInterviewAction({ interviewId: openInterviewId, result: "AGUARDANDO_COMPLEMENTACAO" as InterviewResult }))}>
+            <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => void execute(() => completeInterviewAction({ interviewId: openInterviewId, result: "AGUARDANDO_COMPLEMENTACAO" as InterviewResult }), "Complementação solicitada.")}>
               Pedir complementação
             </Button>
-            <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => void execute(() => completeInterviewAction({ interviewId: openInterviewId, result: "BASE_FUTURA" as InterviewResult }))}>
+            <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => void execute(() => completeInterviewAction({ interviewId: openInterviewId, result: "BASE_FUTURA" as InterviewResult }), "Movida para base futura.")}>
               Mover para base futura
             </Button>
-            <Button type="button" variant="destructive" size="sm" disabled={pending} onClick={() => void execute(() => completeInterviewAction({ interviewId: openInterviewId, result: "REPROVADA" as InterviewResult }))}>
+            <Button type="button" variant="destructive" size="sm" disabled={pending} onClick={() => void execute(() => completeInterviewAction({ interviewId: openInterviewId, result: "REPROVADA" as InterviewResult }), "Reprovada.")}>
               Reprovar
             </Button>
           </>
@@ -87,8 +97,9 @@ export function LeadWorkflowActions({
             variant="success"
             size="sm"
             disabled={pending}
-            onClick={() => void execute(() =>
-              verifyReferenceAction({ referenceId: latestReferenceId, leadId, status: "CONFIRMED" as ReferenceStatus })
+            onClick={() => void execute(
+              () => verifyReferenceAction({ referenceId: latestReferenceId, leadId, status: "CONFIRMED" as ReferenceStatus }),
+              "Referência confirmada.",
             )}
           >
             <UserCheck className="w-3.5 h-3.5 mr-1.5" />
@@ -103,7 +114,7 @@ export function LeadWorkflowActions({
           const result = await addReferenceAction({ leadId, name: referenceName });
           if (result.ok) setReferenceName("");
           return result;
-        })}
+        }, "Referência adicionada.")}
         className="flex items-center gap-2"
       >
         <Input
@@ -121,7 +132,11 @@ export function LeadWorkflowActions({
       )}
 
       <form
-        action={() => void execute(() => addAssessmentAction({ leadId, ...(notes.trim() ? { notes } : {}) }))}
+        action={() => void execute(async () => {
+          const result = await addAssessmentAction({ leadId, ...(notes.trim() ? { notes } : {}) });
+          if (result.ok) setNotes("");
+          return result;
+        }, "Avaliação registrada.")}
         className="flex items-start gap-2"
       >
         <textarea
@@ -141,6 +156,11 @@ export function LeadWorkflowActions({
         <p role="alert" className="flex items-center gap-1.5 text-sm text-red-600">
           <AlertCircle className="w-4 h-4 shrink-0" />
           {error}
+        </p>
+      )}
+      {success && (
+        <p role="status" className="text-sm text-emerald-600">
+          {success}
         </p>
       )}
     </section>

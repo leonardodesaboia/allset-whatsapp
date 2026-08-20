@@ -37,6 +37,7 @@ import {
   resumeRecruitmentConversationAction,
   confirmTermsAcceptanceAction,
 } from "../actions";
+import { currentOperationalTestMilestone, nextOperationalTestMilestone } from "@/application/recruitment/onboarding-operational-test.usecase";
 
 const PIPELINE_ORDER = [
   "LEAD", "PRE_CADASTRO", "TRIAGEM", "CONVERSA_PENDENTE",
@@ -67,6 +68,8 @@ const WOULD_HIRE_AGAIN_LABELS: Record<string, string> = {
 
 export default async function LeadProfilePage({ params }: { params: Promise<{ leadId: string }> }) {
   const { leadId } = await params;
+  // Reject non-UUID paths early to avoid Prisma P2023 errors on invalid input.
+  if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(leadId)) notFound();
 
   const [lead, requirements, onboardingContents, validationPolicy, activeTerms] = await Promise.all([
     prisma.recruitmentLead.findUnique({
@@ -92,28 +95,32 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
   ]);
 
   if (!lead) notFound();
-  const recruitmentConversation = await prisma.recruitmentConversation.findUnique({ where: { leadId } });
 
-  const [inboundMessages, outboundMessages] = lead.phoneE164
-    ? await Promise.all([
-        prisma.inboundMessage.findMany({
+  const [recruitmentConversation, inboundMessages, outboundMessages] = await Promise.all([
+    prisma.recruitmentConversation.findUnique({ where: { leadId } }),
+    lead.phoneE164
+      ? prisma.inboundMessage.findMany({
           where: { sender: lead.phoneE164 },
           orderBy: { receivedAt: "asc" },
           take: 150,
-        }),
-        prisma.outboxMessage.findMany({
+        })
+      : Promise.resolve([] as Awaited<ReturnType<typeof prisma.inboundMessage.findMany>>),
+    lead.phoneE164
+      ? prisma.outboxMessage.findMany({
           where: { recipient: lead.phoneE164, status: { in: ["SENT", "FAILED", "DEAD_LETTER"] } },
           orderBy: { createdAt: "asc" },
           take: 150,
-        }),
-      ])
-    : [[], []] as const;
+        })
+      : Promise.resolve([] as Awaited<ReturnType<typeof prisma.outboxMessage.findMany>>),
+  ]);
+
+  const messagesCapped = inboundMessages.length + outboundMessages.length >= 150;
 
   const openInterview = lead.interviews.find((i) => !i.endedAt);
   const latestReference = lead.references[0];
   const activeTest = lead.operationalTests[0];
-  const lastTestEvent = activeTest?.events.at(-1)?.type;
-  const nextTestEvent = lastTestEvent === "STARTED" ? "ACCEPTED" : lastTestEvent === "ACCEPTED" ? "EN_ROUTE" : lastTestEvent === "EN_ROUTE" ? "ARRIVED" : lastTestEvent === "ARRIVED" ? "COMPLETED" : null;
+  const currentTestMilestone = currentOperationalTestMilestone(activeTest?.events ?? []);
+  const nextTestEvent = nextOperationalTestMilestone(activeTest?.events ?? []);
   const completedContentIds = new Set(lead.onboardingProgress.map((p) => p.contentId));
   const latestDecision = lead.validationDecisions[0];
   const overdue = lead.nextActionAt != null && lead.nextActionAt < new Date();
@@ -240,6 +247,11 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
           </CardHeader>
           <CardContent className="px-0 pb-4">
             <ConversationPanel messages={timeline} />
+            {messagesCapped && (
+              <p className="px-4 pt-2 text-xs text-slate-400">
+                Exibindo as últimas 150 mensagens. Mensagens anteriores não são mostradas.
+              </p>
+            )}
           </CardContent>
         </Card>
       )}
@@ -543,7 +555,7 @@ export default async function LeadProfilePage({ params }: { params: Promise<{ le
                         <SubmitButton variant="secondary" size="sm" pendingLabel="Salvando…">Registrar: {nextTestEvent}</SubmitButton>
                       </ActionFeedbackForm>
                     )}
-                    {lastTestEvent !== "COMPLETED" && (
+                    {currentTestMilestone !== "COMPLETED" && (
                       <ActionFeedbackForm action={async () => {
                         "use server";
                         return recordOperationalTestEventAction({ testId: activeTest.id, leadId, type: "HELP" });

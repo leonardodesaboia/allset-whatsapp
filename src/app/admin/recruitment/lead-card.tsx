@@ -17,13 +17,26 @@ export interface LeadCardData {
 }
 
 export function LeadCard({ lead }: { lead: LeadCardData }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: lead.id });
-  const overdue = lead.nextActionAt !== null && new Date(lead.nextActionAt) < new Date();
+  const {
+    attributes,
+    listeners,
+    setActivatorNodeRef,
+    setNodeRef,
+    transform,
+    isDragging,
+  } = useDraggable({ id: lead.id });
+  const overdue =
+    lead.nextActionAt !== null && new Date(lead.nextActionAt) < new Date();
+  const accessibleName = lead.fullName ?? "profissional sem nome";
 
   return (
     <article
       ref={setNodeRef}
-      style={{ transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined }}
+      style={{
+        transform: transform
+          ? `translate(${transform.x}px, ${transform.y}px)`
+          : undefined,
+      }}
       data-testid={`card-${lead.id}`}
       className={cn(
         "bg-white rounded-md border border-slate-200 p-3 shadow-sm select-none",
@@ -31,9 +44,17 @@ export function LeadCard({ lead }: { lead: LeadCardData }) {
         overdue && "border-l-2 border-l-red-400"
       )}
     >
-      <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing">
+      <div
+        ref={setActivatorNodeRef}
+        {...attributes}
+        {...listeners}
+        aria-label={`Mover ${accessibleName}`}
+        className="cursor-grab rounded-sm outline-none active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+      >
         <p className="text-sm font-semibold text-slate-900 leading-tight mb-1.5">
-          {lead.fullName ?? <span className="text-slate-400 italic">(sem nome)</span>}
+          {lead.fullName ?? (
+            <span className="text-slate-400 italic">(sem nome)</span>
+          )}
         </p>
 
         {lead.neighborhood && (
@@ -51,15 +72,17 @@ export function LeadCard({ lead }: { lead: LeadCardData }) {
         )}
 
         {lead.nextAction && (
-          <p className={cn(
-            "flex items-start gap-1 text-xs mt-1.5 rounded px-1.5 py-1",
-            overdue
-              ? "bg-red-50 text-red-700"
-              : "bg-slate-50 text-slate-600"
-          )}>
-            {overdue
-              ? <AlertCircle className="w-3 h-3 shrink-0 mt-px" />
-              : <Clock className="w-3 h-3 shrink-0 mt-px" />}
+          <p
+            className={cn(
+              "flex items-start gap-1 text-xs mt-1.5 rounded px-1.5 py-1",
+              overdue ? "bg-red-50 text-red-700" : "bg-slate-50 text-slate-600"
+            )}
+          >
+            {overdue ? (
+              <AlertCircle className="w-3 h-3 shrink-0 mt-px" />
+            ) : (
+              <Clock className="w-3 h-3 shrink-0 mt-px" />
+            )}
             <span className="leading-tight">{lead.nextAction}</span>
           </p>
         )}
@@ -69,10 +92,11 @@ export function LeadCard({ lead }: { lead: LeadCardData }) {
         <QuickNoteModal leadId={lead.id} />
         <Link
           href={`/admin/recruitment/${lead.id}`}
+          aria-label={`Abrir perfil de ${accessibleName}`}
           className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium"
         >
           Abrir
-          <ExternalLink className="w-3 h-3" />
+          <ExternalLink className="w-3 h-3" aria-hidden />
         </Link>
       </div>
     </article>
