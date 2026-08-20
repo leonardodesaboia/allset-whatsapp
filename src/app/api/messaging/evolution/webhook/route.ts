@@ -7,6 +7,8 @@ import { logger } from "@/infrastructure/observability/logger";
 import { isValidEvolutionWebhook, normalizeEvolutionWebhook } from "@/infrastructure/messaging/evolution-webhook";
 import { createMessagingGatewayRegistry } from "@/infrastructure/messaging/messaging-runtime";
 import { PayloadTooLargeError, parseJsonBody } from "@/infrastructure/http/parse-json-body";
+import { publishJobSafe } from "@/infrastructure/jobs/publish-job";
+import { JOB_NAME } from "@/infrastructure/jobs/job-names";
 
 export const runtime = "nodejs";
 const MAX_WEBHOOK_BYTES = 1_048_576;
@@ -39,7 +41,12 @@ export async function POST(request: Request) {
     const received = await processInboundEvent(prisma, { ...event, provider: "evolution", actor: "evolution:webhook" });
     if (received.duplicate && received.message.processedAt) return Response.json({ ok: true, duplicate: true });
     if (event.payload.type === "AUDIO") {
-      // A mídia será baixada por um job específico antes de o operador classificá-la.
+      // Worker downloads, transcribes and routes. Fallback: cron/download-audio.
+      publishJobSafe({
+        name: JOB_NAME.RECEIVED_AUDIO,
+        jobId: `received-audio:${received.message.id}`,
+        payload: { inboundMessageId: received.message.id },
+      }).catch((err) => logger.error({ err }, "Falha ao publicar job de áudio"));
       return Response.json({ ok: true, needsMediaDownload: true }, { status: 202 });
     }
 
@@ -49,9 +56,39 @@ export async function POST(request: Request) {
       text: event.payload.text,
       provider: "evolution",
     });
-    dispatchNextOutboxMessage(prisma, createMessagingGatewayRegistry(), "system:webhook-dispatch").catch(
-      (err) => logger.error({ err }, "Falha ao despachar outbox inline no webhook"),
-    );
+    // Schedule a delayed reengagement check whenever a recruitment message is processed.
+    // Stable jobId = at most one pending check per conversation (BullMQ dedup).
+    // The processor re-verifies lastInboundAt before sending, so a late message is safe.
+    if (result.routed === "recruitment") {
+      prisma.recruitmentConversation
+        .findFirst({
+          where: { lead: { phoneE164: event.sender } },
+          select: { id: true, reengagementCount: true, state: true },
+        })
+        .then((conv) => {
+          if (!conv || conv.state === "COMPLETED" || conv.state === "PAUSED" || conv.state === "MANUAL_REVIEW" || conv.state === "INTRODUCTION") return;
+          return publishJobSafe({
+            name: JOB_NAME.RECRUITMENT_REENGAGEMENT,
+            jobId: `reengagement:${conv.id}`,
+            payload: { conversationId: conv.id, reengagementCount: conv.reengagementCount },
+            delay: env.RECRUITMENT_REENGAGEMENT_AFTER_HOURS * 60 * 60 * 1000,
+          });
+        })
+        .catch((err) => logger.error({ err }, "Falha ao agendar job de reengajamento"));
+    }
+    // Publish a drain trigger. Fallback: worker picks up any remaining pending messages.
+    // If REDIS_URL is not set, dispatch inline (keeps existing behavior).
+    if (process.env.REDIS_URL) {
+      publishJobSafe({
+        name: JOB_NAME.MESSAGE_DISPATCH,
+        jobId: `message-dispatch:drain:${Math.floor(Date.now() / 5000)}`,
+        payload: {},
+      }).catch((err) => logger.error({ err }, "Falha ao publicar job de dispatch"));
+    } else {
+      dispatchNextOutboxMessage(prisma, createMessagingGatewayRegistry(), "system:webhook-dispatch").catch(
+        (err) => logger.error({ err }, "Falha ao despachar outbox inline no webhook"),
+      );
+    }
     return Response.json({ ok: true, ...(received.duplicate ? { recovered: true } : {}), ...result });
   } catch (error) {
     logger.error({ err: error, provider: "evolution", externalId: event.externalId }, "Falha ao processar webhook da Evolution");
