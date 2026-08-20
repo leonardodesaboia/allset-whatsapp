@@ -1,6 +1,7 @@
-import type { LeadOrigin, Prisma, PrismaClient, RecruitmentLead } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { LeadOrigin, PrismaClient, RecruitmentLead } from "@prisma/client";
 import { DomainError } from "../../domain/shared/domain-error";
-import { ok, type Result } from "../../domain/shared/result";
+import { err, ok, type Result } from "../../domain/shared/result";
 import { recordAuditLog } from "../audit/record-audit-log.usecase";
 
 export interface CreateLeadInput {
@@ -13,7 +14,8 @@ export interface CreateLeadInput {
 }
 
 export async function createLeadUseCase(prisma: PrismaClient, input: CreateLeadInput): Promise<Result<RecruitmentLead, DomainError>> {
-  return prisma.$transaction(async (tx) => {
+  try {
+    return await prisma.$transaction(async (tx) => {
     const lead = await tx.recruitmentLead.create({
       data: {
         origin: input.origin, lastInteractionAt: new Date(),
@@ -30,6 +32,12 @@ export async function createLeadUseCase(prisma: PrismaClient, input: CreateLeadI
     });
     await tx.leadEvent.create({ data: { leadId: lead.id, type: "LEAD_CREATED", description: "Lead criado", actor: input.actor } });
     await recordAuditLog(tx, { actor: input.actor, action: "LEAD_CREATED", entityType: "RecruitmentLead", entityId: lead.id, metadata: { origin: lead.origin } });
-    return ok(lead);
-  });
+      return ok(lead);
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return err(new DomainError("Telefone já cadastrado", "PHONE_ALREADY_EXISTS"));
+    }
+    throw error;
+  }
 }
