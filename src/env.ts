@@ -41,6 +41,9 @@ const envSchema = z.object({
     }),
   BETTER_AUTH_URL: z.string().url(),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  E2E_DISABLE_AUTH_RATE_LIMIT: optionalEnv(
+    z.literal("true").transform(() => true as const),
+  ),
   EVOLUTION_BASE_URL: optionalEnv(z.string().url()),
   EVOLUTION_API_KEY: optionalEnv(z.string().min(1)),
   EVOLUTION_INSTANCE: optionalEnv(z.string().min(1)),
@@ -48,6 +51,10 @@ const envSchema = z.object({
   INTERNAL_JOB_SECRET: optionalEnv(z.string().min(32)),
   CRON_SECRET: optionalEnv(z.string().min(32)),
   OPENAI_API_KEY: optionalEnv(z.string().min(1)),
+  REDIS_URL: optionalEnv(z.string().url()),
+  JOB_QUEUE_PREFIX: z.string().trim().min(1).max(64).default("allset:development"),
+  WORKER_CONCURRENCY_MESSAGE_DISPATCH: positiveIntegerEnv(3),
+  WORKER_CONCURRENCY_RECEIVED_AUDIO: positiveIntegerEnv(2),
   RECRUITMENT_REENGAGEMENT_AFTER_HOURS: positiveIntegerEnv(24),
   RECRUITMENT_REENGAGEMENT_MAX_ATTEMPTS: positiveIntegerEnv(2),
   OPPORTUNITY_EXPIRY_HOURS: positiveIntegerEnv(4),
@@ -63,8 +70,20 @@ const envSchema = z.object({
   // URL pública do MinIO (quando o endpoint interno difere do URL acessível externamente).
   S3_PUBLIC_URL: optionalEnv(z.string().url()),
 }).superRefine((value, context) => {
+  if (value.E2E_DISABLE_AUTH_RATE_LIMIT) {
+    const hostname = new URL(value.BETTER_AUTH_URL).hostname;
+    const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+    if (!loopbackHosts.has(hostname)) {
+      context.addIssue({
+        code: "custom",
+        path: ["E2E_DISABLE_AUTH_RATE_LIMIT"],
+        message: "só pode ser habilitado pelo harness E2E em uma origem loopback",
+      });
+    }
+  }
+
   if (value.NODE_ENV !== "production") return;
-  for (const key of ["INTERNAL_JOB_SECRET", "CRON_SECRET"] as const) {
+  for (const key of ["EVOLUTION_WEBHOOK_SECRET", "INTERNAL_JOB_SECRET", "CRON_SECRET"] as const) {
     if (!value[key]) context.addIssue({ code: "custom", path: [key], message: "é obrigatório em produção" });
   }
 });
@@ -74,6 +93,7 @@ export type Env = z.infer<typeof envSchema>;
 const BUILD_DATABASE_URL = "postgresql://build:build@localhost:5432/build";
 const BUILD_AUTH_SECRET = "build-only-secret-not-valid-for-runtime";
 const BUILD_AUTH_URL = "http://localhost:3000";
+const BUILD_EVOLUTION_WEBHOOK_SECRET = "build-only-webhook-secret-not-valid-for-runtime";
 const BUILD_INTERNAL_JOB_SECRET = "build-only-internal-job-secret-not-valid-for-runtime";
 const BUILD_CRON_SECRET = "build-only-cron-secret-not-valid-for-runtime";
 
@@ -90,6 +110,7 @@ export function sourceForModuleEvaluation(source: Record<string, string | undefi
     DATABASE_URL: source.DATABASE_URL ?? BUILD_DATABASE_URL,
     BETTER_AUTH_SECRET: source.BETTER_AUTH_SECRET ?? BUILD_AUTH_SECRET,
     BETTER_AUTH_URL: source.BETTER_AUTH_URL ?? BUILD_AUTH_URL,
+    EVOLUTION_WEBHOOK_SECRET: source.EVOLUTION_WEBHOOK_SECRET ?? BUILD_EVOLUTION_WEBHOOK_SECRET,
     INTERNAL_JOB_SECRET: source.INTERNAL_JOB_SECRET ?? BUILD_INTERNAL_JOB_SECRET,
     CRON_SECRET: source.CRON_SECRET ?? BUILD_CRON_SECRET,
   };

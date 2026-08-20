@@ -83,7 +83,20 @@ describe("parseEnv", () => {
         BETTER_AUTH_URL: "https://allset.example",
         NODE_ENV: "production",
       }),
-    ).toThrow(/INTERNAL_JOB_SECRET.*CRON_SECRET/);
+    ).toThrow(/EVOLUTION_WEBHOOK_SECRET.*INTERNAL_JOB_SECRET.*CRON_SECRET/);
+  });
+
+  it("exige o segredo do webhook Evolution em produção", () => {
+    expect(() =>
+      parseEnv({
+        DATABASE_URL: "postgresql://user:pass@localhost:5432/db",
+        BETTER_AUTH_SECRET: "a".repeat(32),
+        BETTER_AUTH_URL: "https://allset.example",
+        NODE_ENV: "production",
+        INTERNAL_JOB_SECRET: "b".repeat(32),
+        CRON_SECRET: "c".repeat(32),
+      }),
+    ).toThrow(/EVOLUTION_WEBHOOK_SECRET.*obrigatório em produção/);
   });
 
   it("aceita segredos dos jobs em produção", () => {
@@ -92,6 +105,7 @@ describe("parseEnv", () => {
       BETTER_AUTH_SECRET: "a".repeat(32),
       BETTER_AUTH_URL: "https://allset.example",
       NODE_ENV: "production",
+      EVOLUTION_WEBHOOK_SECRET: "d".repeat(32),
       INTERNAL_JOB_SECRET: "b".repeat(32),
       CRON_SECRET: "c".repeat(32),
     }).CRON_SECRET).toBe("c".repeat(32));
@@ -104,5 +118,26 @@ describe("parseEnv", () => {
 
   it("não injeta valores de build fora do next build", () => {
     expect(sourceForModuleEvaluation({})).toEqual({});
+  });
+
+  it("aceita a desativação dedicada do rate limit apenas em loopback", () => {
+    expect(parseEnv({
+      DATABASE_URL: "postgresql://user:pass@localhost:5432/db",
+      BETTER_AUTH_SECRET: "a".repeat(32),
+      BETTER_AUTH_URL: "http://localhost:3100",
+      NODE_ENV: "test",
+      E2E_DISABLE_AUTH_RATE_LIMIT: "true",
+    }).E2E_DISABLE_AUTH_RATE_LIMIT).toBe(true);
+
+    expect(() => parseEnv({
+      DATABASE_URL: "postgresql://user:pass@localhost:5432/db",
+      BETTER_AUTH_SECRET: "a".repeat(32),
+      BETTER_AUTH_URL: "https://allset.example",
+      NODE_ENV: "production",
+      EVOLUTION_WEBHOOK_SECRET: "d".repeat(32),
+      INTERNAL_JOB_SECRET: "b".repeat(32),
+      CRON_SECRET: "c".repeat(32),
+      E2E_DISABLE_AUTH_RATE_LIMIT: "true",
+    })).toThrow(/E2E_DISABLE_AUTH_RATE_LIMIT/);
   });
 });
