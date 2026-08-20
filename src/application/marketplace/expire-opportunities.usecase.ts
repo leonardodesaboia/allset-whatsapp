@@ -1,15 +1,22 @@
 import type { PrismaClient } from "@prisma/client";
+import { env } from "../../env";
+import { textPayload } from "../../domain/messaging/message";
 import { recordAuditLog } from "../audit/record-audit-log.usecase";
+import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
 
 /** Expires open opportunities that have not received an acceptance by their deadline. */
 export async function expireOpportunities(
   prisma: PrismaClient,
-  input: { now?: Date } = {},
+  input: { now?: Date; opportunityId?: string } = {},
 ): Promise<{ scanned: number; expired: number }> {
   const now = input.now ?? new Date();
   const candidates = await prisma.serviceOpportunity.findMany({
-    where: { status: "OPEN", expiresAt: { lt: now } },
-    select: { id: true, bookingId: true },
+    where: {
+      status: "OPEN",
+      expiresAt: { lt: now },
+      ...(input.opportunityId ? { id: input.opportunityId } : {}),
+    },
+    select: { id: true, bookingId: true, scheduledAt: true, neighborhood: true },
   });
 
   let expired = 0;
@@ -23,10 +30,28 @@ export async function expireOpportunities(
       });
       if (!claimed.count) return false;
 
+      const pendingResponses = await tx.opportunityResponse.findMany({
+        where: { opportunityId: candidate.id, response: null },
+        include: { lead: { select: { phoneE164: true, conversation: { select: { provider: true } } } } },
+      });
+
       await tx.opportunityResponse.updateMany({
         where: { opportunityId: candidate.id, response: null },
         data: { response: "EXPIRED", respondedAt: now },
       });
+
+      for (const pending of pendingResponses) {
+        if (pending.lead.phoneE164) {
+          await enqueueOutboundMessage(tx, {
+            provider: pending.lead.conversation?.provider ?? env.MESSAGING_DEFAULT_PROVIDER,
+            recipient: pending.lead.phoneE164,
+            payload: textPayload("Infelizmente esta oportunidade expirou sem ser preenchida. Avisaremos quando surgir uma nova na sua região!"),
+            idempotencyKey: `opportunity:expired:${candidate.id}:${pending.leadId}`,
+            correlationId: candidate.id,
+            actor: "system:marketplace",
+          });
+        }
+      }
 
       // A booking can have historical expired opportunities after a recovery.
       // Only escalate it to manual review when this expiry leaves no other open

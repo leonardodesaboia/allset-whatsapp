@@ -14,6 +14,8 @@ import { textPayload } from "@/domain/messaging/message";
 import { DomainError } from "@/domain/shared/domain-error";
 import { auth } from "@/infrastructure/auth/auth";
 import { prisma } from "@/infrastructure/db/prisma-client";
+import { publishJobSafe } from "@/infrastructure/jobs/publish-job";
+import { JOB_NAME } from "@/infrastructure/jobs/job-names";
 
 const createBookingSchema = z.object({
   serviceId: z.string().uuid(),
@@ -121,6 +123,30 @@ export async function dispatchOpportunityAction(bookingId: string): Promise<Book
     if (!result.dispatched) {
       return { ok: false, error: "Nenhuma profissional elegível está disponível para este agendamento." };
     }
+
+    // Publish delayed expiration job for each newly created open opportunity.
+    // Fallback: cron/marketplace/expire runs periodically.
+    const openOpportunities = await prisma.serviceOpportunity.findMany({
+      where: { bookingId, status: "OPEN" },
+      select: { id: true, expiresAt: true },
+    });
+    for (const opportunity of openOpportunities) {
+      const delay = Math.max(0, opportunity.expiresAt.getTime() - Date.now());
+      publishJobSafe({
+        name: JOB_NAME.OPPORTUNITY_EXPIRATION,
+        jobId: `opportunity-expiration:${opportunity.id}`,
+        payload: { opportunityId: opportunity.id },
+        delay,
+      }).catch(() => undefined);
+    }
+
+    // Trigger outbox dispatch so opportunity messages go out immediately.
+    publishJobSafe({
+      name: JOB_NAME.MESSAGE_DISPATCH,
+      jobId: `message-dispatch:drain:${Math.floor(Date.now() / 5000)}`,
+      payload: {},
+    }).catch(() => undefined);
+
     revalidatePath("/admin/bookings");
     revalidatePath(`/admin/bookings/${bookingId}/opportunity`);
     return { ok: true, notified: result.notified };
@@ -160,6 +186,11 @@ export async function sendManualCustomerMessageAction(
   try {
     const result = await sendManualCustomerMessage(prisma, { bookingId, text, actor });
     if (!result.ok) return { ok: false, error: "Este pedido não possui conversa ativa com o cliente." };
+    publishJobSafe({
+      name: JOB_NAME.MESSAGE_DISPATCH,
+      jobId: `message-dispatch:drain:${Math.floor(Date.now() / 5000)}`,
+      payload: {},
+    }).catch(() => undefined);
     revalidatePath("/admin/bookings");
     return { ok: true, bookingId };
   } catch (error) {
@@ -179,6 +210,11 @@ export async function sendManualCustomerConversationMessageAction(
   try {
     const result = await sendManualCustomerMessage(prisma, { conversationId, text, actor });
     if (!result.ok) return { ok: false, error: "Conversa não encontrada." };
+    publishJobSafe({
+      name: JOB_NAME.MESSAGE_DISPATCH,
+      jobId: `message-dispatch:drain:${Math.floor(Date.now() / 5000)}`,
+      payload: {},
+    }).catch(() => undefined);
     revalidatePath("/admin/customer-conversations");
     return { ok: true };
   } catch (error) {
@@ -236,6 +272,11 @@ export async function confirmManualPaymentAction(bookingId: string): Promise<Boo
         });
       }
     });
+    publishJobSafe({
+      name: JOB_NAME.MESSAGE_DISPATCH,
+      jobId: `message-dispatch:drain:${Math.floor(Date.now() / 5000)}`,
+      payload: {},
+    }).catch(() => undefined);
     revalidatePath("/admin/bookings");
     return { ok: true, bookingId };
   } catch (error) {

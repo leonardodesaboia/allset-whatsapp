@@ -114,11 +114,20 @@ export async function processOpportunityResponse(
       return { outcome: "ALREADY_FILLED" as const };
     }
 
-    const parsed = parseOpportunityReply(input.text)?.response;
-    if (!parsed) return { outcome: "INVALID_RESPONSE" as const };
-
     const now = new Date();
     const { opportunity, lead } = response;
+
+    const parsed = parseOpportunityReply(input.text)?.response;
+    if (!parsed) {
+      await enqueueText(tx, {
+        provider: inbound.provider,
+        recipient: lead.phoneE164,
+        text: "Não entendi sua resposta. Responda *SIM* para aceitar ou *NÃO* para recusar a oportunidade.",
+        idempotencyKey: `opportunity:${response.id}:invalid:${inbound.id}`,
+        correlationId: opportunity.id,
+      });
+      return { outcome: "INVALID_RESPONSE" as const };
+    }
 
     if (parsed === "DECLINED") {
       const declined = await tx.opportunityResponse.updateMany({
@@ -160,7 +169,13 @@ export async function processOpportunityResponse(
       return { outcome: "ALREADY_FILLED" as const };
     }
 
-    const booking = await tx.booking.findUniqueOrThrow({ where: { id: opportunity.bookingId } });
+    const booking = await tx.booking.findUniqueOrThrow({
+      where: { id: opportunity.bookingId },
+      include: {
+        customer: { select: { phoneE164: true } },
+        customerConversation: { select: { provider: true } },
+      },
+    });
     const transition = transitionBookingStatus(
       booking.status as BookingStatus,
       "PROFESSIONAL_ASSIGNED",
@@ -199,6 +214,16 @@ export async function processOpportunityResponse(
       idempotencyKey: `opportunity:${opportunity.id}:${response.id}:confirmed`,
       correlationId: opportunity.id,
     });
+
+    if (booking.customer.phoneE164) {
+      await enqueueText(tx, {
+        provider: booking.customerConversation?.provider ?? inbound.provider,
+        recipient: booking.customer.phoneE164,
+        text: `Boa notícia! Um profissional confirmou presença para ${formatSchedule(opportunity.scheduledAt)} em ${opportunity.neighborhood}. Em breve você receberá mais detalhes.`,
+        idempotencyKey: `opportunity:${opportunity.id}:customer-assigned`,
+        correlationId: opportunity.id,
+      });
+    }
 
     const pendingResponses = await tx.opportunityResponse.findMany({
       where: { opportunityId: opportunity.id, response: null },

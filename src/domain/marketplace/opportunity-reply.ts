@@ -10,11 +10,11 @@ export function parseOpportunityReply(text: string): ParsedOpportunityReply | nu
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toUpperCase();
-  const match = normalized.match(/^(SIM|S|NAO|N)(?:\s+([A-Z0-9]{10}))?$/);
+  const match = normalized.match(/^(SIM|S|NAO|N|1|2)(?:\s+([A-Z0-9]{10}))?$/);
   if (!match) return null;
 
   return {
-    response: match[1] === "SIM" || match[1] === "S" ? "ACCEPTED" : "DECLINED",
+    response: match[1] === "SIM" || match[1] === "S" || match[1] === "1" ? "ACCEPTED" : "DECLINED",
     responseToken: match[2] ?? null,
   };
 }
