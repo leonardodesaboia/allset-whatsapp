@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 const e2ePort = Number(process.env.E2E_PORT ?? "3000");
 const e2eBaseUrl = `http://localhost:${e2ePort}`;
+const e2eWebhookSecret = "e2e-only-webhook-secret-at-least-32-characters";
 
 /**
  * Configuração do Playwright para o E2E de login admin (Task 10).
@@ -42,7 +43,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `pnpm build --webpack && mkdir -p .next/standalone/.next/static .next/standalone/public && cp -R .next/static/. .next/standalone/.next/static/ && cp -R public/. .next/standalone/public/ && BETTER_AUTH_URL=${e2eBaseUrl} PORT=${e2ePort} node .next/standalone/server.js`,
+    command: `EVOLUTION_WEBHOOK_SECRET=${e2eWebhookSecret} pnpm build --webpack && mkdir -p .next/standalone/.next/static .next/standalone/public && cp -R .next/static/. .next/standalone/.next/static/ && cp -R public/. .next/standalone/public/ && E2E_DISABLE_AUTH_RATE_LIMIT=true EVOLUTION_WEBHOOK_SECRET=${e2eWebhookSecret} BETTER_AUTH_URL=${e2eBaseUrl} PORT=${e2ePort} node .next/standalone/server.js`,
     url: e2eBaseUrl,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
