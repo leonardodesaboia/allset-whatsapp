@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import process from "node:process";
 
 /**
  * Route handlers are evaluated while `next build` collects metadata. They
