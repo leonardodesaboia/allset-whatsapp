@@ -1,11 +1,19 @@
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startTestDatabase } from "../../../tests/integration/test-db";
-import { decideOperationalTest, recordOperationalTestEvent, startOperationalTest } from "./onboarding-operational-test.usecase";
+import { decideOperationalTest, nextOperationalTestMilestone, recordOperationalTestEvent, startOperationalTest } from "./onboarding-operational-test.usecase";
 import { transitionLeadStatusUseCase } from "./transition-lead-status.usecase";
 import { processRecruitmentAnswer } from "./conversation-engine.usecase";
 
 const adminEmail = "admin:recruitment-gates@test.local";
+
+describe("operational milestone projection", () => {
+  it("derives the next milestone independently of HELP events and input order", () => {
+    const events = [{ type: "HELP" }, { type: "ACCEPTED" }, { type: "STARTED" }];
+
+    expect(nextOperationalTestMilestone(events)).toBe("EN_ROUTE");
+  });
+});
 
 describe("recruitment progression gates", () => {
   let prisma: PrismaClient;
@@ -78,6 +86,29 @@ describe("recruitment progression gates", () => {
     await decideOperationalTest(prisma, { testId: test.id, result: "PASSED", actor: adminEmail });
 
     expect((await prisma.operationalTest.findUniqueOrThrow({ where: { id: test.id } })).result).toBe("PASSED");
+    expect((await prisma.recruitmentLead.findUniqueOrThrow({ where: { id: lead.id } })).status).toBe("EM_VALIDACAO");
+  });
+
+  it("keeps the operational milestone sequence when HELP is recorded between milestones", async () => {
+    const { lead, test } = await operationalTestReadyToStart();
+
+    await recordOperationalTestEvent(prisma, { testId: test.id, type: "ACCEPTED", actor: adminEmail });
+    await recordOperationalTestEvent(prisma, { testId: test.id, type: "HELP", actor: adminEmail });
+    const eventsAfterHelp = await prisma.operationalTestEvent.findMany({
+      where: { testId: test.id },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(nextOperationalTestMilestone(eventsAfterHelp)).toBe("EN_ROUTE");
+
+    for (const type of ["EN_ROUTE", "ARRIVED", "COMPLETED"] as const) {
+      await recordOperationalTestEvent(prisma, { testId: test.id, type, actor: adminEmail });
+    }
+    await decideOperationalTest(prisma, { testId: test.id, result: "PASSED_WITH_SUPPORT", actor: adminEmail });
+
+    expect((await prisma.operationalTest.findUniqueOrThrow({ where: { id: test.id } }))).toMatchObject({
+      result: "PASSED_WITH_SUPPORT",
+      supportUsed: true,
+    });
     expect((await prisma.recruitmentLead.findUniqueOrThrow({ where: { id: lead.id } })).status).toBe("EM_VALIDACAO");
   });
 

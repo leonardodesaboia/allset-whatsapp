@@ -8,7 +8,44 @@ import { recordAuditLog } from "../audit/record-audit-log.usecase";
 const maxDocumentBytes = 15 * 1024 * 1024;
 const allowedTypes = new Set(["image/jpeg", "image/png", "application/pdf"]);
 async function requireAdmin(prisma: PrismaClient, actor: string): Promise<void> { const admin = await prisma.user.findFirst({ where: { email: actor, role: "ADMIN" } }); if (!admin) throw new DomainError("Acesso administrativo necessário", "ADMIN_REQUIRED"); }
-export async function receiveProfessionalDocument(prisma: PrismaClient, storage: StorageProvider, input: { leadId: string; requirementId: string; contentType: string; data: Uint8Array; actor: string }): Promise<Result<{ id: string }, DomainError>> { if (!allowedTypes.has(input.contentType) || !input.data.byteLength || input.data.byteLength > maxDocumentBytes) return err(new DomainError("Documento inválido", "INVALID_DOCUMENT")); const requirement = await prisma.documentRequirement.findUnique({ where: { id: input.requirementId } }); if (!requirement?.isActive) return err(new DomainError("Requisito documental inválido", "DOCUMENT_REQUIREMENT_NOT_FOUND")); const key = `recruitment/documents/${input.leadId}/${randomUUID()}`; const stored = await storage.put({ key, contentType: input.contentType, data: input.data, ownerId: input.leadId }); try { const document = await prisma.$transaction(async (tx) => { const created = await tx.professionalDocument.create({ data: { leadId: input.leadId, requirementId: input.requirementId, storageKey: stored.key, contentType: stored.contentType, sizeBytes: stored.sizeBytes } }); await tx.leadEvent.create({ data: { leadId: input.leadId, type: "DOCUMENT_RECEIVED", description: "Documento recebido", actor: input.actor } }); await recordAuditLog(tx, { actor: input.actor, action: "PROFESSIONAL_DOCUMENT_RECEIVED", entityType: "ProfessionalDocument", entityId: created.id }); return created; }); return ok({ id: document.id }); } catch (error) { await storage.delete({ key: stored.key }); throw error; } }
+export async function receiveProfessionalDocument(
+  prisma: PrismaClient,
+  storage: StorageProvider,
+  input: { leadId: string; requirementId: string; contentType: string; data: Uint8Array; actor: string },
+): Promise<Result<{ id: string }, DomainError>> {
+  if (!allowedTypes.has(input.contentType) || !input.data.byteLength || input.data.byteLength > maxDocumentBytes)
+    return err(new DomainError("Documento inválido", "INVALID_DOCUMENT"));
+
+  const [requirement, lead] = await Promise.all([
+    prisma.documentRequirement.findUnique({ where: { id: input.requirementId } }),
+    prisma.recruitmentLead.findUnique({ where: { id: input.leadId }, select: { status: true } }),
+  ]);
+  if (!requirement?.isActive) return err(new DomainError("Requisito documental inválido", "DOCUMENT_REQUIREMENT_NOT_FOUND"));
+  if (!lead) return err(new DomainError("Lead não encontrado", "LEAD_NOT_FOUND"));
+  if (lead.status !== "DOCUMENTACAO") return err(new DomainError("Documentação não está disponível nesta etapa", "DOCUMENT_NOT_ALLOWED"));
+
+  const key = `recruitment/documents/${input.leadId}/${randomUUID()}`;
+  const sizeBytes = input.data.byteLength;
+
+  // DB record is created first so a storage upload failure leaves a traceable
+  // entry rather than an orphaned file with no corresponding DB row.
+  const document = await prisma.$transaction(async (tx) => {
+    const created = await tx.professionalDocument.create({
+      data: { leadId: input.leadId, requirementId: input.requirementId, storageKey: key, contentType: input.contentType, sizeBytes },
+    });
+    await tx.leadEvent.create({ data: { leadId: input.leadId, type: "DOCUMENT_RECEIVED", description: "Documento recebido", actor: input.actor } });
+    await recordAuditLog(tx, { actor: input.actor, action: "PROFESSIONAL_DOCUMENT_RECEIVED", entityType: "ProfessionalDocument", entityId: created.id });
+    return created;
+  });
+
+  try {
+    await storage.put({ key, contentType: input.contentType, data: input.data, ownerId: input.leadId });
+    return ok({ id: document.id });
+  } catch (error) {
+    await prisma.professionalDocument.delete({ where: { id: document.id } }).catch(() => {});
+    throw error;
+  }
+}
 export async function reviewProfessionalDocument(prisma: PrismaClient, input: { documentId: string; reviewer: string; status: "APPROVED" | "REJECTED"; reason?: string }) { await requireAdmin(prisma, input.reviewer); return prisma.$transaction(async (tx) => { const document = await tx.professionalDocument.update({ where: { id: input.documentId }, data: { status: input.status } }); await tx.documentReview.create({ data: { documentId: document.id, reviewer: input.reviewer, status: input.status, ...(input.reason !== undefined ? { reason: input.reason } : {}) } }); await tx.leadEvent.create({ data: { leadId: document.leadId, type: `DOCUMENT_${input.status}`, description: `Documento ${input.status === "APPROVED" ? "aprovado" : "rejeitado"}`, actor: input.reviewer } }); await recordAuditLog(tx, { actor: input.reviewer, action: "PROFESSIONAL_DOCUMENT_REVIEWED", entityType: "ProfessionalDocument", entityId: document.id }); return document; }); }
 export async function previewProfessionalDocument(prisma: PrismaClient, storage: StorageProvider, input: { documentId: string; actor: string }) { await requireAdmin(prisma, input.actor); const document = await prisma.professionalDocument.findUniqueOrThrow({ where: { id: input.documentId } }); return storage.getSignedUrl({ key: document.storageKey, expiresInSeconds: 300 }); }
 export async function acceptTerms(prisma: PrismaClient, input: { leadId: string; termsVersionId: string; channel: string; consentId: string; phoneE164?: string; ipAddress?: string }) { return prisma.$transaction(async (tx) => { const [lead, terms] = await Promise.all([tx.recruitmentLead.findUnique({ where: { id: input.leadId } }), tx.termsVersion.findUnique({ where: { id: input.termsVersionId } })]); if (!lead) throw new DomainError("Lead não encontrado", "LEAD_NOT_FOUND"); if (!terms?.isActive) throw new DomainError("Versão de termos inativa", "TERMS_VERSION_INACTIVE"); if (input.phoneE164 && lead.phoneE164 && input.phoneE164 !== lead.phoneE164) throw new DomainError("Telefone de aceite não corresponde ao lead", "TERMS_PHONE_MISMATCH"); const acceptance = await tx.termsAcceptance.upsert({ where: { leadId_termsVersionId: { leadId: input.leadId, termsVersionId: input.termsVersionId } }, create: input, update: {} }); await recordAuditLog(tx, { actor: `consent:${input.channel}`, action: "TERMS_ACCEPTED", entityType: "TermsAcceptance", entityId: acceptance.id, metadata: { version: terms.version, consentId: acceptance.consentId } }); return acceptance; }); }
