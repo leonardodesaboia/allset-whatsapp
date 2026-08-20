@@ -142,3 +142,147 @@ Este quadro separa evidência já obtida de itens que ainda exigem execução ou
 - `src/app/login/page.tsx`, `src/app/admin/mobile-nav.tsx`
 - `playwright.config.ts`, `tests/e2e/*`
 - `prisma/seed.ts`, `prisma/migrations/20260819120000_*`, `prisma/migrations/20260819130000_*`
+
+## Continuação da auditoria — 2026-08-20
+
+Esta rodada retomou os itens pendentes acima, refez a validação direta do código e executou revisões separadas de engenharia, segurança e QA/UX. Os estados desta seção substituem, quando conflitantes, o checklist de 2026-08-19.
+
+### Novos problemas encontrados e corrigidos
+
+- Eventos `HELP` intercalados no teste operacional faziam o backend perder o marco atual e a UI ocultar a próxima etapa. A projeção da sequência agora ignora eventos auxiliares, usa o marco mais avançado e é compartilhada pelo backend e pela tela. Foram adicionadas regressões pura e de integração.
+- Ranges de disponibilidade que atravessam a virada da semana, como `sexta a domingo` e `sábado a segunda`, eram expandidos como ranges lineares. O parser agora avança modularmente pelos sete dias e possui cobertura para os dois casos circulares.
+- O `ModalDialog` não restaurava foco de forma confiável e podia perder o foco inicial durante a finalização tardia de uma navegação do App Router. Os gatilhos permanecem montados, o diálogo contém foco programático, restaura o gatilho ao fechar e mantém fallback de foco inicial.
+- Os formulários de mensagem ao cliente usavam largura fixa (`w-96`) e podiam estourar em 320px. Agora usam largura fluida, limite máximo e ações empilhadas em telas estreitas.
+- O Kanban não oferecia movimento por teclado. Foi adicionado `KeyboardSensor`, alça nomeada e focável e resolução determinística da coluna de destino para `Space → ArrowLeft/ArrowRight → Space`.
+- A suíte E2E completa excedia o rate limit do Better Auth por reutilizar o mesmo IP durante vários logins. O harness possui bypass explícito somente para origem loopback, com defesa duplicada na configuração de autenticação; o comportamento padrão e de produção continua protegido.
+- `EVOLUTION_WEBHOOK_SECRET` podia faltar em produção e deixar todo inbound permanentemente rejeitado. A validação de ambiente agora exige o segredo em produção. O E2E fornece apenas um valor efêmero de teste durante build e execução standalone.
+- O teste E2E de nota rápida usava um seletor ambíguo quando havia mais de uma profissional na mesma coluna. O seletor agora está isolado ao card esperado.
+
+### Evidências atualizadas
+
+Executados com sucesso em 2026-08-20:
+
+```text
+pnpm lint
+pnpm typecheck
+pnpm test                         # 26 arquivos, 88 testes
+pnpm test:integration             # 10 arquivos, 36 testes
+pnpm architecture:check           # 159 módulos, 533 dependências
+pnpm dead-code:check              # apenas 6 sugestões de configuração do Knip
+EVOLUTION_WEBHOOK_SECRET=<efêmero> pnpm build --webpack
+E2E_PORT=3100 pnpm exec playwright test --workers=1 --reporter=list
+                                     # 8 testes standalone aprovados
+git diff --check
+```
+
+O E2E completo agora cobre login/logout, visitante sem sessão, headers, menu móvel em 375px, modal de mensagem em 320px sem overflow, autofoco/restauração de foco, nota rápida, cadastro manual e movimento do Kanban por teclado.
+
+### Estado atualizado dos pontos pendentes
+
+| Critério | Evidência de 2026-08-20 | Estado |
+| --- | --- | --- |
+| E2E mobile de 375px | `admin-mobile-nav.spec.ts` passou no standalone. | Concluído |
+| Modal em 320px | Mensagem ao cliente passou sem overflow, com autofoco e restauração. | Concluído |
+| Kanban por teclado | Movimento entre colunas passou no Chromium standalone. | Concluído |
+| Suíte E2E completa | 8/8 testes passaram com um worker e rate limit isolado ao harness loopback. | Concluído no ambiente atual |
+| Viewports 390, 430, 768, 1024, 1280 e 1440px | Ainda não existe matriz automatizada/screenshot registrada para todas as superfícies. | Pendente |
+| Cobertura mínima de 80% | O repositório não possui provider/configuração de coverage do Vitest; as suítes passam, mas o percentual não é mensurável. | Pendente |
+| Dependências de produção | `pnpm audit --prod` continua apontando 1 alerta alto em `deepmerge-ts < 8`, transitivo do Prisma 6.19.3. | Pendente de upgrade Prisma 7 |
+| Runtime suportado | Toda a validação local desta continuação ainda ocorreu em Node 22.18.0; o projeto exige Node 24+. | Pendente de execução em Node 24 |
+| Evolution, storage, transcrição e crons reais | Código, proteção e runbooks foram auditados; credenciais, scheduler e observabilidade reais não estão disponíveis localmente. | Pendente de homologação externa |
+
+### Áreas que ainda exigem análise ou evidência
+
+Esta lista não representa defeitos confirmados. Ela registra superfícies que não receberam evidência suficiente nesta auditoria e, portanto, ainda não devem ser consideradas aprovadas.
+
+| Prioridade | Área | Lacuna atual | Evidência necessária para fechar |
+| --- | --- | --- | --- |
+| P0 | Runtime e deploy de produção | A matriz foi executada em Node 22, mas o artefato-alvo exige Node 24; o build de imagem Docker não foi exercitado nesta rodada. | Build e smoke do container em Node 24, `prisma migrate deploy`, health check autenticado e rollback documentado. |
+| P0 | Dependências vulneráveis | O Prisma 6 mantém o alerta alto transitivo de `deepmerge-ts`. | Upgrade planejado para Prisma 7, audit sem alerta alto, migrations e smoke de deploy repetidos. |
+| P1 | Integrações externas | Evolution, S3/MinIO, OpenAI/Whisper e scheduler real foram cobertos por mocks e testes de integração, não pelo caminho hospedado. | Homologação em staging: webhook assinado, download de mídia, transcrição, outbox, cron e observabilidade dos jobs. |
+| P1 | Confiabilidade de dados | As migrations passam em bancos descartáveis; backup, restore, deploy incremental e rollback em uma cópia realista não foram ensaiados. | Ensaio de restore, `migrate deploy` contra snapshot e procedimento de rollback/mitigação registrado. |
+| P1 | Responsividade e navegadores | Há evidência em 320px e 375px no Chromium; faltam 390, 430, tablet, desktop largo, zoom/text scaling e navegadores alternativos. | Matriz de screenshots/smoke para 390, 430, 768, 1024, 1280 e 1440px, além de Safari/Firefox quando aplicável. |
+| P1 | Acessibilidade assistiva | Foco, Escape, Tab e teclado do Kanban foram exercitados, mas não há avaliação por leitor de tela, contraste medido ou zoom de 200%. | Auditoria assistiva com NVDA/VoiceOver, contraste AA e smoke com zoom/texto ampliado. |
+| P2 | Cobertura e qualidade de testes | As suítes passam, mas o provider de coverage não está configurado e o mínimo de 80% não é verificável. | Provider do Vitest, thresholds explícitos e relatório publicado no CI. |
+| P2 | Resiliência e carga | Não houve teste de carga, concorrência sustentada de outbox/webhook, indisponibilidade de provedores ou recuperação após restart. | Cenários de carga e falha para webhook, outbox, cron, storage e transcrição, com métricas e limites definidos. |
+| P2 | Operação e segurança contínua | Há testes de headers e secrets, mas faltam rotação de segredos, alertas operacionais, retenção de logs/audit e revisão de permissões do ambiente hospedado. | Runbooks testados, alertas configurados, política de retenção e revisão de acesso ao ambiente. |
+
+### Ordem sugerida para a próxima rodada
+
+1. Executar a mesma matriz em Node 24 e validar o container Docker, pois isso bloqueia a equivalência entre ambiente auditado e produção.
+2. Homologar mensageria, áudio, storage e crons em staging com monitoramento ativo.
+3. Planejar o upgrade Prisma 6 → 7 e eliminar o alerta alto sem usar override transitivo forçado.
+4. Instalar coverage no Vitest e adicionar a matriz de viewports/acessibilidade assistiva.
+5. Ensaiar restore/migration e cenários de indisponibilidade antes de ampliar tráfego real.
+
+### Conclusão desta continuação
+
+As pendências locais de E2E móvel originalmente registradas foram fechadas e regressões adicionais de domínio/interface/harness foram corrigidas. A auditoria integral ainda não deve ser declarada encerrada até existir evidência em Node 24, coverage mensurável de pelo menos 80%, matriz responsiva restante, upgrade do Prisma que remova o alerta alto e homologação das integrações externas em staging/produção.
+
+---
+
+## Correções de interface administrativa e feature de reengajamento — 2026-08-20 (sessão 3)
+
+### Escopo
+
+Esta rodada focou em duas frentes: (a) revisão e correção de seis pontos de UX/acessibilidade na interface administrativa de recrutamento, e (b) avaliação e implementação de features e lógica de produto pendentes ordenadas por impacto.
+
+### Correções de interface administrativa
+
+#### `src/app/admin/recruitment/[leadId]/page.tsx`
+
+- Três queries sequenciais (`recruitmentConversation`, `inboundMessage`, `outboxMessage`) foram consolidadas em um único `Promise.all`, eliminando round-trips desnecessários ao banco.
+- A busca de mensagens agora usa `take: 150` para evitar carregamento irrestrito do histórico. Quando o limite é atingido, um aviso é exibido no topo da timeline: *"Exibindo as últimas 150 mensagens. Mensagens anteriores não são mostradas."*
+
+#### `src/app/admin/recruitment/lead-card.tsx`
+
+- O link "Abrir" no cartão do Kanban não tinha rótulo acessível — leitores de tela liam apenas "Abrir" sem contexto. Foi adicionado `aria-label={`Abrir perfil de ${accessibleName}`}` e o ícone marcado com `aria-hidden`.
+
+#### `src/app/admin/recruitment/quick-note-modal.tsx`
+
+- O `<textarea>` de nota rápida não impunha limite de caracteres. Foi adicionado `maxLength={1000}` e um contador visível `{content.length}/1000` abaixo do campo.
+
+#### `src/app/admin/recruitment/lead-workflow-actions.tsx`
+
+- Ações de workflow não forneciam feedback de sucesso — o operador não sabia se a operação tinha sido concluída. Foi adicionado estado `success` com auto-limpeza em 3 s e `role="status"` para acessibilidade.
+- O campo de nota de avaliação não era limpo após salvar. Agora é limpo programaticamente quando `result.ok` é verdadeiro.
+- Todas as ações (iniciar entrevista, avançar para referências, pedir complementação, mover para base futura, reprovar, confirmar referência, adicionar referência, registrar avaliação) passam mensagem de sucesso contextual, por exemplo: *"Entrevista iniciada."*, *"Avançado para referências."*, *"Avaliação registrada."*
+
+### Avaliação de features e lógica de produto
+
+Foram levantadas cinco áreas candidatas e avaliadas diretamente no código:
+
+| # | Área | Estado encontrado |
+| --- | --- | --- |
+| 1 | Worker de áudio (download → transcrição → roteamento) | **Já implementado.** O webhook enfileira `RECEIVED_AUDIO`; o processor chama `processPendingReceivedAudio`. O CLAUDE.md estava desatualizado. |
+| 2 | Redispatch de booking em `REVIEW_REQUIRED` | **Já implementado.** A página de bookings exibe "Reenviar para matching" quando `status === REVIEW_REQUIRED && opportunity?.status === EXPIRED`. |
+| 3 | UI de dead letter / outbox | **Já implementado.** `/admin/outbox/` possui reenvio individual, reenvio em massa e descarte, com feedback inline. |
+| 4 | Agendamento de jobs `RECRUITMENT_REENGAGEMENT` | **Faltava.** Worker e use case existem; nenhum código enfileirava o job. **Implementado nesta sessão.** |
+| 5 | Rate limiting Redis para auth | **Não viável nesta versão.** Better Auth 1.6.26 não expõe storage customizável na API estável; a cron e o toggle de bypass para E2E já cobrem as necessidades atuais. |
+
+### Feature implementada: agendamento de reengajamento por conversa
+
+**Arquivo:** `src/app/api/messaging/evolution/webhook/route.ts`
+
+**Problema:** O BullMQ já possuía worker (`RECRUITMENT_REENGAGEMENT`) e use case (`reengageSilentConversations`), mas nenhum código enfileirava o job após uma mensagem de recrutamento. O único gatilho era o cron `/api/cron/recruitment/reengage`, que executa periodicamente e pode demorar horas para capturar conversas paradas.
+
+**Solução:** Após `routeInboundText` retornar `routed === "recruitment"`, uma operação fire-and-forget busca a `RecruitmentConversation` associada ao remetente e, se a conversa estiver em estado ativo (não `COMPLETED`, `PAUSED`, `MANUAL_REVIEW` ou `INTRODUCTION`), enfileira um job com:
+
+- **`jobId` estável** `reengagement:{conversationId}` — a deduplicação do BullMQ garante no máximo um job pendente por conversa. Mensagens rápidas em sequência não acumulam jobs.
+- **`reengagementCount` como snapshot** — o processor descarta o job se o contador mudou desde o agendamento (a conversa avançou ou o cron já reagiu).
+- **Delay de `RECRUITMENT_REENGAGEMENT_AFTER_HOURS` horas** — o timer se reinicia a cada nova mensagem; uma conversa ativa nunca recebe nudge.
+- O cron permanece como fallback para conversas que ficam silenciosas sem nunca ter enviado uma mensagem após o início.
+
+A operação usa o padrão `.catch((err) => logger.error(...))` estabelecido no mesmo arquivo para o job de áudio. Erros não afetam a resposta ao webhook, e `publishJobSafe` já trata a ausência de `REDIS_URL` retornando silenciosamente.
+
+### Evidências de validação desta sessão
+
+```text
+pnpm tsc --noEmit     # sem erros
+pnpm architecture:check  # 171 módulos, 592 dependências — sem violações
+pnpm test            # 26 arquivos, 90 testes — todos aprovados
+```
+
+### Conclusão desta sessão
+
+As seis correções de UX/acessibilidade foram aplicadas e verificadas. O gap de agendamento do `RECRUITMENT_REENGAGEMENT` foi fechado com a abordagem fire-and-forget no webhook, respeitando as convenções do projeto (padrão `Result`, fire-and-forget com `.catch`, `publishJobSafe`). As pendências P0/P1 listadas na seção anterior (Node 24, Prisma 7, homologação externa, coverage) permanecem abertas e inalteradas.
