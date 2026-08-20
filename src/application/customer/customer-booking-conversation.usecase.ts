@@ -93,6 +93,22 @@ async function resendCurrentQuestion(
     await enqueueQuestion(tx, conversation, recipient, state, "Envie o endereço completo do atendimento para validarmos a área atendida.");
     return;
   }
+  if (state === "FINAL_CONFIRMATION" && conversation.bookingId) {
+    const booking = await tx.booking.findUnique({ where: { id: conversation.bookingId }, include: { propertyPricingTier: true } });
+    if (booking) {
+      const lines: string[] = ["Confira os dados do agendamento:", ""];
+      if (booking.scheduledAt) {
+        lines.push(new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: "America/Fortaleza" }).format(booking.scheduledAt));
+      }
+      if (booking.addressLine1) lines.push(`📍 ${booking.addressLine1}`);
+      if (booking.propertyPricingTier) {
+        lines.push(`💰 R$ ${(booking.propertyPricingTier.priceCents / 100).toFixed(2).replace(".", ",")} — ${booking.propertyPricingTier.durationMinutes} min`);
+      }
+      lines.push("", "Podemos seguir para o pagamento?", "", "1 — Confirmar e pagar", "2 — Alterar informações");
+      await enqueueQuestion(tx, conversation, recipient, state, lines.join("\n"));
+      return;
+    }
+  }
   await enqueueQuestion(tx, conversation, recipient, state);
 }
 

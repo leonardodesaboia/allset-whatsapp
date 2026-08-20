@@ -10,7 +10,7 @@ const activeStates = Object.keys(QUESTIONS).filter((state) => state !== "INTRODU
 
 export async function reengageSilentConversations(
   prisma: PrismaClient,
-  input: { afterHours: number; maximumAttempts: number; limit?: number; now?: Date },
+  input: { afterHours: number; maximumAttempts: number; limit?: number; now?: Date; conversationId?: string },
 ): Promise<{ scanned: number; reengaged: number }> {
   const now = input.now ?? new Date();
   const limit = Math.min(Math.max(input.limit ?? 25, 1), candidateLimit);
@@ -18,6 +18,7 @@ export async function reengageSilentConversations(
   const candidates = await prisma.recruitmentConversation.findMany({
     where: {
       state: { in: activeStates },
+      ...(input.conversationId ? { id: input.conversationId } : {}),
       lastInboundAt: { lte: cutoff },
       reengagementCount: { lt: input.maximumAttempts },
       OR: [{ lastReengagementAt: null }, { lastReengagementAt: { lte: cutoff } }],

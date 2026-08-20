@@ -100,6 +100,16 @@ export async function processContactConversationText(
     await prisma.inboundMessage.updateMany({ where: { id: input.inboundMessageId, processedAt: null }, data: { processedAt: new Date() } });
     return { routed: "paused" as const };
   }
+  if (contactIntent?.state === "PROFESSIONAL" && !lead) {
+    return {
+      routed: "recruitment" as const,
+      started: await startRecruitmentConversation(prisma, {
+        phoneE164: input.phoneE164,
+        provider: input.provider,
+        inboundMessageId: input.inboundMessageId,
+      }),
+    };
+  }
 
   if (!lead) {
     return {

@@ -1,5 +1,7 @@
 import type { Prisma, PrismaClient, RecruitmentConversation } from "@prisma/client";
 import { QUESTIONS, globalCommand, parseAnswer, type ConversationState } from "../../domain/recruitment/conversation-definition";
+import { textPayload } from "../../domain/messaging/message";
+import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
 import { enqueueRecruitmentQuestion } from "./recruitment-question-outbox";
 import { transitionLeadStatusInTransaction } from "./transition-lead-status.usecase";
 
@@ -153,7 +155,21 @@ export async function processRecruitmentAnswer(
       where: { leadId: lead.id },
       include: { lead: true },
     });
-    if (!conversation || conversation.state === "COMPLETED" || conversation.state === "PAUSED") {
+    if (!conversation || conversation.state === "COMPLETED" || conversation.state === "PAUSED" || conversation.state === "MANUAL_REVIEW") {
+      if (conversation && phoneE164) {
+        const ackText =
+          conversation.state === "COMPLETED"
+            ? "Seu pré-cadastro na AllSet já foi concluído! Nossa equipe entrará em contato em breve."
+            : "Sua mensagem foi recebida. Nossa equipe da AllSet entrará em contato assim que possível!";
+        await enqueueOutboundMessage(tx, {
+          provider: conversation.provider,
+          recipient: phoneE164,
+          payload: textPayload(ackText),
+          idempotencyKey: `recruitment:${conversation.id}:inactive-ack:${input.inboundMessageId}`,
+          correlationId: conversation.id,
+          actor: "system:conversation",
+        });
+      }
       return { advanced: false, reason: "CONVERSATION_NOT_ACTIVE" as const };
     }
 
