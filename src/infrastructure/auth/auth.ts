@@ -5,6 +5,7 @@ import { prisma } from "../db/prisma-client";
 import { env } from "../../env";
 import { logger } from "../observability/logger";
 import { recordAuditLog } from "../../application/audit/record-audit-log.usecase";
+import { isAuthRateLimitEnabled } from "./auth-rate-limit";
 
 /**
  * Instância do Better Auth usada pelo Route Handler (`/api/auth/[...all]`)
@@ -25,7 +26,12 @@ export const auth = betterAuth({
     minPasswordLength: 10,
   },
   rateLimit: {
-    enabled: true,
+    enabled: isAuthRateLimitEnabled({
+      baseUrl: env.BETTER_AUTH_URL,
+      ...(env.E2E_DISABLE_AUTH_RATE_LIMIT
+        ? { disableForE2E: env.E2E_DISABLE_AUTH_RATE_LIMIT }
+        : {}),
+    }),
     window: 60,
     max: 5,
   },
