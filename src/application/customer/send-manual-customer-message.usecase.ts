@@ -25,10 +25,12 @@ export async function sendManualCustomerMessage(
         : null;
     if (!conversationWithCustomer) return { ok: false as const, reason: "CUSTOMER_CONVERSATION_NOT_FOUND" as const };
 
-    const conversation = await tx.customerBookingConversation.update({
-      where: { id: conversationWithCustomer.id },
+    const manualClaimed = await tx.customerBookingConversation.updateMany({
+      where: { id: conversationWithCustomer.id, version: conversationWithCustomer.version },
       data: { state: "PAUSED", automationPausedAt: new Date(), version: { increment: 1 } },
     });
+    if (!manualClaimed.count) return { ok: false as const, reason: "CUSTOMER_CONVERSATION_NOT_FOUND" as const };
+    const conversation = await tx.customerBookingConversation.findUniqueOrThrow({ where: { id: conversationWithCustomer.id } });
     await enqueueOutboundMessage(tx, {
       provider: conversation.provider,
       recipient: conversationWithCustomer.customer.phoneE164,

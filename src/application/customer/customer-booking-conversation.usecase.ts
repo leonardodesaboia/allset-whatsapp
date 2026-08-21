@@ -126,10 +126,12 @@ export async function resumeCustomerBookingConversation(
     if (!booking || !paused || paused.state !== "PAUSED" || !state || ["PAUSED", "COMPLETED", "MANUAL_REVIEW", "AWAITING_PAYMENT", "QUOTE"].includes(state)) {
       return { ok: false as const, reason: "CONVERSATION_NOT_RESUMABLE" as const };
     }
-    const conversation = await tx.customerBookingConversation.update({
-      where: { id: paused.id },
+    const resumeClaimed = await tx.customerBookingConversation.updateMany({
+      where: { id: paused.id, version: paused.version },
       data: { state, automationPausedAt: null, lastInboundAt: new Date(), version: { increment: 1 } },
     });
+    if (!resumeClaimed.count) return { ok: false as const, reason: "CONVERSATION_NOT_RESUMABLE" as const };
+    const conversation = await tx.customerBookingConversation.findUniqueOrThrow({ where: { id: paused.id } });
     await recordAuditLog(tx, {
       actor: input.actor,
       action: "CUSTOMER_CONVERSATION_RESUMED",
@@ -263,7 +265,7 @@ export async function processCustomerBookingAnswer(
     if (input.text.trim().toUpperCase() === "PARAR") {
       await tx.customerBookingConversation.update({
         where: { id: conversation.id },
-        data: { state: "PAUSED", automationPausedAt: new Date(), lastInboundAt: new Date() },
+        data: { state: "PAUSED", automationPausedAt: new Date(), lastInboundAt: new Date(), version: { increment: 1 } },
       });
       return { advanced: false, reason: "STOPPED" as const };
     }
