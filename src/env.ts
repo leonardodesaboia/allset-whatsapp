@@ -59,6 +59,7 @@ const envSchema = z.object({
   RECRUITMENT_REENGAGEMENT_MAX_ATTEMPTS: positiveIntegerEnv(2),
   OPPORTUNITY_EXPIRY_HOURS: positiveIntegerEnv(4),
   MESSAGING_DEFAULT_PROVIDER: z.string().trim().min(1).max(64).default("evolution"),
+  PIX_KEY: optionalEnv(z.string().min(1).max(255)),
   // Storage S3-compatível (MinIO local ou AWS S3 em produção).
   // Todas as cinco variáveis abaixo devem ser definidas juntas; deixar vazias
   // ativa o provider local de desenvolvimento (não funciona com Evolution em prod).

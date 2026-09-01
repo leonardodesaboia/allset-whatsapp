@@ -6,6 +6,15 @@ import { transitionBookingStatusInTransaction } from "../booking/transition-book
 import { recordAuditLog } from "../audit/record-audit-log.usecase";
 import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
 import { enqueueCustomerQuestion } from "./customer-question-outbox";
+import { env } from "../../env";
+
+function buildPaymentInstructionsText(tier: PropertyPricingTier | null): string {
+  const lines = ["✅ Pedido confirmado! Para finalizar, realize o pagamento via PIX:"];
+  if (env.PIX_KEY) lines.push(`\n🔑 Chave PIX: ${env.PIX_KEY}`);
+  if (tier) lines.push(`💰 Valor: R$ ${(tier.priceCents / 100).toFixed(2).replace(".", ",")}`);
+  lines.push("\nAssim que confirmarmos o recebimento, seu agendamento estará garantido. Você tem até 24 horas para realizar o pagamento.");
+  return lines.join("\n");
+}
 
 function pricingTierText(tiers: readonly PropertyPricingTier[]): string {
   return [
@@ -469,11 +478,13 @@ export async function processCustomerBookingAnswer(
       }
       const awaitingPayment = await transitionBookingStatusInTransaction(tx, { bookingId: conversation.bookingId, targetStatus: "AWAITING_PAYMENT", actor: "customer:whatsapp" });
       if (!awaitingPayment.ok) throw awaitingPayment.error;
+      const bookingWithTier = await tx.booking.findUnique({ where: { id: conversation.bookingId }, include: { propertyPricingTier: true } });
       const updated = await tx.customerBookingConversation.update({ where: { id: conversation.id }, data: { state: "AWAITING_PAYMENT", lastQuestionKey: "AWAITING_PAYMENT", lastInboundAt: new Date(), version: { increment: 1 } } });
+      const paymentText = buildPaymentInstructionsText(bookingWithTier?.propertyPricingTier ?? null);
       await enqueueOutboundMessage(tx, {
         provider: updated.provider,
         recipient: customer.phoneE164,
-        payload: textPayload("Pedido aguardando pagamento. Enviaremos as instruções de pagamento por aqui."),
+        payload: textPayload(paymentText),
         idempotencyKey: `customer-booking:${updated.id}:AWAITING_PAYMENT:${updated.updatedAt.getTime()}`,
         correlationId: updated.id,
         actor: "system:customer-conversation",
