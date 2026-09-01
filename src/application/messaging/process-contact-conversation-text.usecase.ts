@@ -3,9 +3,12 @@ import { processContactIntentSelection, startContactIntentConversation } from ".
 import { processCustomerBookingAnswer, startCustomerBookingConversation } from "../customer/customer-booking-conversation.usecase";
 import { processRecruitmentAnswer, startRecruitmentConversation } from "../recruitment/conversation-engine.usecase";
 import { enqueueOutboundMessage } from "./enqueue-outbound-message.usecase";
+import { contactIntentPrompt } from "../../domain/customer/contact-intent";
 import { textPayload } from "../../domain/messaging/message";
 import { transitionLeadStatusInTransaction } from "../recruitment/transition-lead-status.usecase";
 import type { RecruitmentStatus } from "../../domain/recruitment/recruitment-status";
+
+const INTENT_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
 
 const ACTIVE_FUNNEL_STATUSES: ReadonlySet<RecruitmentStatus> = new Set([
   "TRIAGEM",
@@ -60,6 +63,47 @@ export async function processContactConversationText(
     include: { conversation: { select: { id: true, state: true } } },
   });
   const contactIntent = await prisma.contactIntentConversation.findUnique({ where: { phoneE164: input.phoneE164 } });
+
+  // Reset intents obsoletos (7 dias sem atividade) para que o contato possa
+  // escolher novamente entre cliente e profissional.
+  if (
+    contactIntent &&
+    contactIntent.state !== "CHOOSING_INTENT" &&
+    contactIntent.state !== "PAUSED" &&
+    !!contactIntent.lastInboundAt &&
+    contactIntent.lastInboundAt.getTime() < Date.now() - INTENT_EXPIRY_MS
+  ) {
+    const hasActiveFlow =
+      contactIntent.state === "CUSTOMER"
+        ? !!(await prisma.customerBookingConversation.findFirst({
+            where: { customer: { phoneE164: input.phoneE164 }, state: { notIn: ["COMPLETED", "PAUSED"] } },
+          }))
+        : !!lead && ACTIVE_FUNNEL_STATUSES.has(lead.status as RecruitmentStatus);
+
+    if (!hasActiveFlow) {
+      const reset = await prisma.$transaction(async (tx) => {
+        const claimed = await tx.inboundMessage.updateMany({
+          where: { id: input.inboundMessageId, processedAt: null },
+          data: { processedAt: new Date() },
+        });
+        if (!claimed.count) return null;
+        const updated = await tx.contactIntentConversation.update({
+          where: { id: contactIntent.id },
+          data: { state: "CHOOSING_INTENT", lastInboundAt: new Date() },
+        });
+        await enqueueOutboundMessage(tx, {
+          provider: input.provider,
+          recipient: input.phoneE164,
+          payload: textPayload(contactIntentPrompt),
+          idempotencyKey: `contact-intent-reset:${contactIntent.id}:${updated.updatedAt.getTime()}`,
+          correlationId: contactIntent.id,
+          actor: "system:contact-intent-expiry",
+        });
+        return updated;
+      });
+      if (reset) return { routed: "contact-intent" as const, reset: true };
+    }
+  }
 
   if (!contactIntent && !lead) {
     await startContactIntentConversation(prisma, {
