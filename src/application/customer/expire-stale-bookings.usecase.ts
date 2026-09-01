@@ -1,7 +1,16 @@
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, PropertyPricingTier } from "@prisma/client";
 import { textPayload } from "../../domain/messaging/message";
 import { transitionBookingStatusInTransaction } from "../booking/transition-booking-status.usecase";
 import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
+import { env } from "../../env";
+
+function buildReminderText(tier: PropertyPricingTier | null): string {
+  const lines = ["⏰ Lembrete: seu pedido ainda aguarda pagamento."];
+  if (env.PIX_KEY) lines.push(`\n🔑 Chave PIX: ${env.PIX_KEY}`);
+  if (tier) lines.push(`💰 Valor: R$ ${(tier.priceCents / 100).toFixed(2).replace(".", ",")}`);
+  lines.push("\nRealize o pagamento para confirmar seu agendamento. O pedido será cancelado automaticamente se o pagamento não for realizado.");
+  return lines.join("\n");
+}
 
 const REMINDER_MS = 12 * 60 * 60 * 1000;
 const CANCEL_MS = 24 * 60 * 60 * 1000;
@@ -21,6 +30,7 @@ export async function expireStaleBookings(prisma: PrismaClient): Promise<{
     include: {
       customer: { select: { phoneE164: true } },
       customerConversation: true,
+      propertyPricingTier: true,
     },
   });
 
@@ -73,10 +83,7 @@ export async function expireStaleBookings(prisma: PrismaClient): Promise<{
         await enqueueOutboundMessage(prisma, {
           provider: conversation.provider,
           recipient: phoneE164,
-          payload: textPayload(
-            "Lembrete: seu pedido está aguardando pagamento. " +
-            "O pagamento deve ser realizado em até 24 horas para confirmar seu agendamento."
-          ),
+          payload: textPayload(buildReminderText(booking.propertyPricingTier)),
           idempotencyKey: `payment-reminder:${conversation.id}`,
           correlationId: conversation.id,
           actor: "system:booking-expiry",

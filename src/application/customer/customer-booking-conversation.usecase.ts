@@ -16,6 +16,14 @@ function buildPaymentInstructionsText(tier: PropertyPricingTier | null): string 
   return lines.join("\n");
 }
 
+function buildPaymentFollowUpText(tier: PropertyPricingTier | null): string {
+  const lines = ["Seu pedido ainda aguarda pagamento. Realize o PIX para confirmar o agendamento:"];
+  if (env.PIX_KEY) lines.push(`\n🔑 Chave PIX: ${env.PIX_KEY}`);
+  if (tier) lines.push(`💰 Valor: R$ ${(tier.priceCents / 100).toFixed(2).replace(".", ",")}`);
+  lines.push("\nApós o pagamento, confirmamos em breve.");
+  return lines.join("\n");
+}
+
 function pricingTierText(tiers: readonly PropertyPricingTier[]): string {
   return [
     "Qual opção descreve melhor o seu imóvel?",
@@ -259,11 +267,14 @@ export async function processCustomerBookingAnswer(
       return { advanced: false, reason: "MANUAL_REVIEW" as const };
     }
     if (current === "AWAITING_PAYMENT") {
+      const bookingWithTier = conversation.bookingId
+        ? await tx.booking.findUnique({ where: { id: conversation.bookingId }, include: { propertyPricingTier: true } })
+        : null;
       const updated = await tx.customerBookingConversation.update({ where: { id: conversation.id }, data: { lastInboundAt: new Date() } });
       await enqueueOutboundMessage(tx, {
         provider: updated.provider,
         recipient: customer.phoneE164,
-        payload: textPayload("Seu pedido continua aguardando pagamento. Enviaremos as instruções por aqui."),
+        payload: textPayload(buildPaymentFollowUpText(bookingWithTier?.propertyPricingTier ?? null)),
         idempotencyKey: `customer-booking:${updated.id}:awaiting-payment-follow-up:${updated.updatedAt.getTime()}`,
         correlationId: updated.id,
         actor: "system:customer-conversation",
