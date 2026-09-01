@@ -458,11 +458,27 @@ export async function processCustomerBookingAnswer(
       }
       const booking = await tx.booking.findUnique({ where: { id: conversation.bookingId }, include: { propertyPricingTier: true } });
       if (!booking?.propertyPricingTier) {
+        if (booking) {
+          const review = await transitionBookingStatusInTransaction(tx, {
+            bookingId: booking.id,
+            targetStatus: "REVIEW_REQUIRED",
+            actor: "system:customer-conversation",
+            reason: "Configuração de preço removida durante o agendamento",
+          });
+          if (!review.ok) throw review.error;
+        }
         const updated = await tx.customerBookingConversation.update({
           where: { id: conversation.id },
           data: { state: "MANUAL_REVIEW", lastQuestionKey: "MANUAL_REVIEW", lastInboundAt: new Date() },
         });
-        await enqueueManualReviewNotice(tx, updated, customer.phoneE164);
+        await enqueueOutboundMessage(tx, {
+          provider: updated.provider,
+          recipient: customer.phoneE164,
+          payload: textPayload("Houve uma atualização nos serviços disponíveis. Nossa equipe entrará em contato para concluir seu agendamento."),
+          idempotencyKey: `customer-booking:${updated.id}:booking-misconfigured:${updated.updatedAt.getTime()}`,
+          correlationId: updated.id,
+          actor: "system:customer-conversation",
+        });
         return { advanced: false, reason: "BOOKING_NOT_CONFIGURED" as const };
       }
       await tx.booking.update({ where: { id: booking.id }, data: { scheduledAt } });

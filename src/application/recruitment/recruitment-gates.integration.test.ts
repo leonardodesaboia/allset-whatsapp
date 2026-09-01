@@ -202,4 +202,42 @@ describe("recruitment progression gates", () => {
     expect((await prisma.recruitmentLead.findUniqueOrThrow({ where: { id: lead.id } })).status).toBe("LIGACAO_SOLICITADA");
     expect((await prisma.recruitmentConversation.findUniqueOrThrow({ where: { leadId: lead.id } })).state).toBe("PAUSED");
   });
+
+  it("envia mensagem de conclusão ao concluir o pré-cadastro via WhatsApp", async () => {
+    sequence += 1;
+    const phone = `+5585977${String(sequence).padStart(6, "0")}`;
+    const lead = await prisma.recruitmentLead.create({
+      data: {
+        origin: "WHATSAPP",
+        status: "PRE_CADASTRO",
+        fullName: "Profissional Completa",
+        phoneE164: phone,
+        canServeInitialArea: "SIM",
+        hasProfessionalExperience: true,
+      },
+    });
+    const conversation = await prisma.recruitmentConversation.create({
+      data: { leadId: lead.id, provider: "test", state: "AVAILABILITY", lastQuestionKey: "AVAILABILITY" },
+    });
+    const inbound = await prisma.inboundMessage.create({
+      data: {
+        provider: "test",
+        externalId: `availability-${sequence}`,
+        sender: phone,
+        recipient: "+5585999999999",
+        type: "text",
+        payload: { text: "Segundas e terças" },
+      },
+    });
+
+    const result = await processRecruitmentAnswer(prisma, { inboundMessageId: inbound.id, text: "Segundas e terças" });
+
+    expect(result).toMatchObject({ advanced: true, completed: true, triageTarget: "CONVERSA_PENDENTE" });
+
+    const outbound = await prisma.outboxMessage.findFirst({
+      where: { idempotencyKey: `recruitment:${conversation.id}:completed` },
+    });
+    expect(outbound).not.toBeNull();
+    expect(outbound?.payload).toMatchObject({ text: expect.stringContaining("Pré-cadastro concluído") });
+  });
 });
