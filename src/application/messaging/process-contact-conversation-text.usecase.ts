@@ -78,7 +78,11 @@ export async function processContactConversationText(
         ? !!(await prisma.customerBookingConversation.findFirst({
             where: { customer: { phoneE164: input.phoneE164 }, state: { notIn: ["COMPLETED", "PAUSED"] } },
           }))
-        : !!lead && ACTIVE_FUNNEL_STATUSES.has(lead.status as RecruitmentStatus);
+        : !!lead &&
+          (ACTIVE_FUNNEL_STATUSES.has(lead.status as RecruitmentStatus) ||
+            lead.status === "LEAD" ||
+            lead.status === "PRE_CADASTRO" ||
+            (!!lead.conversation && !["COMPLETED", "PAUSED", "MANUAL_REVIEW"].includes(lead.conversation.state)));
 
     if (!hasActiveFlow) {
       const reset = await prisma.$transaction(async (tx) => {
