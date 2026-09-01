@@ -171,6 +171,14 @@ export async function startCustomerBookingConversation(
     }
     const existingUser = await tx.user.findUnique({ where: { phoneE164: input.phoneE164 } });
     if (existingUser && existingUser.role !== "CUSTOMER") {
+      await enqueueOutboundMessage(tx, {
+        provider: input.provider,
+        recipient: input.phoneE164,
+        payload: textPayload("Este número está cadastrado como profissional AllSet. Responda *2* para acessar o menu de profissional."),
+        idempotencyKey: `phone-already-used:${input.inboundMessageId ?? input.phoneE164}`,
+        correlationId: input.inboundMessageId ?? input.phoneE164,
+        actor: "system:customer-conversation",
+      });
       return { started: false as const, reason: "PHONE_ALREADY_USED" as const };
     }
 
@@ -223,7 +231,24 @@ export async function processCustomerBookingAnswer(
         where: { customerId: customer.id },
         orderBy: { updatedAt: "desc" },
       });
-      return { advanced: false, reason: latest?.state === "PAUSED" ? ("CONVERSATION_PAUSED" as const) : ("CONVERSATION_NOT_ACTIVE" as const) };
+      if (latest?.state === "PAUSED") {
+        const claimed = await tx.inboundMessage.updateMany({
+          where: { id: inbound.id, processedAt: null },
+          data: { processedAt: new Date() },
+        });
+        if (claimed.count) {
+          await enqueueOutboundMessage(tx, {
+            provider: inbound.provider,
+            recipient: customer.phoneE164,
+            payload: textPayload("Seu atendimento está com nossa equipe. Em breve entraremos em contato."),
+            idempotencyKey: `customer-booking:${latest.id}:paused-ack:${inbound.id}`,
+            correlationId: latest.id,
+            actor: "system:customer-conversation",
+          });
+        }
+        return { advanced: false, reason: "CONVERSATION_PAUSED" as const };
+      }
+      return { advanced: false, reason: "CONVERSATION_NOT_ACTIVE" as const };
     }
 
     const claimed = await tx.inboundMessage.updateMany({
@@ -283,9 +308,17 @@ export async function processCustomerBookingAnswer(
     }
 
     if (input.text.trim().toUpperCase() === "PARAR") {
-      await tx.customerBookingConversation.update({
+      const updated = await tx.customerBookingConversation.update({
         where: { id: conversation.id },
         data: { state: "PAUSED", automationPausedAt: new Date(), lastInboundAt: new Date(), version: { increment: 1 } },
+      });
+      await enqueueOutboundMessage(tx, {
+        provider: updated.provider,
+        recipient: customer.phoneE164,
+        payload: textPayload("Tudo bem! Pausamos seu atendimento. Quando quiser continuar, é só nos chamar novamente."),
+        idempotencyKey: `customer-booking:${updated.id}:stopped:${updated.updatedAt.getTime()}`,
+        correlationId: updated.id,
+        actor: "system:customer-conversation",
       });
       return { advanced: false, reason: "STOPPED" as const };
     }
@@ -294,6 +327,14 @@ export async function processCustomerBookingAnswer(
       const answer = parseCustomerChoice(current, input.text);
       if (answer === "NO") {
         await tx.customerBookingConversation.update({ where: { id: conversation.id }, data: { state: "COMPLETED", lastInboundAt: new Date() } });
+        await enqueueOutboundMessage(tx, {
+          provider: conversation.provider,
+          recipient: customer.phoneE164,
+          payload: textPayload("Tudo bem! Se mudar de ideia, é só nos chamar. 😊"),
+          idempotencyKey: `customer-booking:${conversation.id}:declined`,
+          correlationId: conversation.id,
+          actor: "system:customer-conversation",
+        });
         return { advanced: false, reason: "DECLINED" as const };
       }
       if (answer !== "YES") {
@@ -416,7 +457,14 @@ export async function processCustomerBookingAnswer(
         return { advanced: false, reason: "INVALID_ANSWER" as const };
       }
       const booking = await tx.booking.findUnique({ where: { id: conversation.bookingId }, include: { propertyPricingTier: true } });
-      if (!booking?.propertyPricingTier) return { advanced: false, reason: "BOOKING_NOT_CONFIGURED" as const };
+      if (!booking?.propertyPricingTier) {
+        const updated = await tx.customerBookingConversation.update({
+          where: { id: conversation.id },
+          data: { state: "MANUAL_REVIEW", lastQuestionKey: "MANUAL_REVIEW", lastInboundAt: new Date() },
+        });
+        await enqueueManualReviewNotice(tx, updated, customer.phoneE164);
+        return { advanced: false, reason: "BOOKING_NOT_CONFIGURED" as const };
+      }
       await tx.booking.update({ where: { id: booking.id }, data: { scheduledAt } });
       const quoted = await transitionBookingStatusInTransaction(tx, { bookingId: booking.id, targetStatus: "QUOTED", actor: "system:customer-conversation" });
       if (!quoted.ok) throw quoted.error;

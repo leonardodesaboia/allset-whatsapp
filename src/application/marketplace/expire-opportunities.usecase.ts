@@ -77,6 +77,23 @@ export async function expireOpportunities(
             reason: "Oportunidade expirou sem aceite",
           },
         });
+        const bookingWithCustomer = await tx.booking.findUnique({
+          where: { id: candidate.bookingId },
+          include: {
+            customer: { select: { phoneE164: true } },
+            customerConversation: { select: { provider: true } },
+          },
+        });
+        if (bookingWithCustomer?.customer.phoneE164) {
+          await enqueueOutboundMessage(tx, {
+            provider: bookingWithCustomer.customerConversation?.provider ?? env.MESSAGING_DEFAULT_PROVIDER,
+            recipient: bookingWithCustomer.customer.phoneE164,
+            payload: textPayload("Ainda estamos buscando uma profissional disponível para seu agendamento. Nossa equipe entrará em contato em breve."),
+            idempotencyKey: `booking:no-professional:${candidate.bookingId}`,
+            correlationId: candidate.bookingId,
+            actor: "system:marketplace",
+          });
+        }
       }
 
       await recordAuditLog(tx, {

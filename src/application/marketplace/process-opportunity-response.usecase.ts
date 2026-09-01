@@ -159,10 +159,14 @@ export async function processOpportunityResponse(
       data: { status: "FILLED" },
     });
     if (!claimedOpportunity.count) {
+      const currentOpp = await tx.serviceOpportunity.findUnique({ where: { id: opportunity.id }, select: { status: true } });
+      const tooLateText = currentOpp?.status === "FILLED"
+        ? "Esta oportunidade já foi aceita por outra profissional. Avisaremos quando surgir uma nova."
+        : "Infelizmente o prazo para aceitar esta oportunidade encerrou. Fique de olho nas próximas!";
       await enqueueText(tx, {
         provider: lead.conversation?.provider ?? inbound.provider,
         recipient: lead.phoneE164,
-        text: "Esta oportunidade já foi preenchida. Avisaremos quando surgir uma nova.",
+        text: tooLateText,
         idempotencyKey: `opportunity:${opportunity.id}:${response.id}:too-late`,
         correlationId: opportunity.id,
       });

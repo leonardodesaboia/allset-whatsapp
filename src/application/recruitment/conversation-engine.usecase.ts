@@ -139,7 +139,10 @@ export async function processRecruitmentAnswer(
     if (!inbound) return { advanced: false, reason: "INBOUND_NOT_FOUND" as const };
 
     const lead = await tx.recruitmentLead.findUnique({ where: { phoneE164: inbound.sender } });
-    if (!lead) return { advanced: false, reason: "LEAD_NOT_FOUND" as const };
+    if (!lead) {
+      await tx.inboundMessage.updateMany({ where: { id: input.inboundMessageId, processedAt: null }, data: { processedAt: new Date() } });
+      return { advanced: false, reason: "LEAD_NOT_FOUND" as const };
+    }
 
     // Bug 6 fix: garante phoneE164 presente antes de qualquer enqueue.
     const phoneE164 = lead.phoneE164;
@@ -308,6 +311,22 @@ export async function processRecruitmentAnswer(
           nextActionAt: triageTarget === "CONVERSA_PENDENTE" ? new Date() : null,
         },
       });
+
+      const completionText =
+        triageTarget === "CONVERSA_PENDENTE"
+          ? "✅ Pré-cadastro concluído! Nossa equipe entrará em contato em breve para uma conversa sobre as oportunidades."
+          : triageTarget === "BASE_FUTURA"
+            ? "✅ Pré-cadastro concluído! No momento não temos oportunidades na sua área, mas guardaremos seu contato para futuras vagas."
+            : "✅ Pré-cadastro concluído! Vamos analisar seu perfil e entraremos em contato em breve.";
+      await enqueueOutboundMessage(tx, {
+        provider: conversation.provider,
+        recipient: phoneE164,
+        payload: textPayload(completionText),
+        idempotencyKey: `recruitment:${conversation.id}:completed`,
+        correlationId: conversation.id,
+        actor: "system:conversation",
+      });
+
       return { advanced: true, completed: true, triageTarget };
     }
 
