@@ -48,8 +48,9 @@ export function PricingTierForm() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600">Nome da opção</label>
+          <label htmlFor="pricing-label" className="text-xs font-medium text-slate-600">Nome da opção</label>
           <Input
+            id="pricing-label"
             required
             value={label}
             onChange={(e) => setLabel(e.target.value)}
@@ -58,8 +59,9 @@ export function PricingTierForm() {
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600">Preço para o cliente (R$)</label>
+          <label htmlFor="pricing-price" className="text-xs font-medium text-slate-600">Preço para o cliente (R$)</label>
           <Input
+            id="pricing-price"
             required
             type="number"
             min="0.01"
@@ -71,8 +73,9 @@ export function PricingTierForm() {
         </div>
 
         <div className="sm:col-span-2 space-y-1">
-          <label className="text-xs font-medium text-slate-600">Características</label>
+          <label htmlFor="pricing-description" className="text-xs font-medium text-slate-600">Características</label>
           <textarea
+            id="pricing-description"
             required
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -83,8 +86,9 @@ export function PricingTierForm() {
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600">Duração prevista (minutos)</label>
+          <label htmlFor="pricing-duration" className="text-xs font-medium text-slate-600">Duração prevista (minutos)</label>
           <Input
+            id="pricing-duration"
             required
             type="number"
             min="30"

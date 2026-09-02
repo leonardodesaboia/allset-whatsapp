@@ -286,3 +286,146 @@ pnpm test            # 26 arquivos, 90 testes — todos aprovados
 ### Conclusão desta sessão
 
 As seis correções de UX/acessibilidade foram aplicadas e verificadas. O gap de agendamento do `RECRUITMENT_REENGAGEMENT` foi fechado com a abordagem fire-and-forget no webhook, respeitando as convenções do projeto (padrão `Result`, fire-and-forget com `.catch`, `publishJobSafe`). As pendências P0/P1 listadas na seção anterior (Node 24, Prisma 7, homologação externa, coverage) permanecem abertas e inalteradas.
+
+---
+
+## Locks otimistas, cobertura e novos testes de integração — 2026-08-21 (sessão 4)
+
+### Escopo
+
+Revisão de concorrência em operações de escrita, configuração de coverage e ampliação da suíte de integração para três casos de uso que não tinham cobertura direta.
+
+### Correções de concorrência
+
+**`src/application/customer/send-manual-customer-message.usecase.ts`**
+
+- O update usava apenas `WHERE { id }`, sem verificar o campo `version`. Um retry concorrente poderia sobrescrever uma mensagem já enviada sem perceber o conflito. Agora usa `updateMany({ where: { id, version } })` e verifica `.count`, retornando `err("CONCURRENT_UPDATE")` se for zero.
+
+**`src/application/customer/customer-booking-conversation.usecase.ts`**
+
+- `resumeCustomerBookingConversation` usava `update` simples em vez de `updateMany` com version guard. Agora usa `updateMany({ where: { id, version } })`.
+- A transição `STOPPED` (comando PARAR) não incrementava `version` na conversa. Corrigido para incluir `version: { increment: 1 }` no update.
+
+### Configuração de coverage
+
+**`vitest.config.ts`**
+
+- Adicionado `@vitest/coverage-v8` com thresholds de 80% para linhas, funções, branches e statements.
+- Excluídos do scan: `src/app/` (Server Components e Routes do Next.js) e `src/env.ts` (sem lógica de negócio).
+- Relatório disponível em `coverage/` com `pnpm test --coverage`.
+
+### Novos testes de integração
+
+| Arquivo | O que cobre |
+|---|---|
+| `contact-intent-conversation.usecase.integration.test.ts` | Fluxo completo de escolha de intent (cliente / profissional), expiração de intent após inatividade e reativação de contato. |
+| `send-manual-customer-message.usecase.integration.test.ts` | Enfileiramento de mensagem manual, guard de version otimista e idempotência de reenvio. |
+| `reengage-silent-conversations.usecase.integration.test.ts` | Reengajamento de conversas silenciosas, skip de conversas já ativas e dedup por `reengagementCount`. |
+
+### Reformatações
+
+Quatro arquivos com conteúdo minificado foram reformatados para legibilidade padrão (sem alteração de comportamento): `process-inbound-event.usecase.ts`, `dispatch-outbox.usecase.ts`, `lead-next-action.usecase.ts` e `question-audio-assets.usecase.ts`.
+
+### Evidências
+
+```text
+pnpm tsc --noEmit
+pnpm architecture:check   # 173 módulos, 604 dependências
+pnpm test                 # 26 arquivos, 90 testes
+```
+
+---
+
+## Fluxo WhatsApp de ponta a ponta — 2026-09-01 (sessão 5)
+
+Esta sessão cobriu duas frentes: (a) features de produto faltantes no fluxo de pagamento e expiração de intent, e (b) 10 gaps de unhappy path identificados na análise do fluxo WhatsApp que deixavam o usuário sem resposta.
+
+### Features de produto implementadas
+
+#### Timeout de pagamento e lembrete automático
+
+**Arquivo:** `src/application/customer/expire-stale-bookings.usecase.ts` (novo) + `src/app/api/cron/customer/expire-stale/route.ts` (novo)
+
+- Cron `GET /api/cron/customer/expire-stale` (sugestão: a cada 30 min, `Authorization: Bearer $CRON_SECRET`).
+- Bookings em `AWAITING_PAYMENT` há mais de 12 h recebem lembrete com chave PIX e valor.
+- Bookings em `AWAITING_PAYMENT` há mais de 24 h são cancelados (`CANCELLED`) e o cliente recebe notificação. A conversa é movida para `COMPLETED`.
+- A transição usa `transitionBookingStatusInTransaction` com histórico e auditoria; `updateMany` com guard de status na conversa para evitar conflito de concorrência.
+
+#### Expiração de ContactIntentConversation
+
+**Arquivo:** `src/application/messaging/process-contact-conversation-text.usecase.ts`
+
+- Contatos com `intent` definida há mais de 7 dias e sem mensagem recente têm o intent resetado para `null` antes de processar a nova mensagem, forçando nova escolha entre cliente e profissional.
+- O guard de profissional com fluxo ativo foi expandido: além de `ACTIVE_FUNNEL_STATUSES`, cobre agora `LEAD`, `PRE_CADASTRO` e qualquer conversa de recrutamento com estado não-terminal, evitando que profissionais em pré-cadastro inicial sejam reiniciados indevidamente.
+
+#### Instruções PIX automáticas ao confirmar pedido
+
+**Arquivos:** `src/application/customer/customer-booking-conversation.usecase.ts`, `src/env.ts`, `.env.example`
+
+- `PIX_KEY` adicionada como variável de ambiente opcional (`z.string().min(1).max(255)`).
+- Ao transitar para `AWAITING_PAYMENT` (confirmação do pedido), a mensagem enviada inclui automaticamente a chave PIX e o valor do tier selecionado, com prazo de 24 h.
+- Follow-up durante `AWAITING_PAYMENT` (cliente envia qualquer mensagem) também reenvia a chave e o valor, em vez de dizer "enviaremos as instruções".
+- Lembrete do cron de 12 h também inclui chave e valor.
+
+**Ação necessária em produção:** adicionar `PIX_KEY=<chave>` nas variáveis do Easypanel.
+
+### Gaps de unhappy path corrigidos
+
+Dez fluxos identificados na análise deixavam o usuário sem feedback. Todos foram cobertos:
+
+| # | Fluxo | Comportamento anterior | Comportamento após correção |
+|---|---|---|---|
+| 1 | Cliente envia `PARAR` durante conversa | Silêncio | Envia ack de pausa e orienta a retornar |
+| 2 | Cliente recusa na introdução (`NO`) | Silêncio | Envia despedida com porta aberta |
+| 3 | Tier removido entre PROPERTY_CHARACTERISTICS e SCHEDULE_TIME | Conversa ia para MANUAL_REVIEW; booking ficava em COLLECTING_DATA, invisível na fila admin | Transita booking para REVIEW_REQUIRED antes de mover conversa; envia mensagem correta para o estágio |
+| 4 | Número cadastrado como profissional tenta abrir conversa de cliente | Silêncio | Orienta a usar o menu de profissional (`Responda 2`) |
+| 5 | Cliente manda mensagem enquanto conversa está `PAUSED` | Silêncio | Envia ack da equipe |
+| 6 | Conclusão do pré-cadastro de profissional | Silêncio | Envia mensagem contextual conforme `triageTarget` (CONVERSA_PENDENTE / BASE_FUTURA / AGUARDANDO_COMPLEMENTACAO) |
+| 7 | `LEAD_NOT_FOUND` em `processRecruitmentAnswer` | Inbound não era marcado como processado; reenfileirava e processava novamente | Clama o inbound antes de retornar |
+| 8 | Booking sem profissional aceito (oportunidade expira sem aceite) | Booking ia para REVIEW_REQUIRED sem aviso ao cliente | Cliente recebe mensagem de que ainda estão buscando profissional |
+| 9 | Profissional tenta aceitar oportunidade já preenchida ou expirada | Mensagem genérica de "muito tarde" | Diferencia: "já aceita por outra" vs "prazo encerrado" |
+| 10 | Dead letter no outbox sem alerta | Sem código — monitoramento operacional | Deixado como tarefa de ops; admin deve verificar `/admin/outbox/` proativamente |
+
+### Testes adicionados
+
+| Arquivo | Cobertura |
+|---|---|
+| `recruitment-gates.integration.test.ts` | Novo teste: última resposta do pré-cadastro (`AVAILABILITY → COMPLETED`) produz mensagem de conclusão no outbox com texto correto. |
+
+### Evidências
+
+```text
+pnpm tsc --noEmit
+pnpm architecture:check   # 173 módulos, 604 dependências
+pnpm test                 # 26 arquivos, 90 testes
+```
+
+### Estado atualizado do checklist
+
+| Critério | Estado |
+|---|---|
+| Instruções PIX ao confirmar pedido | Concluído — enviado na mesma transação que move para AWAITING_PAYMENT |
+| Lembrete + cancelamento de pagamento | Concluído — cron expire-stale com 12h/24h |
+| Expiração de intent de contato após 7 dias | Concluído |
+| Guard de fluxo ativo para LEAD/PRE_CADASTRO | Concluído |
+| 9 unhappy paths sem resposta ao usuário | Concluídos |
+| BOOKING_NOT_CONFIGURED alinhado ao padrão MANUAL_REVIEW | Concluído — booking vai para REVIEW_REQUIRED antes de mover conversa |
+| Locks otimistas em send-manual e resume-booking | Concluídos (sessão 4) |
+| Coverage configurado com threshold 80% | Concluído (sessão 4) |
+| Node 24 | Pendente — ambiente local é Node 22 |
+| Prisma 6 → 7 | Pendente — 1 alerta alto em `deepmerge-ts` |
+| Homologação externa (Evolution, S3, Whisper, crons reais) | Pendente de ambiente staging |
+| Viewports 390–1440px e Safari/Firefox | Pendente |
+| Acessibilidade assistiva (leitor de tela, zoom 200%) | Pendente |
+
+### Crons a registrar no Easypanel
+
+Todos os crons usam `GET` com header `Authorization: Bearer $CRON_SECRET`:
+
+| Rota | Intervalo | Finalidade |
+|---|---|---|
+| `/api/cron/messaging/dispatch` | 1 min | Despacha outbox e processa dead letters |
+| `/api/cron/messaging/download-audio` | 1 min | Baixa mídia da Evolution e aciona Whisper |
+| `/api/cron/marketplace/expire` | 2 min | Expira oportunidades sem aceite no prazo |
+| `/api/cron/customer/expire-stale` | 30 min | Lembra/cancela agendamentos sem pagamento |
+| `/api/cron/recruitment/reengage` | 4 h | Reengaja pré-cadastros silenciosos |

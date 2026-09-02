@@ -66,7 +66,7 @@ test("mensagem ao cliente restaura foco e não causa overflow em 320px", async (
   const dialog = page.getByRole("dialog", {
     name: "Enviar mensagem ao cliente",
   });
-  await expect(dialog.getByPlaceholder("Digite a mensagem…")).toBeFocused();
+  await expect(dialog.getByLabel("Mensagem para o cliente")).toBeFocused();
   await expect
     .poll(() =>
       page.evaluate(

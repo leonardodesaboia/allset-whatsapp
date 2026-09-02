@@ -41,6 +41,23 @@ const STATUS_MAP: Record<string, { label: string; variant: BadgeProps["variant"]
   COMPLETED: { label: "Concluído", variant: "success" },
   CANCELLED: { label: "Cancelado", variant: "destructive" },
   ISSUE_OPEN: { label: "Problema aberto", variant: "destructive" },
+  // Conversas de clientes
+  INTRODUCTION: { label: "Início", variant: "secondary" },
+  NAME: { label: "Identificação", variant: "secondary" },
+  PROPERTY_CHARACTERISTICS: { label: "Imóvel", variant: "secondary" },
+  SCHEDULE_DATE: { label: "Data", variant: "secondary" },
+  SCHEDULE_TIME: { label: "Horário", variant: "secondary" },
+  QUOTE_ACCEPTANCE: { label: "Aceite do orçamento", variant: "warning" },
+  ADDRESS: { label: "Endereço", variant: "secondary" },
+  MANUAL_REVIEW: { label: "Revisão manual", variant: "warning" },
+  FINAL_CONFIRMATION: { label: "Confirmação final", variant: "default" },
+  // Oportunidades e respostas
+  OPEN: { label: "Aberta", variant: "default" },
+  FILLED: { label: "Preenchida", variant: "success" },
+  EXPIRED: { label: "Expirada", variant: "destructive" },
+  ACCEPTED: { label: "Aceita", variant: "success" },
+  DECLINED: { label: "Recusada", variant: "destructive" },
+  AWAITING_RESPONSE: { label: "Aguardando resposta", variant: "outline" },
 };
 
 export function StatusBadge({ status, className }: { status: string; className?: string }) {
