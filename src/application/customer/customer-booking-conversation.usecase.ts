@@ -121,7 +121,10 @@ async function recordInvalidAnswer(
   questionState: CustomerConversationState,
   resend: (updated: CustomerBookingConversation) => Promise<void>,
   extraData?: Prisma.CustomerBookingConversationUpdateInput
-): Promise<{ advanced: false; reason: "INVALID_ANSWER" | "ESCALATED_TO_HUMAN" }> {
+): Promise<{
+  advanced: false;
+  reason: "INVALID_ANSWER" | "ESCALATED_TO_HUMAN";
+}> {
   const count =
     conversation.misunderstandingState === questionState
       ? conversation.misunderstandingCount + 1
@@ -619,8 +622,12 @@ export async function processCustomerBookingAnswer(
     if (current === "NAME") {
       const name = input.text.trim();
       if (name.length < 2 || name.length > 120) {
-        return recordInvalidAnswer(tx, conversation, customer.phoneE164, "NAME", (updated) =>
-          enqueueQuestion(tx, updated, customer.phoneE164, "NAME")
+        return recordInvalidAnswer(
+          tx,
+          conversation,
+          customer.phoneE164,
+          "NAME",
+          (updated) => enqueueQuestion(tx, updated, customer.phoneE164, "NAME")
         );
       }
       await tx.user.update({

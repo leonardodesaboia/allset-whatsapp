@@ -27,10 +27,17 @@ const createBookingSchema = z.object({
   neighborhood: z.string().trim().min(2).max(120),
   scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   scheduledTime: z.string().regex(/^\d{2}:\d{2}$/),
-  durationMinutes: z.number().int().min(30).max(12 * 60),
+  durationMinutes: z
+    .number()
+    .int()
+    .min(30)
+    .max(12 * 60),
   professionalPaymentCents: z.number().int().positive().max(10_000_000),
   customerName: z.string().trim().min(2).max(160),
-  customerPhone: z.string().trim().regex(/^\+[1-9]\d{7,14}$/),
+  customerPhone: z
+    .string()
+    .trim()
+    .regex(/^\+[1-9]\d{7,14}$/),
 });
 const bookingIdSchema = z.string().uuid();
 const conversationIdSchema = z.string().uuid();
@@ -43,7 +50,10 @@ async function currentActor(): Promise<string | null> {
   const session = await auth.api.getSession({ headers: await headers() });
   const email = session?.user.email;
   if (!email) return null;
-  const admin = await prisma.user.findFirst({ where: { email, role: "ADMIN" }, select: { email: true } });
+  const admin = await prisma.user.findFirst({
+    where: { email, role: "ADMIN" },
+    select: { email: true },
+  });
   return admin?.email ?? null;
 }
 
@@ -67,12 +77,17 @@ export async function createBookingAction(input: {
 
   try {
     const data = createBookingSchema.parse(input);
-    const scheduledAt = new Date(`${data.scheduledDate}T${data.scheduledTime}:00-03:00`);
+    const scheduledAt = new Date(
+      `${data.scheduledDate}T${data.scheduledTime}:00-03:00`
+    );
     if (Number.isNaN(scheduledAt.getTime())) {
       return { ok: false, error: "Data ou horário inválido." };
     }
     if (scheduledAt <= new Date()) {
-      return { ok: false, error: "O agendamento precisa estar em uma data e horário futuros." };
+      return {
+        ok: false,
+        error: "O agendamento precisa estar em uma data e horário futuros.",
+      };
     }
 
     const booking = await prisma.$transaction(async (tx) => {
@@ -82,13 +97,23 @@ export async function createBookingAction(input: {
       });
       if (!service) throw new Error("Serviço não encontrado ou inativo.");
 
-      const existingCustomer = await tx.user.findUnique({ where: { phoneE164: data.customerPhone } });
-      if (existingCustomer && existingCustomer.role !== "CUSTOMER") {
-        throw new Error("Este telefone já pertence a um usuário que não é cliente.");
-      }
-      const customer = existingCustomer ?? await tx.user.create({
-        data: { role: "CUSTOMER", fullName: data.customerName, phoneE164: data.customerPhone },
+      const existingCustomer = await tx.user.findUnique({
+        where: { phoneE164: data.customerPhone },
       });
+      if (existingCustomer && existingCustomer.role !== "CUSTOMER") {
+        throw new Error(
+          "Este telefone já pertence a um usuário que não é cliente."
+        );
+      }
+      const customer =
+        existingCustomer ??
+        (await tx.user.create({
+          data: {
+            role: "CUSTOMER",
+            fullName: data.customerName,
+            phoneE164: data.customerPhone,
+          },
+        }));
       const created = await tx.booking.create({
         data: {
           customerId: customer.id,
@@ -112,7 +137,10 @@ export async function createBookingAction(input: {
     revalidatePath("/admin/bookings");
     return { ok: true, bookingId: booking.id };
   } catch (error) {
-    return { ok: false, error: errorMessage(error, "Não foi possível criar o agendamento.") };
+    return {
+      ok: false,
+      error: errorMessage(error, "Não foi possível criar o agendamento."),
+    };
   }
 }
 
@@ -128,11 +156,19 @@ export async function prepareBookingMatchingAction(input: {
     revalidatePath("/admin/bookings");
     return { ok: true, bookingId: input.bookingId };
   } catch (error) {
-    return { ok: false, error: errorMessage(error, "Não foi possível salvar os dados da oportunidade.") };
+    return {
+      ok: false,
+      error: errorMessage(
+        error,
+        "Não foi possível salvar os dados da oportunidade."
+      ),
+    };
   }
 }
 
-export async function dispatchOpportunityAction(bookingId: string): Promise<BookingActionResult> {
+export async function dispatchOpportunityAction(
+  bookingId: string
+): Promise<BookingActionResult> {
   const actor = await currentActor();
   if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
   if (!z.string().uuid().safeParse(bookingId).success) {
@@ -142,7 +178,11 @@ export async function dispatchOpportunityAction(bookingId: string): Promise<Book
   try {
     const result = await notifyOpportunity(prisma, { bookingId, actor });
     if (!result.dispatched) {
-      return { ok: false, error: "Nenhuma profissional elegível está disponível para este agendamento." };
+      return {
+        ok: false,
+        error:
+          "Nenhuma profissional elegível está disponível para este agendamento.",
+      };
     }
 
     // Publish delayed expiration job for each newly created open opportunity.
@@ -172,42 +212,74 @@ export async function dispatchOpportunityAction(bookingId: string): Promise<Book
     revalidatePath(`/admin/bookings/${bookingId}/opportunity`);
     return { ok: true, notified: result.notified };
   } catch (error) {
-    return { ok: false, error: errorMessage(error, "Não foi possível enviar a oportunidade.") };
+    return {
+      ok: false,
+      error: errorMessage(error, "Não foi possível enviar a oportunidade."),
+    };
   }
 }
 
 export async function validateBookingCoverageAction(
   bookingId: string,
-  isCovered: boolean,
+  isCovered: boolean
 ): Promise<BookingActionResult> {
   const actor = await currentActor();
   if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
-  if (!z.string().uuid().safeParse(bookingId).success || typeof isCovered !== "boolean") {
+  if (
+    !z.string().uuid().safeParse(bookingId).success ||
+    typeof isCovered !== "boolean"
+  ) {
     return { ok: false, error: "Dados de cobertura inválidos." };
   }
   try {
-    const result = await validateCustomerBookingCoverage(prisma, { bookingId, isCovered, actor });
-    if (!result.ok) return { ok: false, error: "Este pedido não está aguardando validação de cobertura." };
-    await publishJobSafe({ name: JOB_NAME.MESSAGE_DISPATCH, jobId: `coverage-dispatch:${bookingId}:${Date.now()}`, payload: {} });
+    const result = await validateCustomerBookingCoverage(prisma, {
+      bookingId,
+      isCovered,
+      actor,
+    });
+    if (!result.ok)
+      return {
+        ok: false,
+        error: "Este pedido não está aguardando validação de cobertura.",
+      };
+    await publishJobSafe({
+      name: JOB_NAME.MESSAGE_DISPATCH,
+      jobId: `coverage-dispatch:${bookingId}:${Date.now()}`,
+      payload: {},
+    });
     revalidatePath("/admin/bookings");
     return { ok: true, bookingId };
   } catch (error) {
-    return { ok: false, error: errorMessage(error, "Não foi possível validar a cobertura.") };
+    return {
+      ok: false,
+      error: errorMessage(error, "Não foi possível validar a cobertura."),
+    };
   }
 }
 
 export async function sendManualCustomerMessageAction(
   bookingId: string,
-  text: string,
+  text: string
 ): Promise<BookingActionResult> {
   const actor = await currentActor();
   if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
-  if (!bookingIdSchema.safeParse(bookingId).success || typeof text !== "string") {
+  if (
+    !bookingIdSchema.safeParse(bookingId).success ||
+    typeof text !== "string"
+  ) {
     return { ok: false, error: "Dados da mensagem inválidos." };
   }
   try {
-    const result = await sendManualCustomerMessage(prisma, { bookingId, text, actor });
-    if (!result.ok) return { ok: false, error: "Este pedido não possui conversa ativa com o cliente." };
+    const result = await sendManualCustomerMessage(prisma, {
+      bookingId,
+      text,
+      actor,
+    });
+    if (!result.ok)
+      return {
+        ok: false,
+        error: "Este pedido não possui conversa ativa com o cliente.",
+      };
     publishJobSafe({
       name: JOB_NAME.MESSAGE_DISPATCH,
       jobId: `message-dispatch:drain:${Math.floor(Date.now() / 5000)}`,
@@ -216,21 +288,31 @@ export async function sendManualCustomerMessageAction(
     revalidatePath("/admin/bookings");
     return { ok: true, bookingId };
   } catch (error) {
-    return { ok: false, error: errorMessage(error, "Não foi possível enviar a mensagem.") };
+    return {
+      ok: false,
+      error: errorMessage(error, "Não foi possível enviar a mensagem."),
+    };
   }
 }
 
 export async function sendManualCustomerConversationMessageAction(
   conversationId: string,
-  text: string,
+  text: string
 ): Promise<BookingActionResult> {
   const actor = await currentActor();
   if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
-  if (!conversationIdSchema.safeParse(conversationId).success || typeof text !== "string") {
+  if (
+    !conversationIdSchema.safeParse(conversationId).success ||
+    typeof text !== "string"
+  ) {
     return { ok: false, error: "Dados da mensagem inválidos." };
   }
   try {
-    const result = await sendManualCustomerMessage(prisma, { conversationId, text, actor });
+    const result = await sendManualCustomerMessage(prisma, {
+      conversationId,
+      text,
+      actor,
+    });
     if (!result.ok) return { ok: false, error: "Conversa não encontrada." };
     publishJobSafe({
       name: JOB_NAME.MESSAGE_DISPATCH,
@@ -240,24 +322,43 @@ export async function sendManualCustomerConversationMessageAction(
     revalidatePath("/admin/customer-conversations");
     return { ok: true };
   } catch (error) {
-    return { ok: false, error: errorMessage(error, "Não foi possível enviar a mensagem.") };
+    return {
+      ok: false,
+      error: errorMessage(error, "Não foi possível enviar a mensagem."),
+    };
   }
 }
 
-export async function resumeCustomerAutomationAction(bookingId: string): Promise<BookingActionResult> {
+export async function resumeCustomerAutomationAction(
+  bookingId: string
+): Promise<BookingActionResult> {
   const actor = await currentActor();
   if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
   if (!bookingIdSchema.safeParse(bookingId).success) {
     return { ok: false, error: "Identificador de agendamento inválido." };
   }
   try {
-    const result = await resumeCustomerBookingConversation(prisma, { bookingId, actor });
-    if (!result.ok) return { ok: false, error: "Esta conversa não pode ser retomada automaticamente." };
-    await publishJobSafe({ name: JOB_NAME.MESSAGE_DISPATCH, jobId: `resume-dispatch:${bookingId}:${Date.now()}`, payload: {} });
+    const result = await resumeCustomerBookingConversation(prisma, {
+      bookingId,
+      actor,
+    });
+    if (!result.ok)
+      return {
+        ok: false,
+        error: "Esta conversa não pode ser retomada automaticamente.",
+      };
+    await publishJobSafe({
+      name: JOB_NAME.MESSAGE_DISPATCH,
+      jobId: `resume-dispatch:${bookingId}:${Date.now()}`,
+      payload: {},
+    });
     revalidatePath("/admin/bookings");
     return { ok: true, bookingId };
   } catch (error) {
-    return { ok: false, error: errorMessage(error, "Não foi possível retomar a automação.") };
+    return {
+      ok: false,
+      error: errorMessage(error, "Não foi possível retomar a automação."),
+    };
   }
 }
 
@@ -277,35 +378,62 @@ const NEXT_BOOKING_STATUS: Partial<Record<BookingStatus, BookingStatus>> = {
   AWAITING_COMPLETION_CONFIRMATION: "COMPLETED",
 };
 
-export async function advanceBookingStatusAction(bookingId: string): Promise<BookingActionResult> {
+export async function advanceBookingStatusAction(
+  bookingId: string
+): Promise<BookingActionResult> {
   const actor = await currentActor();
   if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
   if (!bookingIdSchema.safeParse(bookingId).success) {
     return { ok: false, error: "Identificador de agendamento inválido." };
   }
   try {
-    const booking = await prisma.booking.findUnique({ where: { id: bookingId }, select: { status: true } });
-    const targetStatus = booking ? NEXT_BOOKING_STATUS[booking.status as BookingStatus] : undefined;
-    if (!targetStatus) return { ok: false, error: "Este pedido não pode avançar de etapa agora." };
-    const result = await transitionBookingStatusUseCase(prisma, { bookingId, targetStatus, actor });
+    const booking = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: { status: true },
+    });
+    const targetStatus = booking
+      ? NEXT_BOOKING_STATUS[booking.status as BookingStatus]
+      : undefined;
+    if (!targetStatus)
+      return {
+        ok: false,
+        error: "Este pedido não pode avançar de etapa agora.",
+      };
+    const result = await transitionBookingStatusUseCase(prisma, {
+      bookingId,
+      targetStatus,
+      actor,
+    });
     if (!result.ok) return { ok: false, error: result.error.message };
     revalidatePath("/admin/bookings");
     return { ok: true, bookingId };
   } catch (error) {
-    return { ok: false, error: errorMessage(error, "Não foi possível avançar a etapa do atendimento.") };
+    return {
+      ok: false,
+      error: errorMessage(
+        error,
+        "Não foi possível avançar a etapa do atendimento."
+      ),
+    };
   }
 }
 
 /** Records an off-platform payment until a real PaymentProvider is configured. */
-export async function confirmManualPaymentAction(bookingId: string): Promise<BookingActionResult> {
+export async function confirmManualPaymentAction(
+  bookingId: string
+): Promise<BookingActionResult> {
   const actor = await currentActor();
   if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
-  if (!z.string().uuid().safeParse(bookingId).success) return { ok: false, error: "Identificador de agendamento inválido." };
+  if (!z.string().uuid().safeParse(bookingId).success)
+    return { ok: false, error: "Identificador de agendamento inválido." };
   try {
     await prisma.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
         where: { id: bookingId },
-        include: { customer: { select: { phoneE164: true } }, customerConversation: true },
+        include: {
+          customer: { select: { phoneE164: true } },
+          customerConversation: true,
+        },
       });
       if (!booking) throw new Error("Agendamento não encontrado.");
       const transition = await transitionBookingStatusInTransaction(tx, {
@@ -323,7 +451,9 @@ export async function confirmManualPaymentAction(bookingId: string): Promise<Boo
         await enqueueOutboundMessage(tx, {
           provider: conversation.provider,
           recipient: booking.customer.phoneE164,
-          payload: textPayload("Pagamento confirmado! Agora vamos buscar a profissional ideal para seu atendimento."),
+          payload: textPayload(
+            "Pagamento confirmado! Agora vamos buscar a profissional ideal para seu atendimento."
+          ),
           idempotencyKey: `customer-booking:${conversation.id}:payment-confirmed`,
           correlationId: conversation.id,
           actor,
@@ -338,6 +468,9 @@ export async function confirmManualPaymentAction(bookingId: string): Promise<Boo
     revalidatePath("/admin/bookings");
     return { ok: true, bookingId };
   } catch (error) {
-    return { ok: false, error: errorMessage(error, "Não foi possível confirmar o pagamento.") };
+    return {
+      ok: false,
+      error: errorMessage(error, "Não foi possível confirmar o pagamento."),
+    };
   }
 }

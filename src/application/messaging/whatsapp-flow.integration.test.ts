@@ -171,13 +171,9 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
     await receive(sender, "1");
     await receive(sender, "1");
     await receive(sender, "Maria Souza");
-    expect((await conversation(sender)).state).toBe(
-      "PROPERTY_CHARACTERISTICS"
-    );
+    expect((await conversation(sender)).state).toBe("PROPERTY_CHARACTERISTICS");
     await receive(sender, "99");
-    expect((await conversation(sender)).state).toBe(
-      "PROPERTY_CHARACTERISTICS"
-    );
+    expect((await conversation(sender)).state).toBe("PROPERTY_CHARACTERISTICS");
   });
 
   it("resets the misunderstanding counter once a conversation is resumed", async () => {

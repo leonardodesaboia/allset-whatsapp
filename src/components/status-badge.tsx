@@ -1,6 +1,9 @@
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 
-const STATUS_MAP: Record<string, { label: string; variant: BadgeProps["variant"] }> = {
+const STATUS_MAP: Record<
+  string,
+  { label: string; variant: BadgeProps["variant"] }
+> = {
   // Recrutamento — funil principal
   LEAD: { label: "Lead", variant: "outline" },
   PRE_CADASTRO: { label: "Pré-cadastro", variant: "secondary" },
@@ -39,7 +42,10 @@ const STATUS_MAP: Record<string, { label: string; variant: BadgeProps["variant"]
   PROFESSIONAL_CONFIRMED: { label: "Prof. confirmado", variant: "success" },
   PROFESSIONAL_EN_ROUTE: { label: "Prof. a caminho", variant: "warning" },
   IN_PROGRESS: { label: "Em andamento", variant: "warning" },
-  AWAITING_COMPLETION_CONFIRMATION: { label: "Aguard. conclusão", variant: "warning" },
+  AWAITING_COMPLETION_CONFIRMATION: {
+    label: "Aguard. conclusão",
+    variant: "warning",
+  },
   COMPLETED: { label: "Concluído", variant: "success" },
   CANCELLED: { label: "Cancelado", variant: "destructive" },
   ISSUE_OPEN: { label: "Problema aberto", variant: "destructive" },
@@ -47,8 +53,17 @@ const STATUS_MAP: Record<string, { label: string; variant: BadgeProps["variant"]
   REFUNDED: { label: "Reembolsado", variant: "secondary" },
 };
 
-export function StatusBadge({ status, className }: { status: string; className?: string }) {
-  const config = STATUS_MAP[status] ?? { label: status, variant: "outline" as const };
+export function StatusBadge({
+  status,
+  className,
+}: {
+  status: string;
+  className?: string;
+}) {
+  const config = STATUS_MAP[status] ?? {
+    label: status,
+    variant: "outline" as const,
+  };
   return (
     <Badge variant={config.variant} className={className}>
       {config.label}
