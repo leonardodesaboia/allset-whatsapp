@@ -81,6 +81,19 @@ Cada tentativa grava evento/auditoria e cria uma mensagem idempotente na
 outbox. O cron precisa chamar o dispatcher da outbox depois, para que o lembrete
 seja efetivamente enviado pela Evolution.
 
+### Reengajamento de pedido de cliente
+
+Agende também, pelo menos uma vez por dia:
+
+```text
+GET /api/cron/customer/reengage
+Authorization: Bearer <CRON_SECRET>
+```
+
+O endpoint envia um único lembrete idempotente para cada etapa ativa sem
+resposta há `CUSTOMER_REENGAGEMENT_AFTER_HOURS` (24 por padrão). A pessoa pode
+responder `MENU` para retomar exatamente de onde parou.
+
 ### Contratos e responsabilidades
 
 | Componente | Responsabilidade | Não faz |

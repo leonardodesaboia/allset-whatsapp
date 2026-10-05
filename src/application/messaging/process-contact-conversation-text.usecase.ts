@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { processContactIntentSelection, startContactIntentConversation } from "../customer/contact-intent-conversation.usecase";
 import { processCustomerBookingAnswer, startCustomerBookingConversation } from "../customer/customer-booking-conversation.usecase";
-import { processRecruitmentAnswer, startRecruitmentConversation } from "../recruitment/conversation-engine.usecase";
+import { processRecruitmentAnswer, resumeRecruitmentConversation, startRecruitmentConversation } from "../recruitment/conversation-engine.usecase";
 import { enqueueOutboundMessage } from "./enqueue-outbound-message.usecase";
 import { textPayload } from "../../domain/messaging/message";
 import { transitionLeadStatusInTransaction } from "../recruitment/transition-lead-status.usecase";
@@ -81,7 +81,7 @@ export async function processContactConversationText(
   }
   if (contactIntent?.state === "CUSTOMER") {
     const result = await processCustomerBookingAnswer(prisma, { inboundMessageId: input.inboundMessageId, text: input.text });
-    if (result.reason === "CONVERSATION_NOT_ACTIVE") {
+    if (result.reason === "CONVERSATION_NOT_ACTIVE" || result.reason === "CUSTOMER_NOT_FOUND") {
       return {
         routed: "customer" as const,
         started: await startCustomerBookingConversation(prisma, {
@@ -122,12 +122,22 @@ export async function processContactConversationText(
     };
   }
   if (!lead.conversation || lead.conversation.state === "PAUSED" || lead.conversation.state === "MANUAL_REVIEW" || lead.conversation.state === "COMPLETED") {
+    const normalized = input.text.trim().normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase().replace(/[*_~]/g, "");
+    if (lead.conversation?.state === "PAUSED" && lead.status === "PAUSADA" && normalized === "MENU") {
+      return {
+        routed: "recruitment" as const,
+        resumed: await resumeRecruitmentConversation(prisma, {
+          leadId: lead.id,
+          actor: "system:conversation",
+          inboundMessageId: input.inboundMessageId,
+        }),
+      };
+    }
     if (lead.status === "LEAD" || lead.status === "PRE_CADASTRO") {
       return { routed: "recruitment" as const, started: await startRecruitmentConversation(prisma, { phoneE164: input.phoneE164, provider: input.provider, inboundMessageId: input.inboundMessageId }) };
     }
 
     // Lead ativa pede ajuda explicitamente → transiciona para LIGACAO_SOLICITADA
-    const normalized = input.text.trim().toUpperCase().replace(/[*_~]/g, "");
     if (
       (normalized === "AJUDA" || normalized === "AJUDA!") &&
       (lead.status === "ATIVA" || lead.status === "PREFERENCIAL" ||

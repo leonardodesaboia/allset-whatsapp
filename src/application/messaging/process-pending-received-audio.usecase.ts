@@ -8,7 +8,9 @@ import { transcribeReceivedAudio } from "./transcribe-received-audio.usecase";
 
 export async function processPendingReceivedAudio(prisma: PrismaClient, storage: StorageProvider, downloader: InboundMediaDownloader, transcriber: AudioTranscriber, input: { inboundMessageId?: string; limit: number }) {
   const ids = input.inboundMessageId ? [input.inboundMessageId] : (await prisma.inboundMessage.findMany({
-    where: { provider: "evolution", type: "AUDIO", OR: [{ receivedAudio: { is: null } }, { receivedAudio: { is: { transcription: null } } }] },
+    // A transcript may already exist when routing failed. Keep recovering the
+    // inbound until the conversation transaction has actually consumed it.
+    where: { provider: "evolution", type: "AUDIO", processedAt: null },
     orderBy: { receivedAt: "asc" }, take: input.limit, select: { id: true },
   })).map((message) => message.id);
   const results = [] as Array<{ inboundMessageId: string; ok: boolean; error?: string }>;

@@ -17,9 +17,20 @@ describe("parseOpportunityReply", () => {
     expect(parseOpportunityReply("1 A1B2C3D4E5")).toEqual({ response: "ACCEPTED", responseToken: "A1B2C3D4E5" });
   });
 
-  it("não aceita texto adicional ou código inválido", () => {
-    expect(parseOpportunityReply("sim agora")).toBeNull();
-    expect(parseOpportunityReply("sim ABC")).toBeNull();
+  it("aceita respostas naturais curtas", () => {
+    expect(parseOpportunityReply("sim, quero!")).toEqual({ response: "ACCEPTED", responseToken: null });
+    expect(parseOpportunityReply("aceito A1B2C3D4E5")).toEqual({ response: "ACCEPTED", responseToken: "A1B2C3D4E5" });
+    expect(parseOpportunityReply("não consigo")).toEqual({ response: "DECLINED", responseToken: null });
+  });
+
+  it("tolera frases curtas e erros comuns, mas não transforma dúvida em recusa", () => {
+    expect(parseOpportunityReply("sim agora")).toEqual({ response: "ACCEPTED", responseToken: null });
+    expect(parseOpportunityReply("simm quero A1B2C3D4E5")).toEqual({ response: "ACCEPTED", responseToken: "A1B2C3D4E5" });
+    expect(parseOpportunityReply("naum consigo")).toEqual({ response: "DECLINED", responseToken: null });
+    expect(parseOpportunityReply("não sei se consigo")).toBeNull();
+  });
+
+  it("não aceita opção desconhecida", () => {
     expect(parseOpportunityReply("3")).toBeNull();
   });
 });

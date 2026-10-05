@@ -48,6 +48,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           <NavLinkClient href="/admin/recruitment" label="Profissionais" iconName="Users" />
           <NavLinkClient href="/admin/customer-conversations" label="Conversas" iconName="MessageSquare" />
           <NavLinkClient href="/admin/settings/pricing" label="Preços" iconName="Settings" />
+          <NavLinkClient href="/admin/settings/evolution" label="WhatsApp" iconName="Wifi" />
         </nav>
 
         {/* User */}

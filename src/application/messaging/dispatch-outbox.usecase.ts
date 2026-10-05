@@ -28,11 +28,14 @@ export async function dispatchNextOutboxMessage(
     orderBy: { createdAt: "asc" },
   });
   if (!candidate) return null;
+  const attempt = candidate.attempts + 1;
+  const leaseExpiresAt = new Date(Date.now() + leaseMs);
 
   const claimed = await prisma.outboxMessage.updateMany({
     where: {
       id: candidate.id,
       status: candidate.status,
+      attempts: candidate.attempts,
       ...(candidate.status === "SENDING"
         ? { leaseExpiresAt: { lte: now } }
         : { availableAt: { lte: now } }),
@@ -40,17 +43,17 @@ export async function dispatchNextOutboxMessage(
     data: {
       status: "SENDING",
       attempts: { increment: 1 },
-      leaseExpiresAt: new Date(Date.now() + leaseMs),
+      leaseExpiresAt,
     },
   });
   if (!claimed.count) return null;
 
   const gateway = registry.get(candidate.provider);
   if (!gateway) {
-    return fail(prisma, candidate.id, candidate.attempts + 1, `Provider não registrado: ${candidate.provider}`, actor);
+    return fail(prisma, candidate.id, attempt, leaseExpiresAt, `Provider não registrado: ${candidate.provider}`, actor);
   }
   if (candidate.type === "AUDIO" && !gateway.capabilities().audio) {
-    return fail(prisma, candidate.id, maxAttempts, "Provider não suporta áudio", actor);
+    return fail(prisma, candidate.id, attempt, leaseExpiresAt, "Provider não suporta áudio", actor, true);
   }
 
   try {
@@ -61,10 +64,12 @@ export async function dispatchNextOutboxMessage(
       ...(candidate.correlationId ? { correlationId: candidate.correlationId } : {}),
     });
     return prisma.$transaction(async (tx) => {
-      const updated = await tx.outboxMessage.update({
-        where: { id: candidate.id },
+      const completed = await tx.outboxMessage.updateMany({
+        where: { id: candidate.id, status: "SENDING", attempts: attempt, leaseExpiresAt },
         data: { status: "SENT", sentAt: new Date(), externalId: sent.externalId, lastError: null, leaseExpiresAt: null },
       });
+      if (!completed.count) return null;
+      const updated = await tx.outboxMessage.findUniqueOrThrow({ where: { id: candidate.id } });
       await recordAuditLog(tx, {
         actor,
         action: "OUTBOX_MESSAGE_SENT",
@@ -75,27 +80,31 @@ export async function dispatchNextOutboxMessage(
       return updated;
     });
   } catch (error) {
-    return fail(prisma, candidate.id, candidate.attempts + 1, safeError(error), actor);
+    return fail(prisma, candidate.id, attempt, leaseExpiresAt, safeError(error), actor);
   }
 }
 
-async function fail(prisma: PrismaClient, id: string, attempts: number, error: string, actor: string) {
-  const deadLetter = attempts >= maxAttempts;
-  const updated = await prisma.outboxMessage.update({
-    where: { id },
-    data: {
-      status: deadLetter ? "DEAD_LETTER" : "FAILED",
-      lastError: error,
-      leaseExpiresAt: null,
-      ...(deadLetter ? {} : { availableAt: new Date(Date.now() + retryDelayMs(attempts)) }),
-    },
+async function fail(prisma: PrismaClient, id: string, attempts: number, leaseExpiresAt: Date, error: string, actor: string, permanent = false) {
+  const deadLetter = permanent || attempts >= maxAttempts;
+  return prisma.$transaction(async (tx) => {
+    const failed = await tx.outboxMessage.updateMany({
+      where: { id, status: "SENDING", attempts, leaseExpiresAt },
+      data: {
+        status: deadLetter ? "DEAD_LETTER" : "FAILED",
+        lastError: error,
+        leaseExpiresAt: null,
+        ...(deadLetter ? {} : { availableAt: new Date(Date.now() + retryDelayMs(attempts)) }),
+      },
+    });
+    if (!failed.count) return null;
+    const updated = await tx.outboxMessage.findUniqueOrThrow({ where: { id } });
+    await recordAuditLog(tx, {
+      actor,
+      action: deadLetter ? "OUTBOX_MESSAGE_DEAD_LETTER" : "OUTBOX_MESSAGE_FAILED",
+      entityType: "OutboxMessage",
+      entityId: updated.id,
+      metadata: { provider: updated.provider },
+    });
+    return updated;
   });
-  await recordAuditLog(prisma, {
-    actor,
-    action: deadLetter ? "OUTBOX_MESSAGE_DEAD_LETTER" : "OUTBOX_MESSAGE_FAILED",
-    entityType: "OutboxMessage",
-    entityId: updated.id,
-    metadata: { provider: updated.provider },
-  });
-  return updated;
 }

@@ -20,23 +20,37 @@ export async function transcribeReceivedAudio(
   if (audio.transcription) return ok({ text: audio.transcription, alreadyTranscribed: true });
 
   const now = new Date();
+  const transcriptionLeaseUntil = new Date(now.getTime() + 5 * 60 * 1000);
   const claimed = await prisma.receivedAudio.updateMany({
     where: { id: audio.id, transcription: null, OR: [{ transcriptionLeaseUntil: null }, { transcriptionLeaseUntil: { lt: now } }] },
-    data: { transcriptionLeaseUntil: new Date(now.getTime() + 5 * 60 * 1000) },
+    data: { transcriptionLeaseUntil },
   });
   if (!claimed.count) return err(new DomainError("Transcrição já está em andamento", "TRANSCRIPTION_IN_PROGRESS"));
 
-  const data = await storage.get({ key: audio.storageKey });
-  const result = await transcriber.transcribe({ data, contentType: audio.contentType, language: "pt" });
-  await prisma.$transaction(async (tx) => {
-    await tx.receivedAudio.update({ where: { id: audio.id }, data: { transcription: result.text, transcriptionLeaseUntil: null } });
-    await recordAuditLog(tx, {
-      actor: "system:whisper",
-      action: "RECEIVED_AUDIO_TRANSCRIBED",
-      entityType: "ReceivedAudio",
-      entityId: audio.id,
-      metadata: { model: result.model },
+  try {
+    const data = await storage.get({ key: audio.storageKey });
+    const result = await transcriber.transcribe({ data, contentType: audio.contentType, language: "pt" });
+    if (!result.text.trim()) throw new Error("A transcrição não retornou texto");
+    const saved = await prisma.$transaction(async (tx) => {
+      const updated = await tx.receivedAudio.updateMany({
+        where: { id: audio.id, transcription: null, transcriptionLeaseUntil },
+        data: { transcription: result.text.trim(), transcriptionLeaseUntil: null },
+      });
+      if (!updated.count) return false;
+      await recordAuditLog(tx, {
+        actor: "system:whisper", action: "RECEIVED_AUDIO_TRANSCRIBED",
+        entityType: "ReceivedAudio", entityId: audio.id, metadata: { model: result.model },
+      });
+      return true;
     });
-  });
-  return ok({ text: result.text, alreadyTranscribed: false });
+    if (!saved) return err(new DomainError("Outra tentativa assumiu a transcrição", "TRANSCRIPTION_IN_PROGRESS"));
+    return ok({ text: result.text.trim(), alreadyTranscribed: false });
+  } catch (error) {
+    // Only release our own lease: another worker may have taken over after expiry.
+    await prisma.receivedAudio.updateMany({
+      where: { id: audio.id, transcription: null, transcriptionLeaseUntil },
+      data: { transcriptionLeaseUntil: null },
+    });
+    throw error;
+  }
 }

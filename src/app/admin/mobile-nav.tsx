@@ -114,6 +114,7 @@ export function MobileNav({ admin, initials }: MobileNavProps) {
               <NavLinkClient href="/admin/recruitment" label="Profissionais" iconName="Users" onClick={close} />
               <NavLinkClient href="/admin/customer-conversations" label="Conversas" iconName="MessageSquare" onClick={close} />
               <NavLinkClient href="/admin/settings/pricing" label="Preços" iconName="Settings" onClick={close} />
+              <NavLinkClient href="/admin/settings/evolution" label="WhatsApp" iconName="Wifi" onClick={close} />
             </nav>
 
             <div className="border-t border-white/10 p-3 shrink-0">

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { processContactConversationText } from "./process-contact-conversation-text.usecase";
-import { startRecruitmentConversation } from "../recruitment/conversation-engine.usecase";
+import { resumeRecruitmentConversation, startRecruitmentConversation } from "../recruitment/conversation-engine.usecase";
 
 vi.mock("../customer/contact-intent-conversation.usecase", () => ({
   processContactIntentSelection: vi.fn(),
@@ -14,6 +14,7 @@ vi.mock("../customer/customer-booking-conversation.usecase", () => ({
 
 vi.mock("../recruitment/conversation-engine.usecase", () => ({
   processRecruitmentAnswer: vi.fn(),
+  resumeRecruitmentConversation: vi.fn(async () => ({ id: "conversation-1" })),
   startRecruitmentConversation: vi.fn(async () => ({ started: true })),
 }));
 
@@ -71,6 +72,32 @@ describe("processContactConversationText", () => {
     expect(updateMany).toHaveBeenCalledWith({
       where: { id: "inbound-2", processedAt: null },
       data: { processedAt: expect.any(Date) },
+    });
+  });
+
+  it("retoma o pré-cadastro pausado quando a profissional envia MENU", async () => {
+    const prisma = {
+      recruitmentLead: {
+        findUnique: vi.fn(async () => ({
+          id: "lead-1",
+          status: "PAUSADA",
+          conversation: { id: "conversation-1", state: "PAUSED" },
+        })),
+      },
+      contactIntentConversation: { findUnique: vi.fn(async () => ({ state: "PROFESSIONAL" })) },
+    };
+
+    await expect(processContactConversationText(prisma as never, {
+      inboundMessageId: "inbound-3",
+      phoneE164: "+5585888888888",
+      text: "menu",
+      provider: "mock",
+    })).resolves.toMatchObject({ routed: "recruitment", resumed: { id: "conversation-1" } });
+
+    expect(resumeRecruitmentConversation).toHaveBeenCalledWith(prisma, {
+      leadId: "lead-1",
+      actor: "system:conversation",
+      inboundMessageId: "inbound-3",
     });
   });
 });

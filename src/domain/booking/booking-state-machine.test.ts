@@ -28,6 +28,10 @@ describe("transitionBookingStatus", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("permite validar cobertura antes da confirmação final no fluxo curto", () => {
+    expect(transitionBookingStatus("QUOTED", "REVIEW_REQUIRED").ok).toBe(true);
+  });
+
   it("todo status listado em BOOKING_STATUSES aparece no mapa de transições (nem que seja como terminal, com lista vazia)", () => {
     for (const status of BOOKING_STATUSES) {
       expect(Object.hasOwn(ALLOWED_TRANSITIONS, status)).toBe(true);

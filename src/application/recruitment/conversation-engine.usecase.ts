@@ -9,7 +9,9 @@ function nextState(state: ConversationState, answer: string): ConversationState 
   if (state === "CHANNEL_PREFERENCE") return answer === "PHONE" ? "PAUSED" : "NAME";
   if (state === "NAME") return "NEIGHBORHOOD";
   if (state === "NEIGHBORHOOD") return "PROFESSIONAL_EXPERIENCE";
-  if (state === "PROFESSIONAL_EXPERIENCE") return answer === "SIM" ? "EXPERIENCE_DURATION" : "INFORMAL_EXPERIENCE";
+  // Tempo de experiência é útil na entrevista, mas não precisa travar o
+  // pré-cadastro de quem já confirmou experiência profissional.
+  if (state === "PROFESSIONAL_EXPERIENCE") return answer === "SIM" ? "SERVICE_AREA" : "INFORMAL_EXPERIENCE";
   if (state === "EXPERIENCE_DURATION" || state === "INFORMAL_EXPERIENCE") return "SERVICE_AREA";
   if (state === "SERVICE_AREA") return "AVAILABILITY";
   return "COMPLETED";
@@ -59,27 +61,53 @@ export async function startRecruitmentConversation(
     });
     if (lead.status === "LEAD") lead = await transitionStatus(tx, lead.id, "PRE_CADASTRO");
 
-    // Bug 2 fix: nova conversa começa em INTRODUCTION. Envia apresentação da AllSet
-    // antes de perguntar preferência de canal (spec §2).
+    // Quem iniciou pelo WhatsApp já escolheu o canal. Começamos pela primeira
+    // informação útil e mantemos LIGAR/AJUDA disponíveis globalmente.
     const conversation = await tx.recruitmentConversation.upsert({
       where: { leadId: lead.id },
       create: {
         leadId: lead.id,
         provider: input.provider,
-        state: "INTRODUCTION",
-        lastQuestionKey: "INTRODUCTION",
+        state: "NAME",
+        lastQuestionKey: "NAME",
         lastInboundAt: new Date(),
       },
       update: { lastInboundAt: new Date() },
     });
 
-    if (conversation.state === "INTRODUCTION") {
-      await enqueueQuestion(tx, conversation, input.phoneE164, "INTRODUCTION");
+    if (conversation.state === "NAME") {
+      await enqueueOutboundMessage(tx, {
+        provider: conversation.provider,
+        recipient: input.phoneE164,
+        payload: textPayload(`${QUESTIONS.INTRODUCTION!.text}\n\n${QUESTIONS.NAME!.text}`),
+        idempotencyKey: `recruitment:${conversation.id}:introduction-name:${conversation.updatedAt.getTime()}`,
+        correlationId: conversation.id,
+        actor: "system:conversation",
+      });
+      // A primeira pergunta também precisa estar disponível em áudio. O texto
+      // acima já a contém, então aqui enviamos apenas o áudio configurado.
+      await enqueueRecruitmentQuestion(tx, {
+        conversation,
+        recipient: input.phoneE164,
+        state: "NAME",
+        idempotencyPrefix: `recruitment:${conversation.id}:introduction-name:${conversation.updatedAt.getTime()}`,
+        includeText: false,
+        actor: "system:conversation",
+      });
+    } else if (conversation.state === "INTRODUCTION") {
+      // Compatibilidade para conversas iniciadas antes do fluxo curto.
       const atChannel = await tx.recruitmentConversation.update({
         where: { id: conversation.id },
         data: { state: "CHANNEL_PREFERENCE", lastQuestionKey: "CHANNEL_PREFERENCE" },
       });
-      await enqueueQuestion(tx, atChannel, input.phoneE164, "CHANNEL_PREFERENCE");
+      await enqueueOutboundMessage(tx, {
+        provider: atChannel.provider,
+        recipient: input.phoneE164,
+        payload: textPayload(`${QUESTIONS.INTRODUCTION!.text}\n\n${QUESTIONS.CHANNEL_PREFERENCE!.text}`),
+        idempotencyKey: `recruitment:${atChannel.id}:introduction-channel:${atChannel.updatedAt.getTime()}`,
+        correlationId: atChannel.id,
+        actor: "system:conversation",
+      });
     } else if (conversation.state === "CHANNEL_PREFERENCE") {
       // Profissional retorna à primeira pergunta: reenvia sem apresentação.
       await enqueueQuestion(tx, conversation, input.phoneE164, "CHANNEL_PREFERENCE");
@@ -92,7 +120,7 @@ export async function startRecruitmentConversation(
 /** Lets an administrator return a paused/manual conversation to its last real question. */
 export async function resumeRecruitmentConversation(
   prisma: PrismaClient,
-  input: { leadId: string; actor: string },
+  input: { leadId: string; actor: string; inboundMessageId?: string },
 ) {
   return prisma.$transaction(async (tx) => {
     const conversation = await tx.recruitmentConversation.findUnique({
@@ -106,6 +134,15 @@ export async function resumeRecruitmentConversation(
 
     const state = conversation.lastQuestionKey as ConversationState | null;
     if (!state || !QUESTIONS[state]) throw new Error("Não há uma pergunta válida para retomar");
+
+    if (input.inboundMessageId) {
+      const claimed = await tx.inboundMessage.updateMany({
+        where: { id: input.inboundMessageId, processedAt: null },
+        data: { processedAt: new Date() },
+      });
+      // A webhook retry must not re-send the resumed question.
+      if (!claimed.count) return conversation;
+    }
 
     if (conversation.lead.status === "PAUSADA" || conversation.lead.status === "LIGACAO_SOLICITADA" || conversation.lead.status === "PRECISA_DE_AJUDA") {
       const transition = await transitionLeadStatusInTransaction(tx, {
@@ -144,6 +181,7 @@ export async function processRecruitmentAnswer(
     // Bug 6 fix: garante phoneE164 presente antes de qualquer enqueue.
     const phoneE164 = lead.phoneE164;
     if (!phoneE164) return { advanced: false, reason: "NO_PHONE" as const };
+    await tx.$queryRaw`SELECT id FROM "RecruitmentLead" WHERE id = ${lead.id} FOR UPDATE`;
 
     const claimedInbound = await tx.inboundMessage.updateMany({
       where: { id: input.inboundMessageId, processedAt: null },
@@ -181,16 +219,24 @@ export async function processRecruitmentAnswer(
         where: { id: lead.id },
         data: { nextAction: "Ligar para profissional", nextActionAt: new Date() },
       });
-      await tx.recruitmentConversation.update({
+      const updated = await tx.recruitmentConversation.update({
         where: { id: conversation.id },
         data: { state: "PAUSED", automationPausedAt: new Date(), lastInboundAt: new Date() },
+      });
+      await enqueueOutboundMessage(tx, {
+        provider: updated.provider,
+        recipient: phoneE164,
+        payload: textPayload("Recebemos seu pedido de ajuda. Nossa equipe vai falar com você por ligação em breve."),
+        idempotencyKey: `recruitment:${updated.id}:help:${input.inboundMessageId}`,
+        correlationId: updated.id,
+        actor: "system:conversation",
       });
       return { advanced: false, reason: "PHONE_REQUESTED" as const };
     }
 
     if (command === "STOP") {
       const status = await transitionStatus(tx, lead.id, "PAUSADA", "Automação pausada pela profissional");
-      await tx.recruitmentConversation.update({
+      const updated = await tx.recruitmentConversation.update({
         where: { id: conversation.id },
         data: { state: "PAUSED", automationPausedAt: new Date() },
       });
@@ -198,7 +244,24 @@ export async function processRecruitmentAnswer(
         where: { id: status.id },
         data: { nextAction: "Retomar pré-cadastro quando a profissional solicitar", nextActionAt: null },
       });
+      await enqueueOutboundMessage(tx, {
+        provider: updated.provider,
+        recipient: phoneE164,
+        payload: textPayload("Tudo bem, pausamos seu pré-cadastro. Quando quiser continuar, responda MENU."),
+        idempotencyKey: `recruitment:${updated.id}:stopped:${input.inboundMessageId}`,
+        correlationId: updated.id,
+        actor: "system:conversation",
+      });
       return { advanced: false, reason: "STOPPED" as const };
+    }
+
+    if (command === "MENU") {
+      const updated = await tx.recruitmentConversation.update({
+        where: { id: conversation.id },
+        data: { lastInboundAt: new Date(), misunderstandingCount: 0 },
+      });
+      await enqueueQuestion(tx, updated, phoneE164, conversation.state as ConversationState);
+      return { advanced: false, reason: "QUESTION_REPEATED" as const };
     }
 
     // Bug 3 fix: trata "Não entendi" explicitamente (spec §5).
@@ -247,6 +310,14 @@ export async function processRecruitmentAnswer(
         await tx.recruitmentLead.update({
           where: { id: status.id },
           data: { nextAction: "Revisar resposta não estruturada", nextActionAt: new Date() },
+        });
+        await enqueueOutboundMessage(tx, {
+          provider: updated.provider,
+          recipient: phoneE164,
+          payload: textPayload("Não se preocupe, não consegui entender sua resposta. Vou pedir para alguém da equipe falar com você por ligação."),
+          idempotencyKey: `recruitment:${updated.id}:manual-help:${input.inboundMessageId}`,
+          correlationId: updated.id,
+          actor: "system:conversation",
         });
       } else {
         await enqueueQuestion(tx, updated, phoneE164, current);
@@ -307,6 +378,11 @@ export async function processRecruitmentAnswer(
           nextAction: triageTarget === "CONVERSA_PENDENTE" ? "Iniciar entrevista" : null,
           nextActionAt: triageTarget === "CONVERSA_PENDENTE" ? new Date() : null,
         },
+      });
+      await enqueueOutboundMessage(tx, {
+        provider: updated.provider, recipient: phoneE164,
+        payload: textPayload("Seu pré-cadastro foi recebido! Nossa equipe vai revisar suas informações e entrar em contato com os próximos passos."),
+        idempotencyKey: `recruitment:${updated.id}:completed`, correlationId: updated.id, actor: "system:conversation",
       });
       return { advanced: true, completed: true, triageTarget };
     }

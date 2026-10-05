@@ -1,0 +1,1 @@
+ALTER TYPE "CustomerBookingConversationState" ADD VALUE IF NOT EXISTS 'EDIT_SELECTION';

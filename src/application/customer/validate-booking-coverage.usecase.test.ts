@@ -5,11 +5,13 @@ describe("validateCustomerBookingCoverage", () => {
   it("cancela o booking quando o endereco fica fora da cobertura", async () => {
     const bookingUpdates: unknown[] = [];
     const tx = {
+      $queryRaw: vi.fn(async () => []),
       booking: {
         findUnique: vi.fn(async () => ({
           id: "3c22f875-61ca-48b1-a31e-e07fd6af9474",
+          customerId: "customer-1",
           status: "REVIEW_REQUIRED",
-          customerConversation: { id: "conversation-1" },
+          customerConversation: { id: "conversation-1", state: "MANUAL_REVIEW", lastQuestionKey: "MANUAL_REVIEW" },
           customer: { phoneE164: "+5585999999999" },
         })),
         updateMany: vi.fn(async (input) => {

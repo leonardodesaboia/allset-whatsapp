@@ -25,7 +25,7 @@ export async function publishJobSafe<N extends JobName>(
   const prefix = process.env.JOB_QUEUE_PREFIX ?? "allset:development";
 
   try {
-    const [{ getSharedConnection }, { getJobQueue }] = await Promise.all([
+    const [{ getSharedConnection }, { getJobQueue, toBullMqJobId }] = await Promise.all([
       import("./bullmq-connection"),
       import("./job-queue"),
     ]);
@@ -35,7 +35,7 @@ export async function publishJobSafe<N extends JobName>(
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (queue as Queue<any>).add(input.name, input.payload, {
-      jobId: input.jobId,
+      jobId: toBullMqJobId(input.jobId),
       ...(input.delay !== undefined ? { delay: input.delay } : {}),
     });
 

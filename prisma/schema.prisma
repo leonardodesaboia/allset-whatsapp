@@ -701,6 +701,7 @@ enum CustomerBookingConversationState {
   QUOTE_ACCEPTANCE
   ADDRESS
   FINAL_CONFIRMATION
+  EDIT_SELECTION
   AWAITING_PAYMENT
   MANUAL_REVIEW
   PAUSED
@@ -780,6 +781,9 @@ model CustomerBookingConversation {
   pendingScheduleDate String?
   automationPausedAt  DateTime?
   lastInboundAt       DateTime?
+  lastReengagementAt   DateTime?
+  misunderstandingCount Int                          @default(0)
+  misunderstandingState String?
   version             Int                            @default(0)
   createdAt           DateTime                       @default(now())
   updatedAt           DateTime                       @updatedAt

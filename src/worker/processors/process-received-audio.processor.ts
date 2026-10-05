@@ -7,6 +7,8 @@ import { createAudioTranscriber } from "@/infrastructure/transcription/transcrip
 import { logger } from "@/infrastructure/observability/logger";
 import { env } from "@/env";
 import type { ReceivedAudioPayload } from "@/infrastructure/jobs/job-payloads";
+import { publishJobSafe } from "@/infrastructure/jobs/publish-job";
+import { JOB_NAME } from "@/infrastructure/jobs/job-names";
 
 export async function processReceivedAudioProcessor(
   job: Job<ReceivedAudioPayload>,
@@ -38,6 +40,14 @@ export async function processReceivedAudioProcessor(
   if (!result.ok) {
     throw new Error(`Falha ao processar áudio ${inboundMessageId}: ${result.error}`);
   }
+
+  // Routing the transcription can enqueue a reply. Drain it without waiting
+  // for a later inbound event or periodic job.
+  await publishJobSafe({
+    name: JOB_NAME.MESSAGE_DISPATCH,
+    jobId: `message-dispatch:audio:${inboundMessageId}`,
+    payload: {},
+  });
 
   logger.info({ jobId: job.id, inboundMessageId }, "Áudio processado com sucesso");
 }

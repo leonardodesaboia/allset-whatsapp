@@ -1,0 +1,88 @@
+name: allset-whatsapp-local
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: allset_local
+      POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD:?Execute pnpm local:configure primeiro}
+      POSTGRES_DB: allset_local
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - app_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U allset_local -d allset_local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "127.0.0.1:56379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  evolution-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: evolution_local
+      POSTGRES_PASSWORD: ${LOCAL_EVOLUTION_DB_PASSWORD:?Execute pnpm local:configure primeiro}
+      POSTGRES_DB: evolution_local
+    volumes:
+      - evolution_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution_local -d evolution_local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  evolution:
+    image: evoapicloud/evolution-api:v2.3.7
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      evolution-db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SERVER_URL: http://localhost:18080
+      SERVER_PORT: "8080"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evolution_local:${LOCAL_EVOLUTION_DB_PASSWORD}@evolution-db:5432/evolution_local?schema=public
+      DATABASE_CONNECTION_CLIENT_NAME: allset-local
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?Execute pnpm local:configure primeiro}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "false"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379/6
+      CACHE_REDIS_PREFIX_KEY: allset-evolution-local
+      CACHE_REDIS_SAVE_INSTANCES: "false"
+      CACHE_LOCAL_ENABLED: "false"
+      TELEMETRY_ENABLED: "false"
+      DEL_INSTANCE: "false"
+      LOG_LEVEL: ERROR,WARN,INFO
+      LOG_BAILEYS: error
+      CONFIG_SESSION_PHONE_CLIENT: AllSet Local
+      CONFIG_SESSION_PHONE_NAME: Chrome
+    volumes:
+      - evolution_instances:/evolution/instances
+
+volumes:
+  app_db:
+  redis_data:
+  evolution_db:
+  evolution_instances:

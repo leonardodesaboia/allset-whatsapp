@@ -20,7 +20,11 @@ describe("expireOpportunities", () => {
     const ts = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
     const neighborhood = `Aldeota ${ts}`;
     const customer = await prisma.user.create({
-      data: { role: "CUSTOMER", fullName: "Cliente", phoneE164: `+558540${ts}` },
+      data: {
+        role: "CUSTOMER",
+        fullName: "Cliente",
+        phoneE164: `+558540${ts}`,
+      },
     });
     const service = await prisma.serviceDefinition.create({
       data: { code: `service-${ts}`, name: "Limpeza" },
@@ -56,32 +60,73 @@ describe("expireOpportunities", () => {
         expiresAt,
       },
     });
-    await prisma.opportunityResponse.create({ data: { opportunityId: opportunity.id, leadId: lead.id } });
+    await prisma.opportunityResponse.create({
+      data: { opportunityId: opportunity.id, leadId: lead.id },
+    });
     return { booking, opportunity };
   }
 
   it("expira a oportunidade, as respostas e move o booking para revisão", async () => {
-    const { booking, opportunity } = await seedOpportunity(new Date(Date.now() - 1_000));
+    const { booking, opportunity } = await seedOpportunity(
+      new Date(Date.now() - 1_000)
+    );
 
     const result = await expireOpportunities(prisma);
 
     expect(result.expired).toBeGreaterThanOrEqual(1);
-    expect((await prisma.serviceOpportunity.findUniqueOrThrow({ where: { id: opportunity.id } })).status).toBe("EXPIRED");
-    expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe("REVIEW_REQUIRED");
-    const responses = await prisma.opportunityResponse.findMany({ where: { opportunityId: opportunity.id } });
-    expect(responses.every((response) => response.response === "EXPIRED")).toBe(true);
+    expect(
+      (
+        await prisma.serviceOpportunity.findUniqueOrThrow({
+          where: { id: opportunity.id },
+        })
+      ).status
+    ).toBe("EXPIRED");
+    expect(
+      (await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } }))
+        .status
+    ).toBe("REVIEW_REQUIRED");
+    const responses = await prisma.opportunityResponse.findMany({
+      where: { opportunityId: opportunity.id },
+    });
+    expect(responses.every((response) => response.response === "EXPIRED")).toBe(
+      true
+    );
   });
 
-  it("preserva oportunidades que ainda não venceram", async () => {
-    const { opportunity } = await seedOpportunity(new Date(Date.now() + 60 * 60 * 1_000));
+  it("avisa o cliente quando nenhuma profissional aceitou a tempo e o booking volta para revisão", async () => {
+    const { booking } = await seedOpportunity(new Date(Date.now() - 1_000));
+    const customer = await prisma.user.findUniqueOrThrow({
+      where: { id: booking.customerId },
+    });
 
     await expireOpportunities(prisma);
 
-    expect((await prisma.serviceOpportunity.findUniqueOrThrow({ where: { id: opportunity.id } })).status).toBe("OPEN");
+    const message = await prisma.outboxMessage.findFirst({
+      where: { recipient: customer.phoneE164 },
+    });
+    expect(message).not.toBeNull();
+  });
+
+  it("preserva oportunidades que ainda não venceram", async () => {
+    const { opportunity } = await seedOpportunity(
+      new Date(Date.now() + 60 * 60 * 1_000)
+    );
+
+    await expireOpportunities(prisma);
+
+    expect(
+      (
+        await prisma.serviceOpportunity.findUniqueOrThrow({
+          where: { id: opportunity.id },
+        })
+      ).status
+    ).toBe("OPEN");
   });
 
   it("não tira o booking de matching se outra oportunidade ainda estiver aberta", async () => {
-    const { booking, opportunity } = await seedOpportunity(new Date(Date.now() - 1_000));
+    const { booking, opportunity } = await seedOpportunity(
+      new Date(Date.now() - 1_000)
+    );
     await prisma.serviceOpportunity.create({
       data: {
         bookingId: booking.id,
@@ -95,12 +140,23 @@ describe("expireOpportunities", () => {
 
     await expireOpportunities(prisma);
 
-    expect((await prisma.serviceOpportunity.findUniqueOrThrow({ where: { id: opportunity.id } })).status).toBe("EXPIRED");
-    expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe("MATCHING");
+    expect(
+      (
+        await prisma.serviceOpportunity.findUniqueOrThrow({
+          where: { id: opportunity.id },
+        })
+      ).status
+    ).toBe("EXPIRED");
+    expect(
+      (await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } }))
+        .status
+    ).toBe("MATCHING");
   });
 
   it("permite reenviar matching após expirar, preservando o histórico da oportunidade anterior", async () => {
-    const { booking, opportunity } = await seedOpportunity(new Date(Date.now() - 1_000));
+    const { booking, opportunity } = await seedOpportunity(
+      new Date(Date.now() - 1_000)
+    );
 
     await expireOpportunities(prisma);
     const result = await notifyOpportunity(prisma, { bookingId: booking.id });
@@ -114,6 +170,9 @@ describe("expireOpportunities", () => {
     expect(opportunities[0]?.id).toBe(opportunity.id);
     expect(opportunities[0]?.status).toBe("EXPIRED");
     expect(opportunities[1]?.status).toBe("OPEN");
-    expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe("MATCHING");
+    expect(
+      (await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } }))
+        .status
+    ).toBe("MATCHING");
   });
 });

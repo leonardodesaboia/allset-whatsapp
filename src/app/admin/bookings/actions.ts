@@ -4,6 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { notifyOpportunity } from "@/application/marketplace/notify-opportunity.usecase";
+import { prepareBookingMatching } from "@/application/booking/prepare-booking-matching.usecase";
 import { validateCustomerBookingCoverage } from "@/application/customer/validate-booking-coverage.usecase";
 import { sendManualCustomerMessage } from "@/application/customer/send-manual-customer-message.usecase";
 import { resumeCustomerBookingConversation } from "@/application/customer/customer-booking-conversation.usecase";
@@ -111,6 +112,22 @@ export async function createBookingAction(input: {
   }
 }
 
+export async function prepareBookingMatchingAction(input: {
+  bookingId: string;
+  neighborhood: string;
+  professionalPaymentCents: number;
+}): Promise<BookingActionResult> {
+  const actor = await currentActor();
+  if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
+  try {
+    await prepareBookingMatching(prisma, { ...input, actor });
+    revalidatePath("/admin/bookings");
+    return { ok: true, bookingId: input.bookingId };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Não foi possível salvar os dados da oportunidade.") };
+  }
+}
+
 export async function dispatchOpportunityAction(bookingId: string): Promise<BookingActionResult> {
   const actor = await currentActor();
   if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
@@ -167,6 +184,7 @@ export async function validateBookingCoverageAction(
   try {
     const result = await validateCustomerBookingCoverage(prisma, { bookingId, isCovered, actor });
     if (!result.ok) return { ok: false, error: "Este pedido não está aguardando validação de cobertura." };
+    await publishJobSafe({ name: JOB_NAME.MESSAGE_DISPATCH, jobId: `coverage-dispatch:${bookingId}:${Date.now()}`, payload: {} });
     revalidatePath("/admin/bookings");
     return { ok: true, bookingId };
   } catch (error) {
@@ -231,6 +249,7 @@ export async function resumeCustomerAutomationAction(bookingId: string): Promise
   try {
     const result = await resumeCustomerBookingConversation(prisma, { bookingId, actor });
     if (!result.ok) return { ok: false, error: "Esta conversa não pode ser retomada automaticamente." };
+    await publishJobSafe({ name: JOB_NAME.MESSAGE_DISPATCH, jobId: `resume-dispatch:${bookingId}:${Date.now()}`, payload: {} });
     revalidatePath("/admin/bookings");
     return { ok: true, bookingId };
   } catch (error) {

@@ -13,9 +13,15 @@ export type RecruitmentReengagementPayload = {
   reengagementCount: number;
 };
 
+export type CustomerReengagementPayload = {
+  conversationId: string;
+  lastInboundAtMs: number;
+};
+
 export type JobPayloadMap = {
   "message-dispatch": MessageDispatchPayload;
   "received-audio": ReceivedAudioPayload;
   "opportunity-expiration": OpportunityExpirationPayload;
   "recruitment-reengagement": RecruitmentReengagementPayload;
+  "customer-reengagement": CustomerReengagementPayload;
 };

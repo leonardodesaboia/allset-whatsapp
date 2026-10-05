@@ -207,10 +207,17 @@ export async function processOpportunityResponse(
       },
     });
 
+    const serviceDetails = [
+      `Confirmado${lead.fullName ? `, ${lead.fullName}` : ""}: ${formatSchedule(opportunity.scheduledAt)} em ${opportunity.neighborhood}.`,
+      booking.addressLine1 ? `📍 Endereço: ${booking.addressLine1}` : null,
+      booking.addressLine2 ? booking.addressLine2 : null,
+      booking.addressReference ? `Referência: ${booking.addressReference}` : null,
+      "Se precisar de ajuda antes do atendimento, responda AJUDA.",
+    ].filter((line): line is string => Boolean(line)).join("\n");
     await enqueueText(tx, {
       provider: inbound.provider,
       recipient: lead.phoneE164,
-      text: `Confirmado${lead.fullName ? `, ${lead.fullName}` : ""}: ${formatSchedule(opportunity.scheduledAt)} em ${opportunity.neighborhood}.`,
+      text: serviceDetails,
       idempotencyKey: `opportunity:${opportunity.id}:${response.id}:confirmed`,
       correlationId: opportunity.id,
     });
@@ -219,7 +226,7 @@ export async function processOpportunityResponse(
       await enqueueText(tx, {
         provider: booking.customerConversation?.provider ?? inbound.provider,
         recipient: booking.customer.phoneE164,
-        text: `Boa notícia! Um profissional confirmou presença para ${formatSchedule(opportunity.scheduledAt)} em ${opportunity.neighborhood}. Em breve você receberá mais detalhes.`,
+        text: `Boa notícia! Uma profissional confirmou presença para ${formatSchedule(opportunity.scheduledAt)} em ${opportunity.neighborhood}. Nossa equipe confirmará os detalhes por aqui antes do atendimento.`,
         idempotencyKey: `opportunity:${opportunity.id}:customer-assigned`,
         correlationId: opportunity.id,
       });

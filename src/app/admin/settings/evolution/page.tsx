@@ -6,10 +6,12 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertTriangle,
+  ExternalLink,
 } from "lucide-react";
 import { env } from "@/env";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { QrCodePanel } from "./qr-code-panel";
 
 async function fetchEvolutionState(): Promise<{
@@ -50,6 +52,14 @@ export default async function EvolutionSettingsPage() {
       <div>
         <h1 className="text-xl font-bold text-slate-900">Integração Evolution</h1>
         <p className="text-sm text-slate-500 mt-0.5">Status da instância WhatsApp</p>
+        {env.EVOLUTION_BASE_URL && (
+          <Button asChild variant="outline" size="sm" className="mt-3">
+            <a href={`${env.EVOLUTION_BASE_URL.replace(/\/$/, "")}/manager/`} target="_blank" rel="noopener noreferrer">
+              <ExternalLink className="w-3.5 h-3.5" />
+              Abrir painel da Evolution
+            </a>
+          </Button>
+        )}
       </div>
 
       {/* Config status */}

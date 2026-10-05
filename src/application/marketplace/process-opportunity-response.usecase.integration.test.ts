@@ -71,7 +71,7 @@ describe("processOpportunityResponse", () => {
   }
 
   it("aceita apenas a primeira profissional e move o booking", async () => {
-    const { booking, opportunity, lead1, response1, response2, makeInbound } = await seedScene();
+    const { booking, opportunity, lead1, lead2, response1, response2, makeInbound } = await seedScene();
     const inbound = await makeInbound(lead1.phoneE164!, "sim", "accept");
 
     await expect(processOpportunityResponse(prisma, {
@@ -84,7 +84,9 @@ describe("processOpportunityResponse", () => {
     expect(updatedBooking.assignedProfessionalLeadId).toBe(lead1.id);
     expect((await prisma.opportunityResponse.findUniqueOrThrow({ where: { id: response1.id } })).response).toBe("ACCEPTED");
     expect((await prisma.opportunityResponse.findUniqueOrThrow({ where: { id: response2.id } })).response).toBe("DECLINED");
-    expect(await prisma.outboxMessage.count({ where: { correlationId: opportunity.id } })).toBe(2);
+    const customer = await prisma.user.findUniqueOrThrow({ where: { id: booking.customerId } });
+    const messages = await prisma.outboxMessage.findMany({ where: { correlationId: opportunity.id } });
+    expect(messages.map((message) => message.recipient).sort()).toEqual([lead1.phoneE164, lead2.phoneE164, customer.phoneE164].sort());
   });
 
   it("recusa sem alterar o booking", async () => {

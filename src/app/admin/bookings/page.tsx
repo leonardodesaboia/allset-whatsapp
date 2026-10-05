@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Plus, Clock, CheckCircle2, ArrowRight } from "lucide-react";
 import { prisma } from "@/infrastructure/db/prisma-client";
-import { confirmManualPaymentAction, dispatchOpportunityAction, resumeCustomerAutomationAction, validateBookingCoverageAction } from "./actions";
+import { confirmManualPaymentAction, resumeCustomerAutomationAction, validateBookingCoverageAction } from "./actions";
+import { BookingMatchingActions } from "./booking-matching-actions";
 import { CustomerMessageForm } from "./customer-message-form";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +24,7 @@ export default async function BookingsPage() {
     include: {
       service: { select: { name: true } },
       customer: { select: { fullName: true, phoneE164: true } },
-      customerConversation: { select: { id: true, state: true } },
+      customerConversation: { select: { id: true, state: true, lastQuestionKey: true } },
       opportunities: { select: { id: true, status: true }, orderBy: { createdAt: "desc" }, take: 1 },
     },
   });
@@ -91,29 +92,20 @@ export default async function BookingsPage() {
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1.5">
                           {(booking.status === "DRAFT" || booking.status === "PAID" || (booking.status === "REVIEW_REQUIRED" && opportunity?.status === "EXPIRED")) && (
-                            <ActionFeedbackForm action={async () => {
-                              "use server";
-                              return dispatchOpportunityAction(booking.id);
-                            }}>
-                              <button
-                                type="submit"
-                                className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900"
-                              >
-                                <ArrowRight className="w-3 h-3" />
-                                {opportunity?.status === "EXPIRED" ? "Reenviar para matching" : "Enviar para matching"}
-                              </button>
-                            </ActionFeedbackForm>
+                            <BookingMatchingActions bookingId={booking.id} neighborhood={booking.neighborhood}
+                              professionalPaymentCents={booking.professionalPaymentCents} address={booking.addressLine1}
+                              expired={opportunity?.status === "EXPIRED"} />
                           )}
 
                           {booking.status === "AWAITING_PAYMENT" && (
                             <ActionFeedbackForm action={async () => { "use server"; return confirmManualPaymentAction(booking.id); }}>
-                              <ConfirmButton message="Confirmar o pagamento manual? Esta ação registra o pedido como pago e inicia o matching." className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900">
+                              <ConfirmButton message="Confirmar o pagamento manual? Esta ação registra o pedido como pago. Depois, informe bairro e repasse para enviar a oportunidade." className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900">
                                 <CheckCircle2 className="w-3 h-3" /> Confirmar pagamento manual
                               </ConfirmButton>
                             </ActionFeedbackForm>
                           )}
 
-                          {booking.status === "REVIEW_REQUIRED" && booking.customerConversation && booking.addressLine1 && (
+                          {booking.status === "REVIEW_REQUIRED" && booking.customerConversation?.lastQuestionKey === "MANUAL_REVIEW" && booking.addressLine1 && (
                             <div className="space-y-1">
                               <p className="text-xs text-slate-600">{booking.addressLine1}</p>
                               <div className="flex gap-2 flex-wrap">
@@ -190,29 +182,20 @@ export default async function BookingsPage() {
 
                   <div className="flex flex-col gap-2 pt-1 border-t border-slate-100">
                     {(booking.status === "DRAFT" || booking.status === "PAID" || (booking.status === "REVIEW_REQUIRED" && opportunity?.status === "EXPIRED")) && (
-                      <ActionFeedbackForm action={async () => {
-                        "use server";
-                        return dispatchOpportunityAction(booking.id);
-                      }}>
-                        <button
-                          type="submit"
-                          className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900"
-                        >
-                          <ArrowRight className="w-3 h-3" />
-                          {opportunity?.status === "EXPIRED" ? "Reenviar para matching" : "Enviar para matching"}
-                        </button>
-                      </ActionFeedbackForm>
+                      <BookingMatchingActions bookingId={booking.id} neighborhood={booking.neighborhood}
+                        professionalPaymentCents={booking.professionalPaymentCents} address={booking.addressLine1}
+                        expired={opportunity?.status === "EXPIRED"} />
                     )}
 
                     {booking.status === "AWAITING_PAYMENT" && (
                       <ActionFeedbackForm action={async () => { "use server"; return confirmManualPaymentAction(booking.id); }}>
-                        <ConfirmButton message="Confirmar o pagamento manual? Esta ação registra o pedido como pago e inicia o matching." className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900">
+                        <ConfirmButton message="Confirmar o pagamento manual? Esta ação registra o pedido como pago. Depois, informe bairro e repasse para enviar a oportunidade." className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900">
                           <CheckCircle2 className="w-3 h-3" /> Confirmar pagamento manual
                         </ConfirmButton>
                       </ActionFeedbackForm>
                     )}
 
-                    {booking.status === "REVIEW_REQUIRED" && booking.customerConversation && booking.addressLine1 && (
+                    {booking.status === "REVIEW_REQUIRED" && booking.customerConversation?.lastQuestionKey === "MANUAL_REVIEW" && booking.addressLine1 && (
                       <div className="space-y-1">
                         <p className="text-xs text-slate-600">{booking.addressLine1}</p>
                         <div className="flex gap-3 flex-wrap">

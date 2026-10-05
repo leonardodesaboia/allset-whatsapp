@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   customerScheduleDateChoices,
   parseScheduleDateChoice,
+  parseScheduleDateTime,
   parseScheduleTimeChoice,
   scheduledAtFromFortalezaLocal,
 } from "./customer-schedule";
@@ -24,5 +25,17 @@ describe("customer schedule choices", () => {
 
   it("cria scheduledAt em UTC a partir de data e hora locais de Fortaleza", () => {
     expect(scheduledAtFromFortalezaLocal("2026-08-09", "09:00")?.toISOString()).toBe("2026-08-09T12:00:00.000Z");
+  });
+
+  it("entende data e horário na mesma mensagem", () => {
+    const base = new Date("2026-08-07T12:00:00Z");
+    expect(parseScheduleDateTime("amanhã às 14h", base)).toEqual({ date: "2026-08-08", time: "14:00" });
+    expect(parseScheduleDateTime("09/08 9h", base)).toEqual({ date: "2026-08-09", time: "09:00" });
+    expect(parseScheduleDateTime("sexta às 13h", new Date("2026-08-06T12:00:00Z"))).toEqual({ date: "2026-08-07", time: "13:00" });
+    expect(parseScheduleDateTime("hoje às 8h", base)).toEqual({ date: "2026-08-07", time: "08:00" });
+  });
+
+  it("rejeita datas de calendário inválidas", () => {
+    expect(scheduledAtFromFortalezaLocal("2026-02-31", "14:00")).toBeUndefined();
   });
 });

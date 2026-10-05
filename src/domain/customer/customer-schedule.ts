@@ -1,5 +1,14 @@
 const FORTALEZA_TIME_ZONE = "America/Fortaleza";
 const FORTALEZA_OFFSET = "-03:00";
+const WEEKDAY_INDEX: Record<string, number> = {
+  domingo: 0,
+  segunda: 1,
+  terca: 2,
+  quarta: 3,
+  quinta: 4,
+  sexta: 5,
+  sabado: 6,
+};
 
 export type CustomerScheduleDateChoice = {
   value: string;
@@ -76,8 +85,57 @@ export function parseScheduleTimeChoice(text: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Accepts a short natural-language slot such as "amanhã às 14h" while
+ * preserving the fixed, operationally available time slots.
+ */
+export function parseScheduleDateTime(text: string, baseDate = new Date()): { date: string; time: string } | undefined {
+  const normalized = text.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+  const timeMatch = normalized.match(/(?:as?|às?)?\s*(0?[89]|13|14)(?:h|:00)?\b/);
+  if (!timeMatch) return undefined;
+  const hour = Number(timeMatch[1]);
+  const time = `${String(hour).padStart(2, "0")}:00`;
+  if (!CUSTOMER_SCHEDULE_TIME_CHOICES.some((choice) => choice.value === time)) return undefined;
+
+  let date: string | undefined;
+  if (/\bhoje\b/.test(normalized)) date = isoDateFromFortalezaOffset(baseDate, 0);
+  else if (/\bdepois de amanha\b/.test(normalized)) date = isoDateFromFortalezaOffset(baseDate, 2);
+  else if (/\bamanha\b/.test(normalized)) date = isoDateFromFortalezaOffset(baseDate, 1);
+  else {
+    const iso = normalized.match(/\b(\d{4}-\d{2}-\d{2})\b/)?.[1];
+    const brazilian = normalized.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?\b/);
+    if (iso) date = iso;
+    else if (brazilian) {
+      const current = fortalezaDateParts(baseDate);
+      const year = brazilian[3] ? Number(brazilian[3]) : current.year;
+      date = `${year}-${String(Number(brazilian[2])).padStart(2, "0")}-${String(Number(brazilian[1])).padStart(2, "0")}`;
+    } else {
+      const weekday = Object.entries(WEEKDAY_INDEX).find(([name]) => new RegExp(`\\b${name}(?:-feira)?\\b`).test(normalized))?.[0];
+      if (weekday) {
+        const current = fortalezaDateParts(baseDate);
+        const currentWeekday = new Date(Date.UTC(current.year, current.month - 1, current.day)).getUTCDay();
+        const targetWeekday = WEEKDAY_INDEX[weekday];
+        if (targetWeekday !== undefined) {
+          const offset = (targetWeekday - currentWeekday + 7) % 7;
+          date = isoDateFromFortalezaOffset(baseDate, offset);
+        }
+      }
+    }
+  }
+  return date ? { date, time } : undefined;
+}
+
 export function scheduledAtFromFortalezaLocal(isoDate: string, time: string): Date | undefined {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate) || !/^\d{2}:\d{2}$/.test(time)) return undefined;
-  const scheduledAt = new Date(`${isoDate}T${time}:00${FORTALEZA_OFFSET}`);
-  return Number.isNaN(scheduledAt.getTime()) ? undefined : scheduledAt;
+  const [year = Number.NaN, month = Number.NaN, day = Number.NaN] = isoDate.split("-").map(Number);
+  const [hour = Number.NaN, minute = Number.NaN] = time.split(":").map(Number);
+  const calendarDate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    Number.isNaN(calendarDate.getTime()) ||
+    calendarDate.getUTCFullYear() !== year ||
+    calendarDate.getUTCMonth() !== month - 1 ||
+    calendarDate.getUTCDate() !== day ||
+    hour > 23 || minute > 59
+  ) return undefined;
+  return new Date(`${isoDate}T${time}:00${FORTALEZA_OFFSET}`);
 }

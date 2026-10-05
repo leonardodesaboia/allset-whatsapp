@@ -21,9 +21,10 @@ export async function routeInboundText(
     select: { id: true, responseToken: true },
   });
   const reply = parseOpportunityReply(input.text);
+  // A pending offer must not swallow commands such as AJUDA or PARAR.
   const pendingResponse = reply?.responseToken
     ? pendingResponses.find((response) => response.responseToken === reply.responseToken)
-    : pendingResponses.length === 1 ? pendingResponses[0] : undefined;
+    : reply && pendingResponses.length === 1 ? pendingResponses[0] : undefined;
 
   if (pendingResponse) {
     return {
@@ -35,7 +36,7 @@ export async function routeInboundText(
       }),
     };
   }
-  if (pendingResponses.length > 0) {
+  if (reply && pendingResponses.length > 0) {
     return {
       routed: "opportunity" as const,
       result: await requestOpportunityClarification(prisma, {
