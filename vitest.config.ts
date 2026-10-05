@@ -5,6 +5,20 @@ export default defineConfig({
   test: {
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      thresholds: { lines: 80, functions: 80, branches: 70, statements: 80 },
+      exclude: [
+        "**/node_modules/**",
+        "**/tests/**",
+        "**/*.config.*",
+        "src/app/**",
+        "src/env.ts",
+        "src/lib/**",
+        "src/worker/main.ts",
+      ],
+    },
     // tests/e2e/*.spec.ts são testes do Playwright (Task 10), não do
     // Vitest — o glob padrão do Vitest também casa com "*.spec.ts" e tenta
     // importar `test()` do @playwright/test, que quebra fora do runner do

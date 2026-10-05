@@ -114,11 +114,20 @@ export async function processOpportunityResponse(
       return { outcome: "ALREADY_FILLED" as const };
     }
 
-    const parsed = parseOpportunityReply(input.text)?.response;
-    if (!parsed) return { outcome: "INVALID_RESPONSE" as const };
-
     const now = new Date();
     const { opportunity, lead } = response;
+
+    const parsed = parseOpportunityReply(input.text)?.response;
+    if (!parsed) {
+      await enqueueText(tx, {
+        provider: inbound.provider,
+        recipient: lead.phoneE164,
+        text: "Não entendi sua resposta. Responda *SIM* para aceitar ou *NÃO* para recusar a oportunidade.",
+        idempotencyKey: `opportunity:${response.id}:invalid:${inbound.id}`,
+        correlationId: opportunity.id,
+      });
+      return { outcome: "INVALID_RESPONSE" as const };
+    }
 
     if (parsed === "DECLINED") {
       const declined = await tx.opportunityResponse.updateMany({
@@ -150,17 +159,27 @@ export async function processOpportunityResponse(
       data: { status: "FILLED" },
     });
     if (!claimedOpportunity.count) {
+      const currentOpp = await tx.serviceOpportunity.findUnique({ where: { id: opportunity.id }, select: { status: true } });
+      const tooLateText = currentOpp?.status === "FILLED"
+        ? "Esta oportunidade já foi aceita por outra profissional. Avisaremos quando surgir uma nova."
+        : "Infelizmente o prazo para aceitar esta oportunidade encerrou. Fique de olho nas próximas!";
       await enqueueText(tx, {
         provider: lead.conversation?.provider ?? inbound.provider,
         recipient: lead.phoneE164,
-        text: "Esta oportunidade já foi preenchida. Avisaremos quando surgir uma nova.",
+        text: tooLateText,
         idempotencyKey: `opportunity:${opportunity.id}:${response.id}:too-late`,
         correlationId: opportunity.id,
       });
       return { outcome: "ALREADY_FILLED" as const };
     }
 
-    const booking = await tx.booking.findUniqueOrThrow({ where: { id: opportunity.bookingId } });
+    const booking = await tx.booking.findUniqueOrThrow({
+      where: { id: opportunity.bookingId },
+      include: {
+        customer: { select: { phoneE164: true } },
+        customerConversation: { select: { provider: true } },
+      },
+    });
     const transition = transitionBookingStatus(
       booking.status as BookingStatus,
       "PROFESSIONAL_ASSIGNED",
@@ -192,13 +211,30 @@ export async function processOpportunityResponse(
       },
     });
 
+    const serviceDetails = [
+      `Confirmado${lead.fullName ? `, ${lead.fullName}` : ""}: ${formatSchedule(opportunity.scheduledAt)} em ${opportunity.neighborhood}.`,
+      booking.addressLine1 ? `📍 Endereço: ${booking.addressLine1}` : null,
+      booking.addressLine2 ? booking.addressLine2 : null,
+      booking.addressReference ? `Referência: ${booking.addressReference}` : null,
+      "Se precisar de ajuda antes do atendimento, responda AJUDA.",
+    ].filter((line): line is string => Boolean(line)).join("\n");
     await enqueueText(tx, {
       provider: inbound.provider,
       recipient: lead.phoneE164,
-      text: `Confirmado${lead.fullName ? `, ${lead.fullName}` : ""}: ${formatSchedule(opportunity.scheduledAt)} em ${opportunity.neighborhood}.`,
+      text: serviceDetails,
       idempotencyKey: `opportunity:${opportunity.id}:${response.id}:confirmed`,
       correlationId: opportunity.id,
     });
+
+    if (booking.customer.phoneE164) {
+      await enqueueText(tx, {
+        provider: booking.customerConversation?.provider ?? inbound.provider,
+        recipient: booking.customer.phoneE164,
+        text: `Boa notícia! Uma profissional confirmou presença para ${formatSchedule(opportunity.scheduledAt)} em ${opportunity.neighborhood}. Nossa equipe confirmará os detalhes por aqui antes do atendimento.`,
+        idempotencyKey: `opportunity:${opportunity.id}:customer-assigned`,
+        correlationId: opportunity.id,
+      });
+    }
 
     const pendingResponses = await tx.opportunityResponse.findMany({
       where: { opportunityId: opportunity.id, response: null },

@@ -1,84 +1,193 @@
 import { env } from "@/env";
-import { processOpportunityResponse, requestOpportunityClarification } from "@/application/marketplace/process-opportunity-response.usecase";
-import { processContactConversationText } from "@/application/messaging/process-contact-conversation-text.usecase";
 import { processInboundEvent } from "@/application/messaging/process-inbound-event.usecase";
 import { dispatchNextOutboxMessage } from "@/application/messaging/dispatch-outbox.usecase";
-import { parseOpportunityReply } from "@/domain/marketplace/opportunity-reply";
+import { routeInboundText } from "@/application/messaging/route-inbound-text.usecase";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { logger } from "@/infrastructure/observability/logger";
-import { isValidEvolutionWebhook, normalizeEvolutionWebhook } from "@/infrastructure/messaging/evolution-webhook";
+import {
+  isValidEvolutionWebhook,
+  normalizeEvolutionWebhook,
+} from "@/infrastructure/messaging/evolution-webhook";
 import { createMessagingGatewayRegistry } from "@/infrastructure/messaging/messaging-runtime";
+import {
+  PayloadTooLargeError,
+  parseJsonBody,
+} from "@/infrastructure/http/parse-json-body";
+import { publishJobSafe } from "@/infrastructure/jobs/publish-job";
+import { JOB_NAME } from "@/infrastructure/jobs/job-names";
+import { activeStates as customerActiveStates } from "@/application/customer/reengage-silent-customer-conversations.usecase";
 
 export const runtime = "nodejs";
+const MAX_WEBHOOK_BYTES = 1_048_576;
 
 /** A configuração da Evolution deve enviar este valor em `x-allset-webhook-secret`. */
 export async function POST(request: Request) {
-  if (!isValidEvolutionWebhook(env.EVOLUTION_WEBHOOK_SECRET, request.headers.get("x-allset-webhook-secret"))) {
+  if (
+    !isValidEvolutionWebhook(
+      env.EVOLUTION_WEBHOOK_SECRET,
+      request.headers.get("x-allset-webhook-secret")
+    )
+  ) {
     return Response.json({ ok: false, error: "UNAUTHORIZED" }, { status: 401 });
+  }
+
+  const contentLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > MAX_WEBHOOK_BYTES) {
+    return Response.json(
+      { ok: false, error: "PAYLOAD_TOO_LARGE" },
+      { status: 413 }
+    );
   }
 
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
+    body = await parseJsonBody(request, MAX_WEBHOOK_BYTES);
+  } catch (error) {
+    if (error instanceof PayloadTooLargeError) {
+      return Response.json(
+        { ok: false, error: "PAYLOAD_TOO_LARGE" },
+        { status: 413 }
+      );
+    }
     return Response.json({ ok: false, error: "INVALID_JSON" }, { status: 400 });
   }
 
-  const event = normalizeEvolutionWebhook(body);
+  const event = normalizeEvolutionWebhook(
+    body,
+    env.WHATSAPP_NUMBER ? `+${env.WHATSAPP_NUMBER}` : "allset"
+  );
   if (!event) return Response.json({ ok: true, ignored: true });
 
   try {
-    const received = await processInboundEvent(prisma, { ...event, provider: "evolution", actor: "evolution:webhook" });
-    if (received.duplicate) return Response.json({ ok: true, duplicate: true });
-    if (event.payload.type === "AUDIO") {
-      // A mídia será baixada por um job específico antes de o operador classificá-la.
-      return Response.json({ ok: true, needsMediaDownload: true }, { status: 202 });
-    }
-
-    // Opportunity responses take precedence over recruitment. This is an
-    // adapter concern only: the use case validates ownership and claims the
-    // inbound message before performing the state transition.
-    const pendingOpportunityResponses = await prisma.opportunityResponse.findMany({
-      where: {
-        lead: { phoneE164: event.sender },
-        response: null,
-        opportunity: { status: "OPEN" },
-      },
-      orderBy: { sentAt: "asc" },
-      select: { id: true, responseToken: true },
+    const received = await processInboundEvent(prisma, {
+      ...event,
+      provider: "evolution",
+      actor: "evolution:webhook",
     });
-    const reply = parseOpportunityReply(event.payload.text);
-    const pendingOpportunityResponse = reply?.responseToken
-      ? pendingOpportunityResponses.find((response) => response.responseToken === reply.responseToken)
-      : pendingOpportunityResponses.length === 1 ? pendingOpportunityResponses[0] : undefined;
-    if (pendingOpportunityResponse) {
-      const result = await processOpportunityResponse(prisma, {
-        responseId: pendingOpportunityResponse.id,
-        text: event.payload.text,
-        inboundMessageId: received.message.id,
-      });
-      return Response.json({ ok: true, routed: "opportunity", result });
-    }
-    if (pendingOpportunityResponses.length > 0) {
-      const result = await requestOpportunityClarification(prisma, {
-        inboundMessageId: received.message.id,
-        responseTokens: pendingOpportunityResponses.map((response) => response.responseToken),
-      });
-      return Response.json({ ok: true, routed: "opportunity", result });
+    if (received.duplicate && received.message.processedAt)
+      return Response.json({ ok: true, duplicate: true });
+    if (event.payload.type === "AUDIO") {
+      // Worker downloads, transcribes and routes. Fallback: cron/download-audio.
+      publishJobSafe({
+        name: JOB_NAME.RECEIVED_AUDIO,
+        jobId: `received-audio:${received.message.id}`,
+        payload: { inboundMessageId: received.message.id },
+      }).catch((err) =>
+        logger.error({ err }, "Falha ao publicar job de áudio")
+      );
+      return Response.json(
+        { ok: true, needsMediaDownload: true },
+        { status: 202 }
+      );
     }
 
-    const result = await processContactConversationText(prisma, {
+    const result = await routeInboundText(prisma, {
       inboundMessageId: received.message.id,
       phoneE164: event.sender,
       text: event.payload.text,
       provider: "evolution",
     });
-    dispatchNextOutboxMessage(prisma, createMessagingGatewayRegistry(), "system:webhook-dispatch").catch(
-      (err) => logger.error({ err }, "Falha ao despachar outbox inline no webhook"),
-    );
-    return Response.json({ ok: true, ...result });
+    // Schedule a delayed reengagement check whenever a recruitment message is processed.
+    // Stable jobId = at most one pending check per conversation (BullMQ dedup).
+    // The processor re-verifies lastInboundAt before sending, so a late message is safe.
+    if (result.routed === "recruitment") {
+      prisma.recruitmentConversation
+        .findFirst({
+          where: { lead: { phoneE164: event.sender } },
+          select: {
+            id: true,
+            reengagementCount: true,
+            state: true,
+            lastInboundAt: true,
+          },
+        })
+        .then((conv) => {
+          if (
+            !conv ||
+            conv.state === "COMPLETED" ||
+            conv.state === "PAUSED" ||
+            conv.state === "MANUAL_REVIEW" ||
+            conv.state === "INTRODUCTION"
+          )
+            return;
+          return publishJobSafe({
+            name: JOB_NAME.RECRUITMENT_REENGAGEMENT,
+            jobId: `reengagement:${conv.id}:${conv.lastInboundAt?.getTime()}:${conv.reengagementCount}`,
+            payload: {
+              conversationId: conv.id,
+              reengagementCount: conv.reengagementCount,
+            },
+            delay: env.RECRUITMENT_REENGAGEMENT_AFTER_HOURS * 60 * 60 * 1000,
+          });
+        })
+        .catch((err) =>
+          logger.error({ err }, "Falha ao agendar job de reengajamento")
+        );
+    }
+    // Same idea for a customer booking conversation: delayed check, dedup by
+    // (conversationId, lastInboundAt) so a late message is still safe.
+    if (result.routed === "customer") {
+      prisma.customerBookingConversation
+        .findFirst({
+          where: { customer: { phoneE164: event.sender } },
+          orderBy: { updatedAt: "desc" },
+          select: { id: true, state: true, lastInboundAt: true },
+        })
+        .then((conv) => {
+          if (
+            !conv?.lastInboundAt ||
+            !(customerActiveStates as readonly string[]).includes(conv.state)
+          )
+            return;
+          return publishJobSafe({
+            name: JOB_NAME.CUSTOMER_REENGAGEMENT,
+            jobId: `customer-reengagement:${conv.id}:${conv.lastInboundAt.getTime()}`,
+            payload: {
+              conversationId: conv.id,
+              lastInboundAtMs: conv.lastInboundAt.getTime(),
+            },
+            delay: env.CUSTOMER_REENGAGEMENT_AFTER_HOURS * 60 * 60 * 1000,
+          });
+        })
+        .catch((err) =>
+          logger.error(
+            { err },
+            "Falha ao agendar job de reengajamento do cliente"
+          )
+        );
+    }
+    // Publish a drain trigger. Fallback: worker picks up any remaining pending messages.
+    // If REDIS_URL is not set, dispatch inline (keeps existing behavior).
+    if (process.env.REDIS_URL) {
+      publishJobSafe({
+        name: JOB_NAME.MESSAGE_DISPATCH,
+        jobId: `message-dispatch:drain:${Math.floor(Date.now() / 5000)}`,
+        payload: {},
+      }).catch((err) =>
+        logger.error({ err }, "Falha ao publicar job de dispatch")
+      );
+    } else {
+      dispatchNextOutboxMessage(
+        prisma,
+        createMessagingGatewayRegistry(),
+        "system:webhook-dispatch"
+      ).catch((err) =>
+        logger.error({ err }, "Falha ao despachar outbox inline no webhook")
+      );
+    }
+    return Response.json({
+      ok: true,
+      ...(received.duplicate ? { recovered: true } : {}),
+      ...result,
+    });
   } catch (error) {
-    logger.error({ err: error, provider: "evolution", externalId: event.externalId }, "Falha ao processar webhook da Evolution");
-    return Response.json({ ok: false, error: "PROCESSING_FAILED" }, { status: 500 });
+    logger.error(
+      { err: error, provider: "evolution", externalId: event.externalId },
+      "Falha ao processar webhook da Evolution"
+    );
+    return Response.json(
+      { ok: false, error: "PROCESSING_FAILED" },
+      { status: 500 }
+    );
   }
 }

@@ -6,12 +6,13 @@ import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.us
 async function enqueueIntentPrompt(
   tx: Prisma.TransactionClient,
   conversation: ContactIntentConversation,
+  initial = false,
 ): Promise<void> {
   await enqueueOutboundMessage(tx, {
     provider: conversation.provider,
     recipient: conversation.phoneE164,
     payload: textPayload(contactIntentPrompt),
-    idempotencyKey: `contact-intent:${conversation.id}:${conversation.updatedAt.getTime()}`,
+    idempotencyKey: initial ? `contact-intent:${conversation.id}:initial` : `contact-intent:${conversation.id}:${conversation.updatedAt.getTime()}`,
     correlationId: conversation.id,
     actor: "system:contact-intent",
   });
@@ -35,7 +36,7 @@ export async function startContactIntentConversation(
       update: { lastInboundAt: new Date() },
     });
 
-    if (conversation.state === "CHOOSING_INTENT") await enqueueIntentPrompt(tx, conversation);
+    if (conversation.state === "CHOOSING_INTENT") await enqueueIntentPrompt(tx, conversation, true);
     return conversation;
   });
 }
@@ -47,6 +48,8 @@ export async function processContactIntentSelection(
   return prisma.$transaction(async (tx) => {
     const inbound = await tx.inboundMessage.findUnique({ where: { id: input.inboundMessageId } });
     if (!inbound) return { handled: false, reason: "INBOUND_NOT_FOUND" };
+    if (inbound.processedAt) return { handled: false, reason: "DUPLICATE_INBOUND" };
+    await tx.$queryRaw`SELECT id FROM "ContactIntentConversation" WHERE "phoneE164" = ${inbound.sender} FOR UPDATE`;
 
     const conversation = await tx.contactIntentConversation.findUnique({ where: { phoneE164: inbound.sender } });
     if (!conversation || conversation.state !== "CHOOSING_INTENT") {

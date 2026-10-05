@@ -2,13 +2,15 @@ import type { PrismaClient } from "@prisma/client";
 import type { AudioTranscriber } from "../../domain/ports/audio-transcriber";
 import type { InboundMediaDownloader } from "../../domain/ports/inbound-media-downloader";
 import type { StorageProvider } from "../../domain/ports/storage-provider";
-import { processContactConversationText } from "./process-contact-conversation-text.usecase";
+import { routeInboundText } from "./route-inbound-text.usecase";
 import { downloadReceivedAudio } from "./download-received-audio.usecase";
 import { transcribeReceivedAudio } from "./transcribe-received-audio.usecase";
 
 export async function processPendingReceivedAudio(prisma: PrismaClient, storage: StorageProvider, downloader: InboundMediaDownloader, transcriber: AudioTranscriber, input: { inboundMessageId?: string; limit: number }) {
   const ids = input.inboundMessageId ? [input.inboundMessageId] : (await prisma.inboundMessage.findMany({
-    where: { provider: "evolution", type: "AUDIO", OR: [{ receivedAudio: { is: null } }, { receivedAudio: { is: { transcription: null } } }] },
+    // A transcript may already exist when routing failed. Keep recovering the
+    // inbound until the conversation transaction has actually consumed it.
+    where: { provider: "evolution", type: "AUDIO", processedAt: null },
     orderBy: { receivedAt: "asc" }, take: input.limit, select: { id: true },
   })).map((message) => message.id);
   const results = [] as Array<{ inboundMessageId: string; ok: boolean; error?: string }>;
@@ -26,7 +28,7 @@ export async function processPendingReceivedAudio(prisma: PrismaClient, storage:
         results.push({ inboundMessageId, ok: false, error: "INBOUND_NOT_FOUND" });
         continue;
       }
-      await processContactConversationText(prisma, {
+      await routeInboundText(prisma, {
         inboundMessageId,
         phoneE164: inbound.sender,
         text: transcription.value.text,

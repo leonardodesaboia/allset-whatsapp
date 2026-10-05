@@ -17,7 +17,11 @@ describe("transitionBookingStatusUseCase", () => {
 
   async function seedBooking() {
     const user = await prisma.user.create({
-      data: { role: "CUSTOMER", fullName: "Cliente Teste", phoneE164: `+5585${Date.now()}` },
+      data: {
+        role: "CUSTOMER",
+        fullName: "Cliente Teste",
+        phoneE164: `+5585${Date.now()}`,
+      },
     });
     const service = await prisma.serviceDefinition.create({
       data: { code: `limpeza-${Date.now()}`, name: "Limpeza comum" },
@@ -37,16 +41,62 @@ describe("transitionBookingStatusUseCase", () => {
     });
 
     expect(result.ok).toBe(true);
-    const updated = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
+    const updated = await prisma.booking.findUniqueOrThrow({
+      where: { id: booking.id },
+    });
     expect(updated.status).toBe("COLLECTING_DATA");
 
-    const history = await prisma.bookingStatusHistory.findMany({ where: { bookingId: booking.id } });
+    const history = await prisma.bookingStatusHistory.findMany({
+      where: { bookingId: booking.id },
+    });
     expect(history).toHaveLength(1);
-    expect(history[0]).toMatchObject({ fromStatus: "DRAFT", toStatus: "COLLECTING_DATA" });
+    expect(history[0]).toMatchObject({
+      fromStatus: "DRAFT",
+      toStatus: "COLLECTING_DATA",
+    });
 
-    const audit = await prisma.auditLog.findMany({ where: { entityId: booking.id } });
+    const audit = await prisma.auditLog.findMany({
+      where: { entityId: booking.id },
+    });
     expect(audit).toHaveLength(1);
     expect(audit[0]).toMatchObject({ action: "BOOKING_STATUS_TRANSITION" });
+  });
+
+  it("avança pela cadeia completa pós-atribuição até a conclusão", async () => {
+    const booking = await seedBooking();
+    const chain: Array<{
+      actor: string;
+      target: Parameters<
+        typeof transitionBookingStatusUseCase
+      >[1]["targetStatus"];
+    }> = [
+      { actor: "system:test", target: "MATCHING" },
+      { actor: "system:test", target: "PROFESSIONAL_ASSIGNED" },
+      { actor: "admin:test", target: "SCHEDULED" },
+      { actor: "admin:test", target: "PROFESSIONAL_CONFIRMED" },
+      { actor: "admin:test", target: "PROFESSIONAL_EN_ROUTE" },
+      { actor: "admin:test", target: "IN_PROGRESS" },
+      { actor: "admin:test", target: "AWAITING_COMPLETION_CONFIRMATION" },
+      { actor: "admin:test", target: "COMPLETED" },
+    ];
+
+    for (const step of chain) {
+      const result = await transitionBookingStatusUseCase(prisma, {
+        bookingId: booking.id,
+        targetStatus: step.target,
+        actor: step.actor,
+      });
+      expect(result.ok).toBe(true);
+    }
+
+    const final = await prisma.booking.findUniqueOrThrow({
+      where: { id: booking.id },
+    });
+    expect(final.status).toBe("COMPLETED");
+    const history = await prisma.bookingStatusHistory.findMany({
+      where: { bookingId: booking.id },
+    });
+    expect(history).toHaveLength(chain.length);
   });
 
   it("rejeita transição inválida sem escrever nada", async () => {
@@ -59,9 +109,13 @@ describe("transitionBookingStatusUseCase", () => {
     });
 
     expect(result.ok).toBe(false);
-    const unchanged = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
+    const unchanged = await prisma.booking.findUniqueOrThrow({
+      where: { id: booking.id },
+    });
     expect(unchanged.status).toBe("DRAFT");
-    const history = await prisma.bookingStatusHistory.findMany({ where: { bookingId: booking.id } });
+    const history = await prisma.bookingStatusHistory.findMany({
+      where: { bookingId: booking.id },
+    });
     expect(history).toHaveLength(0);
   });
 
@@ -98,7 +152,9 @@ describe("transitionBookingStatusUseCase", () => {
     const succeeded = outcomes.filter((r) => r.ok);
     expect(succeeded).toHaveLength(1);
 
-    const history = await prisma.bookingStatusHistory.findMany({ where: { bookingId: booking.id } });
+    const history = await prisma.bookingStatusHistory.findMany({
+      where: { bookingId: booking.id },
+    });
     expect(history).toHaveLength(2); // DRAFT->COLLECTING_DATA + a única transição concorrente que venceu
   });
 });

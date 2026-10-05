@@ -297,6 +297,9 @@ Adicionar ao crontab do servidor (via Easypanel terminal ou SSH):
 # Drena outbox de mensagens a cada minuto
 * * * * * curl -s -H "Authorization: Bearer <CRON_SECRET>" http://localhost:3000/api/cron/messaging/dispatch
 
+# Baixa e transcreve áudios pendentes a cada minuto
+* * * * * curl -s -H "Authorization: Bearer <CRON_SECRET>" http://localhost:3000/api/cron/messaging/download-audio
+
 # Reengaja leads silenciosos uma vez por dia à meia-noite
 0 0 * * * curl -s -H "Authorization: Bearer <CRON_SECRET>" http://localhost:3000/api/cron/recruitment/reengage
 
@@ -329,4 +332,6 @@ Eventos: MESSAGES_UPSERT
 - [ ] Webhook da Evolution reconfigurado para o novo domínio
 - [ ] Enviar mensagem de teste no WhatsApp e verificar resposta imediata
 - [ ] Crontab configurado e testado manualmente
+- [ ] Cron de download/transcrição de áudio configurado e testado com um áudio real
+- [ ] Monitor chama `GET /api/internal/health` com `x-allset-job-secret` e alerta em resposta diferente de 200
 - [ ] Vercel desativado / projeto removido

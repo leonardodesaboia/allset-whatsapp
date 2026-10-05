@@ -28,6 +28,9 @@ jobs:
       # sempre que o secret BETTER_AUTH_SECRET_TEST não estiver configurado.
       BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET_TEST || 'a-32-char-minimum-test-secret!!!' }}
       BETTER_AUTH_URL: http://localhost:3000
+      EVOLUTION_WEBHOOK_SECRET: e2e-only-webhook-secret-at-least-32-characters
+      INTERNAL_JOB_SECRET: e2e-only-internal-job-secret-at-least-32-characters
+      CRON_SECRET: e2e-only-cron-secret-at-least-32-characters
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4

@@ -4,7 +4,7 @@ RUN corepack enable pnpm
 # ── deps ──────────────────────────────────────────────────────────────────────
 FROM base AS deps
 WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 # ── builder ───────────────────────────────────────────────────────────────────
@@ -13,7 +13,13 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm prisma generate
-RUN pnpm build
+RUN DATABASE_URL=postgresql://build:build@localhost:5432/build \
+    BETTER_AUTH_SECRET=build-only-secret-not-valid-for-runtime \
+    BETTER_AUTH_URL=http://localhost:3000 \
+    EVOLUTION_WEBHOOK_SECRET=build-only-webhook-secret-not-valid-for-runtime \
+    INTERNAL_JOB_SECRET=build-only-internal-job-secret-not-valid-for-runtime \
+    CRON_SECRET=build-only-cron-secret-not-valid-for-runtime \
+    pnpm build
 
 # ── runner ────────────────────────────────────────────────────────────────────
 FROM node:24-alpine AS runner
@@ -47,5 +53,10 @@ USER nextjs
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+
+# The route checks both the authenticated application boundary and database
+# readiness. INTERNAL_JOB_SECRET is required by env validation in production.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget -q -O /dev/null --header="x-allset-job-secret: ${INTERNAL_JOB_SECRET}" http://127.0.0.1:3000/api/internal/health || exit 1
 
 ENTRYPOINT ["./docker-entrypoint.sh"]

@@ -11,19 +11,22 @@ export async function enqueueRecruitmentQuestion(
     state: ConversationState;
     idempotencyPrefix: string;
     text?: string;
+    includeText?: boolean;
     actor: string;
   },
 ) {
   const question = QUESTIONS[input.state];
   if (!question) return;
-  await enqueueOutboundMessage(tx, {
-    provider: input.conversation.provider,
-    recipient: input.recipient,
-    payload: textPayload(input.text ?? question.text),
-    idempotencyKey: `${input.idempotencyPrefix}:text`,
-    correlationId: input.conversation.id,
-    actor: input.actor,
-  });
+  if (input.includeText !== false) {
+    await enqueueOutboundMessage(tx, {
+      provider: input.conversation.provider,
+      recipient: input.recipient,
+      payload: textPayload(input.text ?? question.text),
+      idempotencyKey: `${input.idempotencyPrefix}:text`,
+      correlationId: input.conversation.id,
+      actor: input.actor,
+    });
+  }
   const audio = await tx.questionAudioAsset.findFirst({
     where: { questionKey: input.state, isActive: true },
     orderBy: { version: "desc" },

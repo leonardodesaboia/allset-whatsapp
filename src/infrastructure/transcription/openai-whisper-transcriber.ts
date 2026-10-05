@@ -20,6 +20,7 @@ export class OpenAiWhisperTranscriber implements AudioTranscriber {
       method: "POST",
       headers: { Authorization: `Bearer ${this.apiKey}` },
       body: form,
+      signal: AbortSignal.timeout(120_000),
     });
     if (!response.ok) throw new Error(`OpenAI transcription retornou ${response.status}`);
     const body = await response.json() as { text?: unknown };

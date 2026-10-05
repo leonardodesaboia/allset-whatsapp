@@ -19,4 +19,8 @@ describe("transitionRecruitmentStatus", () => {
     expect(transitionRecruitmentStatus("LIGACAO_SOLICITADA", "ENTREVISTA").ok).toBe(true);
     expect(transitionRecruitmentStatus("DESISTIU", "PRE_CADASTRO").ok).toBe(false);
   });
+  it("encaminha pedido de ajuda de profissionais ativas para ligação", () => {
+    expect(transitionRecruitmentStatus("ATIVA", "LIGACAO_SOLICITADA").ok).toBe(true);
+    expect(transitionRecruitmentStatus("PREFERENCIAL", "LIGACAO_SOLICITADA").ok).toBe(true);
+  });
 });

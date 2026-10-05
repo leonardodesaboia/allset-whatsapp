@@ -2,6 +2,7 @@
 .next
 node_modules
 .env*
+.local
 !.env.example
 *.md
 docs

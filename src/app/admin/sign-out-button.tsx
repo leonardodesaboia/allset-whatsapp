@@ -25,8 +25,9 @@ export function SignOutButton() {
     <button
       type="button"
       onClick={handleSignOut}
-      className="text-slate-500 hover:text-white transition-colors"
+      className="inline-flex min-h-8 min-w-8 items-center justify-center text-slate-500 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
       title="Sair"
+      aria-label="Sair da conta"
     >
       <LogOut className="w-3.5 h-3.5" />
     </button>

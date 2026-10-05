@@ -2,7 +2,7 @@ import Link from "next/link";
 import { MessageSquare, Clock } from "lucide-react";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { CustomerConversationMessageForm } from "./customer-conversation-message-form";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
 
 export default async function CustomerConversationsPage() {
@@ -14,7 +14,7 @@ export default async function CustomerConversationsPage() {
   });
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="space-y-5 p-4 sm:p-6">
       <div>
         <h1 className="text-xl font-bold text-slate-900">Conversas de clientes</h1>
         <p className="text-sm text-slate-500 mt-0.5">
@@ -55,7 +55,7 @@ export default async function CustomerConversationsPage() {
                       <p className="text-xs text-slate-500 mt-0.5">{conversation.customer.phoneE164}</p>
                     </td>
                     <td className="px-4 py-3">
-                      <Badge variant="secondary">{conversation.state}</Badge>
+                      <StatusBadge status={conversation.state} />
                     </td>
                     <td className="px-4 py-3 hidden md:table-cell">
                       <span className="flex items-center gap-1.5 text-xs text-slate-500">
@@ -90,7 +90,7 @@ export default async function CustomerConversationsPage() {
                     </Link>
                     <p className="text-xs text-slate-500 mt-0.5">{conversation.customer.phoneE164}</p>
                   </div>
-                  <Badge variant="secondary">{conversation.state}</Badge>
+                  <StatusBadge status={conversation.state} />
                 </div>
 
                 <span className="flex items-center gap-1.5 text-xs text-slate-500">

@@ -17,21 +17,30 @@ export function NewLeadForm() {
   const [pending, setPending] = useState(false);
 
   async function submit() {
+    if (pending) return;
     setPending(true);
-    const res = await createLeadAction({
-      origin: "CADASTRO_MANUAL",
-      ...(fullName ? { fullName } : {}),
-      ...(phoneE164 ? { phoneE164 } : {}),
-      ...(neighborhood ? { neighborhood } : {}),
-    });
-    setPending(false);
-    if (!res.ok) return setError(res.error ?? "Não foi possível criar.");
-    setOpen(false);
-    setFullName("");
-    setPhone("");
-    setNeighborhood("");
     setError(null);
-    router.refresh();
+    try {
+      const res = await createLeadAction({
+        origin: "CADASTRO_MANUAL",
+        ...(fullName ? { fullName } : {}),
+        ...(phoneE164 ? { phoneE164 } : {}),
+        ...(neighborhood ? { neighborhood } : {}),
+      });
+      if (!res.ok) {
+        setError(res.error ?? "Não foi possível criar.");
+        return;
+      }
+      setOpen(false);
+      setFullName("");
+      setPhone("");
+      setNeighborhood("");
+      router.refresh();
+    } catch {
+      setError("Não foi possível criar o cadastro. Tente novamente.");
+    } finally {
+      setPending(false);
+    }
   }
 
   if (!open) {

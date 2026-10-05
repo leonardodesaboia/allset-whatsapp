@@ -81,6 +81,19 @@ Cada tentativa grava evento/auditoria e cria uma mensagem idempotente na
 outbox. O cron precisa chamar o dispatcher da outbox depois, para que o lembrete
 seja efetivamente enviado pela Evolution.
 
+### Reengajamento de pedido de cliente
+
+Agende também, pelo menos uma vez por dia:
+
+```text
+GET /api/cron/customer/reengage
+Authorization: Bearer <CRON_SECRET>
+```
+
+O endpoint envia um único lembrete idempotente para cada etapa ativa sem
+resposta há `CUSTOMER_REENGAGEMENT_AFTER_HOURS` (24 por padrão). A pessoa pode
+responder `MENU` para retomar exatamente de onde parou.
+
 ### Contratos e responsabilidades
 
 | Componente | Responsabilidade | Não faz |
@@ -148,6 +161,19 @@ O arquivo `vercel.json` agenda, a cada cinco minutos,
 no projeto. A primeira rota chama diretamente `expireOpportunities`; a segunda
 processa até dez áudios pendentes. A transcrição usa um lease de cinco minutos,
 evitando que execuções concorrentes enviem o mesmo áudio ao Whisper.
+
+### Monitoramento de disponibilidade
+
+O monitor de infraestrutura deve verificar periodicamente a prontidão da aplicação:
+
+```text
+GET /api/internal/health
+x-allset-job-secret: <INTERNAL_JOB_SECRET>
+```
+
+`200 { "ok": true }` confirma que a aplicação consegue consultar o banco.
+`503` exige investigação imediata do banco ou da conectividade da aplicação.
+O endpoint não expõe segredos, configuração ou detalhes do banco.
 
 ### Segurança, privacidade e retenção
 

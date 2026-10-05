@@ -1,11 +1,14 @@
 import type { PrismaClient } from "@prisma/client";
 import { processContactIntentSelection, startContactIntentConversation } from "../customer/contact-intent-conversation.usecase";
 import { processCustomerBookingAnswer, startCustomerBookingConversation } from "../customer/customer-booking-conversation.usecase";
-import { processRecruitmentAnswer, startRecruitmentConversation } from "../recruitment/conversation-engine.usecase";
+import { processRecruitmentAnswer, resumeRecruitmentConversation, startRecruitmentConversation } from "../recruitment/conversation-engine.usecase";
 import { enqueueOutboundMessage } from "./enqueue-outbound-message.usecase";
+import { contactIntentPrompt } from "../../domain/customer/contact-intent";
 import { textPayload } from "../../domain/messaging/message";
 import { transitionLeadStatusInTransaction } from "../recruitment/transition-lead-status.usecase";
 import type { RecruitmentStatus } from "../../domain/recruitment/recruitment-status";
+
+const INTENT_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
 
 const ACTIVE_FUNNEL_STATUSES: ReadonlySet<RecruitmentStatus> = new Set([
   "TRIAGEM",
@@ -57,9 +60,54 @@ export async function processContactConversationText(
 ) {
   const lead = await prisma.recruitmentLead.findUnique({
     where: { phoneE164: input.phoneE164 },
-    include: { conversation: { select: { id: true } } },
+    include: { conversation: { select: { id: true, state: true } } },
   });
   const contactIntent = await prisma.contactIntentConversation.findUnique({ where: { phoneE164: input.phoneE164 } });
+
+  // Reset intents obsoletos (7 dias sem atividade) para que o contato possa
+  // escolher novamente entre cliente e profissional.
+  if (
+    contactIntent &&
+    contactIntent.state !== "CHOOSING_INTENT" &&
+    contactIntent.state !== "PAUSED" &&
+    !!contactIntent.lastInboundAt &&
+    contactIntent.lastInboundAt.getTime() < Date.now() - INTENT_EXPIRY_MS
+  ) {
+    const hasActiveFlow =
+      contactIntent.state === "CUSTOMER"
+        ? !!(await prisma.customerBookingConversation.findFirst({
+            where: { customer: { phoneE164: input.phoneE164 }, state: { notIn: ["COMPLETED", "PAUSED"] } },
+          }))
+        : !!lead &&
+          (ACTIVE_FUNNEL_STATUSES.has(lead.status as RecruitmentStatus) ||
+            lead.status === "LEAD" ||
+            lead.status === "PRE_CADASTRO" ||
+            (!!lead.conversation && !["COMPLETED", "PAUSED", "MANUAL_REVIEW"].includes(lead.conversation.state)));
+
+    if (!hasActiveFlow) {
+      const reset = await prisma.$transaction(async (tx) => {
+        const claimed = await tx.inboundMessage.updateMany({
+          where: { id: input.inboundMessageId, processedAt: null },
+          data: { processedAt: new Date() },
+        });
+        if (!claimed.count) return null;
+        const updated = await tx.contactIntentConversation.update({
+          where: { id: contactIntent.id },
+          data: { state: "CHOOSING_INTENT", lastInboundAt: new Date() },
+        });
+        await enqueueOutboundMessage(tx, {
+          provider: input.provider,
+          recipient: input.phoneE164,
+          payload: textPayload(contactIntentPrompt),
+          idempotencyKey: `contact-intent-reset:${contactIntent.id}:${updated.updatedAt.getTime()}`,
+          correlationId: contactIntent.id,
+          actor: "system:contact-intent-expiry",
+        });
+        return updated;
+      });
+      if (reset) return { routed: "contact-intent" as const, reset: true };
+    }
+  }
 
   if (!contactIntent && !lead) {
     await startContactIntentConversation(prisma, {
@@ -81,7 +129,7 @@ export async function processContactConversationText(
   }
   if (contactIntent?.state === "CUSTOMER") {
     const result = await processCustomerBookingAnswer(prisma, { inboundMessageId: input.inboundMessageId, text: input.text });
-    if (result.reason === "CONVERSATION_NOT_ACTIVE") {
+    if (result.reason === "CONVERSATION_NOT_ACTIVE" || result.reason === "CUSTOMER_NOT_FOUND") {
       return {
         routed: "customer" as const,
         started: await startCustomerBookingConversation(prisma, {
@@ -96,33 +144,66 @@ export async function processContactConversationText(
     }
     return { routed: "customer" as const, result };
   }
-  if (contactIntent?.state === "PAUSED") return { routed: "paused" as const };
+  if (contactIntent?.state === "PAUSED") {
+    await prisma.inboundMessage.updateMany({ where: { id: input.inboundMessageId, processedAt: null }, data: { processedAt: new Date() } });
+    return { routed: "paused" as const };
+  }
+  if (contactIntent?.state === "PROFESSIONAL" && !lead) {
+    return {
+      routed: "recruitment" as const,
+      started: await startRecruitmentConversation(prisma, {
+        phoneE164: input.phoneE164,
+        provider: input.provider,
+        inboundMessageId: input.inboundMessageId,
+      }),
+    };
+  }
 
   if (!lead) {
-    return { routed: "recruitment" as const, started: await startRecruitmentConversation(prisma, { phoneE164: input.phoneE164, provider: input.provider }) };
+    return {
+      routed: "recruitment" as const,
+      started: await startRecruitmentConversation(prisma, {
+        phoneE164: input.phoneE164,
+        provider: input.provider,
+        inboundMessageId: input.inboundMessageId,
+      }),
+    };
   }
-  if (!lead.conversation) {
+  if (!lead.conversation || lead.conversation.state === "PAUSED" || lead.conversation.state === "MANUAL_REVIEW" || lead.conversation.state === "COMPLETED") {
+    const normalized = input.text.trim().normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase().replace(/[*_~]/g, "");
+    if (lead.conversation?.state === "PAUSED" && lead.status === "PAUSADA" && normalized === "MENU") {
+      return {
+        routed: "recruitment" as const,
+        resumed: await resumeRecruitmentConversation(prisma, {
+          leadId: lead.id,
+          actor: "system:conversation",
+          inboundMessageId: input.inboundMessageId,
+        }),
+      };
+    }
     if (lead.status === "LEAD" || lead.status === "PRE_CADASTRO") {
-      return { routed: "recruitment" as const, started: await startRecruitmentConversation(prisma, { phoneE164: input.phoneE164, provider: input.provider }) };
+      return { routed: "recruitment" as const, started: await startRecruitmentConversation(prisma, { phoneE164: input.phoneE164, provider: input.provider, inboundMessageId: input.inboundMessageId }) };
     }
 
     // Lead ativa pede ajuda explicitamente → transiciona para LIGACAO_SOLICITADA
-    const normalized = input.text.trim().toUpperCase().replace(/[*_~]/g, "");
     if (
       (normalized === "AJUDA" || normalized === "AJUDA!") &&
       (lead.status === "ATIVA" || lead.status === "PREFERENCIAL" ||
        lead.status === "TRIAGEM" || lead.status === "CONVERSA_PENDENTE" ||
        lead.status === "ENTREVISTA" || lead.status === "DOCUMENTACAO" ||
        lead.status === "ONBOARDING" || lead.status === "TESTE_OPERACIONAL" ||
-       lead.status === "EM_VALIDACAO")
+       lead.status === "EM_VALIDACAO" || lead.status === "PAUSADA")
     ) {
-      await prisma.$transaction(async (tx) => {
-        await transitionLeadStatusInTransaction(tx, {
+      const claimed = await prisma.$transaction(async (tx) => {
+        const claimedInbound = await tx.inboundMessage.updateMany({ where: { id: input.inboundMessageId, processedAt: null }, data: { processedAt: new Date() } });
+        if (!claimedInbound.count) return false;
+        const transition = await transitionLeadStatusInTransaction(tx, {
           leadId: lead.id,
           targetStatus: "LIGACAO_SOLICITADA",
           actor: "system:ack",
           reason: "Solicitou ajuda via WhatsApp",
         });
+        if (!transition.ok) throw transition.error;
         await enqueueOutboundMessage(tx, {
           provider: input.provider,
           recipient: input.phoneE164,
@@ -133,14 +214,18 @@ export async function processContactConversationText(
           correlationId: input.inboundMessageId,
           actor: "system:ack",
         });
+        return true;
       });
+      if (!claimed) return { routed: "recruitment" as const, duplicate: true };
       return { routed: "recruitment" as const, ack: true, status: "LIGACAO_SOLICITADA" };
     }
 
     // Lead está no funil mas sem conversa ativa: envia ACK contextual e cria nota
     if (ACTIVE_FUNNEL_STATUSES.has(lead.status as RecruitmentStatus)) {
       const text = ackMessage(lead.status as RecruitmentStatus);
-      await prisma.$transaction(async (tx) => {
+      const claimed = await prisma.$transaction(async (tx) => {
+        const claimedInbound = await tx.inboundMessage.updateMany({ where: { id: input.inboundMessageId, processedAt: null }, data: { processedAt: new Date() } });
+        if (!claimedInbound.count) return false;
         await enqueueOutboundMessage(tx, {
           provider: input.provider,
           recipient: input.phoneE164,
@@ -157,10 +242,16 @@ export async function processContactConversationText(
             author: "system:ack",
           },
         });
+        return true;
       });
+      if (!claimed) return { routed: "recruitment" as const, duplicate: true };
       return { routed: "recruitment" as const, ack: true, status: lead.status };
     }
 
+    await prisma.inboundMessage.updateMany({
+      where: { id: input.inboundMessageId, processedAt: null },
+      data: { processedAt: new Date() },
+    });
     return { routed: "recruitment" as const, ignored: "NO_RECRUITMENT_CONVERSATION" as const };
   }
   return { routed: "recruitment" as const, result: await processRecruitmentAnswer(prisma, { inboundMessageId: input.inboundMessageId, text: input.text }) };

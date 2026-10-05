@@ -26,9 +26,10 @@ async function currentActor(): Promise<string | null> {
 export async function retryOutboxMessageAction(messageId: string) {
   const actor = await currentActor();
   const parsedId = messageIdSchema.safeParse(messageId);
-  if (!actor || !parsedId.success) return;
+  if (!actor) return { ok: false as const, error: "Sessão expirada ou sem permissão." };
+  if (!parsedId.success) return { ok: false as const, error: "Mensagem inválida." };
 
-  await prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx) => {
     const updated = await tx.outboxMessage.updateMany({
       where: { id: parsedId.data, status: { in: retryableStatuses } },
       data: {
@@ -39,7 +40,7 @@ export async function retryOutboxMessageAction(messageId: string) {
         leaseExpiresAt: null,
       },
     });
-    if (updated.count === 0) return;
+    if (updated.count === 0) return false;
 
     await recordAuditLog(tx, {
       actor,
@@ -47,51 +48,62 @@ export async function retryOutboxMessageAction(messageId: string) {
       entityType: "OutboxMessage",
       entityId: parsedId.data,
     });
+    return true;
   });
+  if (!updated) return { ok: false as const, error: "A mensagem não está disponível para reenvio." };
   revalidatePath("/admin/outbox");
+  return { ok: true as const };
 }
 
 export async function retryAllDeadLettersAction() {
   const actor = await currentActor();
-  if (!actor) return;
+  if (!actor) return { ok: false as const, error: "Sessão expirada ou sem permissão." };
 
-  await prisma.$transaction(async (tx) => {
+  const count = await prisma.$transaction(async (tx) => {
     const messages = await tx.outboxMessage.findMany({
       where: { status: "DEAD_LETTER" },
       select: { id: true },
     });
-    if (messages.length === 0) return;
+    if (messages.length === 0) return 0;
 
-    await tx.outboxMessage.updateMany({
-      where: { id: { in: messages.map(({ id }) => id) }, status: "DEAD_LETTER" },
-      data: {
-        status: "PENDING",
-        attempts: 0,
-        availableAt: new Date(),
-        lastError: null,
-        leaseExpiresAt: null,
-      },
-    });
-    await Promise.all(messages.map(({ id }) => recordAuditLog(tx, {
-      actor,
-      action: "OUTBOX_MESSAGE_REQUEUED",
-      entityType: "OutboxMessage",
-      entityId: id,
-    })));
+    const retried = await Promise.all(messages.map(async ({ id }) => {
+      const updated = await tx.outboxMessage.updateMany({
+        where: { id, status: "DEAD_LETTER" },
+        data: {
+          status: "PENDING",
+          attempts: 0,
+          availableAt: new Date(),
+          lastError: null,
+          leaseExpiresAt: null,
+        },
+      });
+      if (!updated.count) return false;
+      await recordAuditLog(tx, {
+        actor,
+        action: "OUTBOX_MESSAGE_REQUEUED",
+        entityType: "OutboxMessage",
+        entityId: id,
+      });
+      return true;
+    }));
+    return retried.filter(Boolean).length;
   });
+  if (!count) return { ok: false as const, error: "Não há falhas permanentes para reenfileirar." };
   revalidatePath("/admin/outbox");
+  return { ok: true as const, count };
 }
 
 export async function discardOutboxMessageAction(messageId: string) {
   const actor = await currentActor();
   const parsedId = messageIdSchema.safeParse(messageId);
-  if (!actor || !parsedId.success) return;
+  if (!actor) return { ok: false as const, error: "Sessão expirada ou sem permissão." };
+  if (!parsedId.success) return { ok: false as const, error: "Mensagem inválida." };
 
-  await prisma.$transaction(async (tx) => {
+  const deleted = await prisma.$transaction(async (tx) => {
     const deleted = await tx.outboxMessage.deleteMany({
       where: { id: parsedId.data, status: "DEAD_LETTER" },
     });
-    if (deleted.count === 0) return;
+    if (deleted.count === 0) return false;
 
     await recordAuditLog(tx, {
       actor,
@@ -99,6 +111,9 @@ export async function discardOutboxMessageAction(messageId: string) {
       entityType: "OutboxMessage",
       entityId: parsedId.data,
     });
+    return true;
   });
+  if (!deleted) return { ok: false as const, error: "A mensagem não está disponível para descarte." };
   revalidatePath("/admin/outbox");
+  return { ok: true as const };
 }

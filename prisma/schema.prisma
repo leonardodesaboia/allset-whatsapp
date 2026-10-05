@@ -255,6 +255,8 @@ model ReceivedAudio {
   transcription    String?
   transcriptionLeaseUntil DateTime?
   createdAt        DateTime       @default(now())
+
+  @@index([transcription, transcriptionLeaseUntil])
 }
 
 model OutboxMessage {
@@ -276,6 +278,7 @@ model OutboxMessage {
   leaseExpiresAt DateTime?
 
   @@index([status, availableAt])
+  @@index([status, leaseExpiresAt])
   @@index([correlationId])
   @@index([leaseExpiresAt])
 }
@@ -586,7 +589,7 @@ model LeadNote {
   deletedAt   DateTime?
   revisions   LeadNoteRevision[]
 
-  @@index([leadId])
+  @@index([leadId, deletedAt])
 }
 
 model LeadNoteRevision {
@@ -698,6 +701,7 @@ enum CustomerBookingConversationState {
   QUOTE_ACCEPTANCE
   ADDRESS
   FINAL_CONFIRMATION
+  EDIT_SELECTION
   AWAITING_PAYMENT
   MANUAL_REVIEW
   PAUSED
@@ -777,6 +781,9 @@ model CustomerBookingConversation {
   pendingScheduleDate String?
   automationPausedAt  DateTime?
   lastInboundAt       DateTime?
+  lastReengagementAt   DateTime?
+  misunderstandingCount Int                          @default(0)
+  misunderstandingState String?
   version             Int                            @default(0)
   createdAt           DateTime                       @default(now())
   updatedAt           DateTime                       @updatedAt
@@ -812,7 +819,7 @@ model BookingStatusHistory {
 
 model ServiceOpportunity {
   id              String                   @id @default(uuid())
-  bookingId       String                   @unique
+  bookingId       String
   booking         Booking                  @relation(fields: [bookingId], references: [id])
   neighborhood    String
   scheduledAt     DateTime
@@ -825,6 +832,7 @@ model ServiceOpportunity {
   responses       OpportunityResponse[]
 
   @@index([status, expiresAt])
+  @@index([bookingId])
 }
 
 model OpportunityResponse {
@@ -891,19 +899,21 @@ model AuthUser {
 model AuthSession {
   id        String   @id @default(uuid())
   userId    String
-  user      AuthUser @relation(fields: [userId], references: [id])
+  user      AuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
   token     String   @unique
   expiresAt DateTime
   ipAddress String?
   userAgent String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model AuthAccount {
   id                String   @id @default(uuid())
   userId            String
-  user              AuthUser @relation(fields: [userId], references: [id])
+  user              AuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
   providerId        String
   accountId         String
   passwordHash      String?
@@ -911,6 +921,7 @@ model AuthAccount {
   updatedAt         DateTime @updatedAt
 
   @@unique([providerId, accountId])
+  @@index([userId])
 }
 
 model AuthVerification {
@@ -920,4 +931,6 @@ model AuthVerification {
   expiresAt  DateTime
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  @@index([identifier, expiresAt])
 }

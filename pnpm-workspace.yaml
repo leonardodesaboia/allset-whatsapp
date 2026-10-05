@@ -1,0 +1,7 @@
+onlyBuiltDependencies:
+  - "@prisma/client"
+  - "@prisma/engines"
+  - prisma
+
+overrides:
+  nanoid: 3.3.18

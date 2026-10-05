@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Sparkles, Mail, Lock, AlertCircle } from "lucide-react";
 import { createAuthClient } from "better-auth/react";
@@ -13,22 +13,30 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setIsSubmitting(true);
 
-    const { error: signInError } = await authClient.signIn.email({ email, password });
+    try {
+      const { error: signInError } = await authClient.signIn.email({ email, password });
+      if (signInError) {
+        setError(signInError.message ?? "Não foi possível fazer login.");
+        return;
+      }
 
-    setIsSubmitting(false);
-
-    if (signInError) {
-      setError(signInError.message ?? "Não foi possível fazer login.");
-      return;
+      router.push("/admin");
+    } catch {
+      setError("Não foi possível fazer login. Verifique sua conexão e tente novamente.");
+    } finally {
+      setIsSubmitting(false);
     }
-
-    router.push("/admin");
   }
 
   return (
@@ -51,12 +59,13 @@ export default function LoginPage() {
           className="space-y-4"
         >
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-400 uppercase tracking-wide">
+            <label htmlFor="email" className="text-xs font-medium text-slate-400 uppercase tracking-wide">
               E-mail
             </label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
               <input
+                id="email"
                 type="email"
                 name="email"
                 autoComplete="username"
@@ -70,12 +79,13 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-400 uppercase tracking-wide">
+            <label htmlFor="password" className="text-xs font-medium text-slate-400 uppercase tracking-wide">
               Senha
             </label>
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
               <input
+                id="password"
                 type="password"
                 name="password"
                 autoComplete="current-password"
@@ -89,7 +99,7 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <div className="flex items-center gap-2 rounded-lg border border-red-800 bg-red-950 px-3 py-2.5 text-sm text-red-400">
+            <div role="alert" className="flex items-center gap-2 rounded-lg border border-red-800 bg-red-950 px-3 py-2.5 text-sm text-red-400">
               <AlertCircle className="w-4 h-4 shrink-0" />
               {error}
             </div>
@@ -97,10 +107,10 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={!isHydrated || isSubmitting}
             className="w-full rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-sm py-2.5 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900"
           >
-            {isSubmitting ? "Entrando…" : "Entrar"}
+            {!isHydrated || isSubmitting ? "Entrando…" : "Entrar"}
           </button>
         </form>
       </div>

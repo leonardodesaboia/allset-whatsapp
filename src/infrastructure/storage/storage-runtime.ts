@@ -25,5 +25,8 @@ export function createRuntimeStorage() {
       "Configuração S3 incompleta: S3_ENDPOINT, S3_BUCKET, S3_REGION, S3_ACCESS_KEY_ID e S3_SECRET_ACCESS_KEY devem ser definidos juntos",
     );
   }
+  if (env.NODE_ENV === "production") {
+    throw new Error("Storage S3 é obrigatório em produção");
+  }
   return new LocalStorageProvider(process.env.LOCAL_STORAGE_DIR ?? ".data/storage");
 }

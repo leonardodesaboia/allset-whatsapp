@@ -5,7 +5,7 @@ import { notifyOpportunity } from "./notify-opportunity.usecase";
 
 describe("notifyOpportunity", () => {
   let prisma: PrismaClient;
-  let stop: () => Promise<void>;
+  let stop: () => Promise<void> = async () => {};
 
   beforeAll(async () => {
     const db = await startTestDatabase();
@@ -15,10 +15,17 @@ describe("notifyOpportunity", () => {
 
   afterAll(async () => stop());
 
-  async function seedBooking(opts?: { neighborhood?: string; scheduledAt?: Date }) {
+  async function seedBooking(opts?: {
+    neighborhood?: string;
+    scheduledAt?: Date;
+  }) {
     const ts = Date.now();
     const customer = await prisma.user.create({
-      data: { role: "CUSTOMER", fullName: "Cliente", phoneE164: `+5585100${ts}` },
+      data: {
+        role: "CUSTOMER",
+        fullName: "Cliente",
+        phoneE164: `+5585100${ts}`,
+      },
     });
     const service = await prisma.serviceDefinition.create({
       data: { code: `svc-${ts}`, name: "Limpeza" },
@@ -59,38 +66,88 @@ describe("notifyOpportunity", () => {
 
   it("cria ServiceOpportunity, OpportunityResponses e OutboxMessages apenas para leads elegíveis", async () => {
     const booking = await seedBooking(); // segunda-feira, Aldeota
-    const lead1 = await seedLead({ status: "ATIVA", neighborhood: "Aldeota", canServe: "SIM", availability: ["segunda, quarta, sexta"], suffix: "A" });
-    const lead2 = await seedLead({ status: "PREFERENCIAL", neighborhood: "Aldeota", canServe: "TALVEZ", availability: ["segunda a sexta"], suffix: "B" });
+    const lead1 = await seedLead({
+      status: "ATIVA",
+      neighborhood: "Aldeota",
+      canServe: "SIM",
+      availability: ["segunda, quarta, sexta"],
+      suffix: "A",
+    });
+    const lead2 = await seedLead({
+      status: "PREFERENCIAL",
+      neighborhood: "Aldeota",
+      canServe: "TALVEZ",
+      availability: ["segunda a sexta"],
+      suffix: "B",
+    });
     // Inelegível: BASE_FUTURA
-    await seedLead({ status: "BASE_FUTURA", neighborhood: "Aldeota", canServe: "SIM", availability: ["segunda a sexta"], suffix: "C" });
+    await seedLead({
+      status: "BASE_FUTURA",
+      neighborhood: "Aldeota",
+      canServe: "SIM",
+      availability: ["segunda a sexta"],
+      suffix: "C",
+    });
 
     const result = await notifyOpportunity(prisma, { bookingId: booking.id });
     expect(result.notified).toBe(2);
 
-    const opportunity = await prisma.serviceOpportunity.findUniqueOrThrow({
+    const opportunity = await prisma.serviceOpportunity.findFirstOrThrow({
       where: { bookingId: booking.id },
       include: { responses: true },
     });
     expect(opportunity.status).toBe("OPEN");
     expect(opportunity.responses).toHaveLength(2);
-    expect(opportunity.responses.map((r) => r.leadId).sort()).toEqual([lead1.id, lead2.id].sort());
-    expect(opportunity.responses.every((response) => /^[A-Z0-9]{10}$/.test(response.responseToken ?? ""))).toBe(true);
+    expect(opportunity.responses.map((r) => r.leadId).sort()).toEqual(
+      [lead1.id, lead2.id].sort()
+    );
+    expect(
+      opportunity.responses.every((response) =>
+        /^[A-Z0-9]{10}$/.test(response.responseToken ?? "")
+      )
+    ).toBe(true);
 
-    const outbox = await prisma.outboxMessage.findMany({ where: { correlationId: opportunity.id } });
+    const outbox = await prisma.outboxMessage.findMany({
+      where: { correlationId: opportunity.id },
+    });
     expect(outbox).toHaveLength(2);
 
-    const updatedBooking = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
+    const updatedBooking = await prisma.booking.findUniqueOrThrow({
+      where: { id: booking.id },
+    });
     expect(updatedBooking.status).toBe("MATCHING");
   });
 
-  it("retorna notified=0 quando nenhum profissional elegível existe", async () => {
+  it("não cria oportunidade nem coloca o booking em matching quando não há profissional elegível", async () => {
     // domingo — nenhum profissional com domingo na disponibilidade
-    const booking = await seedBooking({ scheduledAt: new Date("2026-08-09T13:00:00.000Z") });
+    const booking = await seedBooking({
+      scheduledAt: new Date("2026-08-09T13:00:00.000Z"),
+    });
     const result = await notifyOpportunity(prisma, { bookingId: booking.id });
     expect(result.notified).toBe(0);
-    const opportunity = await prisma.serviceOpportunity.findUniqueOrThrow({ where: { bookingId: booking.id } });
-    expect(opportunity.status).toBe("OPEN");
-    const updatedBooking = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
-    expect(updatedBooking.status).toBe("MATCHING");
+    const opportunities = await prisma.serviceOpportunity.findMany({
+      where: { bookingId: booking.id },
+    });
+    expect(opportunities).toHaveLength(0);
+    const updatedBooking = await prisma.booking.findUniqueOrThrow({
+      where: { id: booking.id },
+    });
+    expect(updatedBooking.status).toBe("DRAFT");
+  });
+
+  it("avisa o cliente que ainda está buscando uma profissional quando não há candidata elegível", async () => {
+    const booking = await seedBooking({
+      scheduledAt: new Date("2026-08-09T13:00:00.000Z"),
+    });
+    const customer = await prisma.user.findUniqueOrThrow({
+      where: { id: booking.customerId },
+    });
+
+    await notifyOpportunity(prisma, { bookingId: booking.id });
+
+    const message = await prisma.outboxMessage.findFirst({
+      where: { recipient: customer.phoneE164 },
+    });
+    expect(message).not.toBeNull();
   });
 });

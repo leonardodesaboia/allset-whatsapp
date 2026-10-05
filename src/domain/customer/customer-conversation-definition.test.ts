@@ -11,4 +11,10 @@ describe("customer conversation choices", () => {
     expect(parseCustomerChoice("INTRODUCTION", "1")).toBe("YES");
     expect(parseCustomerChoice("FINAL_CONFIRMATION", "2")).toBe("CHANGE");
   });
+
+  it("aceita o rótulo e respostas naturais das escolhas", () => {
+    expect(parseCustomerChoice("INTRODUCTION", "Quero contratar")).toBe("YES");
+    expect(parseCustomerChoice("QUOTE_ACCEPTANCE", "confirmar")).toBe("ACCEPT");
+    expect(parseCustomerChoice("FINAL_CONFIRMATION", "alterar")).toBe("CHANGE");
+  });
 });

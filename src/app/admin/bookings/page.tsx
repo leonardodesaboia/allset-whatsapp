@@ -1,11 +1,19 @@
 import Link from "next/link";
 import { Plus, Clock, CheckCircle2, ArrowRight } from "lucide-react";
 import { prisma } from "@/infrastructure/db/prisma-client";
-import { dispatchOpportunityAction, resumeCustomerAutomationAction, validateBookingCoverageAction } from "./actions";
+import {
+  advanceBookingStatusAction,
+  confirmManualPaymentAction,
+  resumeCustomerAutomationAction,
+  validateBookingCoverageAction,
+} from "./actions";
+import { BookingMatchingActions } from "./booking-matching-actions";
 import { CustomerMessageForm } from "./customer-message-form";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ActionFeedbackForm } from "@/components/ui/action-feedback-form";
+import { ConfirmButton } from "@/components/ui/confirm-button";
 
 const formatDateTime = (date: Date) =>
   new Intl.DateTimeFormat("pt-BR", {
@@ -14,6 +22,15 @@ const formatDateTime = (date: Date) =>
     timeZone: "America/Fortaleza",
   }).format(date);
 
+const NEXT_STEP_LABEL: Record<string, string> = {
+  PROFESSIONAL_ASSIGNED: "Marcar como agendado",
+  SCHEDULED: "Profissional confirmou",
+  PROFESSIONAL_CONFIRMED: "Profissional a caminho",
+  PROFESSIONAL_EN_ROUTE: "Atendimento iniciado",
+  IN_PROGRESS: "Atendimento concluído",
+  AWAITING_COMPLETION_CONFIRMATION: "Confirmar conclusão",
+};
+
 export default async function BookingsPage() {
   const bookings = await prisma.booking.findMany({
     orderBy: { createdAt: "desc" },
@@ -21,8 +38,14 @@ export default async function BookingsPage() {
     include: {
       service: { select: { name: true } },
       customer: { select: { fullName: true, phoneE164: true } },
-      customerConversation: { select: { id: true, state: true } },
-      opportunities: { select: { id: true, status: true }, orderBy: { createdAt: "desc" }, take: 1 },
+      customerConversation: {
+        select: { id: true, state: true, lastQuestionKey: true },
+      },
+      opportunities: {
+        select: { id: true, status: true },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      },
     },
   });
 
@@ -54,12 +77,24 @@ export default async function BookingsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Cliente</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Serviço</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Bairro</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">Data</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Ações</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Cliente
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Serviço
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">
+                    Bairro
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">
+                    Data
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Status
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Ações
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -68,11 +103,19 @@ export default async function BookingsPage() {
                   return (
                     <tr key={booking.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3">
-                        <p className="font-semibold text-slate-900 leading-tight">{booking.customer.fullName}</p>
-                        <p className="text-xs text-slate-500 mt-0.5">{booking.customer.phoneE164}</p>
+                        <p className="font-semibold text-slate-900 leading-tight">
+                          {booking.customer.fullName}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {booking.customer.phoneE164}
+                        </p>
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{booking.service.name}</td>
-                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{booking.neighborhood ?? "—"}</td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {booking.service.name}
+                      </td>
+                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">
+                        {booking.neighborhood ?? "—"}
+                      </td>
                       <td className="px-4 py-3 hidden lg:table-cell">
                         {booking.scheduledAt ? (
                           <span className="flex items-center gap-1 text-slate-600">
@@ -88,45 +131,117 @@ export default async function BookingsPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1.5">
-                          {booking.status === "DRAFT" && (
-                            <form action={async () => {
-                              "use server";
-                              await dispatchOpportunityAction(booking.id);
-                            }}>
+                          {(booking.status === "DRAFT" ||
+                            booking.status === "PAID" ||
+                            (booking.status === "REVIEW_REQUIRED" &&
+                              opportunity?.status === "EXPIRED")) && (
+                            <BookingMatchingActions
+                              bookingId={booking.id}
+                              neighborhood={booking.neighborhood}
+                              professionalPaymentCents={
+                                booking.professionalPaymentCents
+                              }
+                              address={booking.addressLine1}
+                              expired={opportunity?.status === "EXPIRED"}
+                            />
+                          )}
+
+                          {booking.status === "AWAITING_PAYMENT" && (
+                            <ActionFeedbackForm
+                              action={async () => {
+                                "use server";
+                                return confirmManualPaymentAction(booking.id);
+                              }}
+                            >
+                              <ConfirmButton
+                                message="Confirmar o pagamento manual? Esta ação registra o pedido como pago. Depois, informe bairro e repasse para enviar a oportunidade."
+                                className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900"
+                              >
+                                <CheckCircle2 className="w-3 h-3" /> Confirmar
+                                pagamento manual
+                              </ConfirmButton>
+                            </ActionFeedbackForm>
+                          )}
+
+                          {booking.status === "REVIEW_REQUIRED" &&
+                            booking.customerConversation?.lastQuestionKey ===
+                              "MANUAL_REVIEW" &&
+                            booking.addressLine1 && (
+                              <div className="space-y-1">
+                                <p className="text-xs text-slate-600">
+                                  {booking.addressLine1}
+                                </p>
+                                <div className="flex gap-2 flex-wrap">
+                                  <ActionFeedbackForm
+                                    action={async () => {
+                                      "use server";
+                                      return validateBookingCoverageAction(
+                                        booking.id,
+                                        true
+                                      );
+                                    }}
+                                  >
+                                    <button
+                                      type="submit"
+                                      className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900"
+                                    >
+                                      <CheckCircle2 className="w-3 h-3" />{" "}
+                                      Atendido
+                                    </button>
+                                  </ActionFeedbackForm>
+                                  <ActionFeedbackForm
+                                    action={async () => {
+                                      "use server";
+                                      return validateBookingCoverageAction(
+                                        booking.id,
+                                        false
+                                      );
+                                    }}
+                                  >
+                                    <button
+                                      type="submit"
+                                      className="text-xs font-medium text-amber-700 hover:text-amber-900"
+                                    >
+                                      Lista de espera
+                                    </button>
+                                  </ActionFeedbackForm>
+                                </div>
+                              </div>
+                            )}
+
+                          {booking.customerConversation?.state === "PAUSED" && (
+                            <ActionFeedbackForm
+                              action={async () => {
+                                "use server";
+                                return resumeCustomerAutomationAction(
+                                  booking.id
+                                );
+                              }}
+                            >
+                              <button
+                                type="submit"
+                                className="text-xs font-medium text-slate-600 hover:text-slate-900"
+                              >
+                                Retomar automação
+                              </button>
+                            </ActionFeedbackForm>
+                          )}
+
+                          {NEXT_STEP_LABEL[booking.status] && (
+                            <ActionFeedbackForm
+                              action={async () => {
+                                "use server";
+                                return advanceBookingStatusAction(booking.id);
+                              }}
+                            >
                               <button
                                 type="submit"
                                 className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900"
                               >
-                                <ArrowRight className="w-3 h-3" />
-                                Enviar para matching
+                                <ArrowRight className="w-3 h-3" />{" "}
+                                {NEXT_STEP_LABEL[booking.status]}
                               </button>
-                            </form>
-                          )}
-
-                          {booking.status === "REVIEW_REQUIRED" && booking.customerConversation && booking.addressLine1 && (
-                            <div className="space-y-1">
-                              <p className="text-xs text-slate-600">{booking.addressLine1}</p>
-                              <div className="flex gap-2 flex-wrap">
-                                <form action={async () => { "use server"; await validateBookingCoverageAction(booking.id, true); }}>
-                                  <button type="submit" className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900">
-                                    <CheckCircle2 className="w-3 h-3" /> Atendido
-                                  </button>
-                                </form>
-                                <form action={async () => { "use server"; await validateBookingCoverageAction(booking.id, false); }}>
-                                  <button type="submit" className="text-xs font-medium text-amber-700 hover:text-amber-900">
-                                    Lista de espera
-                                  </button>
-                                </form>
-                              </div>
-                            </div>
-                          )}
-
-                          {booking.customerConversation?.state === "PAUSED" && (
-                            <form action={async () => { "use server"; await resumeCustomerAutomationAction(booking.id); }}>
-                              <button type="submit" className="text-xs font-medium text-slate-600 hover:text-slate-900">
-                                Retomar automação
-                              </button>
-                            </form>
+                            </ActionFeedbackForm>
                           )}
 
                           {opportunity && (
@@ -156,11 +271,18 @@ export default async function BookingsPage() {
             {bookings.map((booking) => {
               const opportunity = booking.opportunities[0];
               return (
-                <div key={booking.id} className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+                <div
+                  key={booking.id}
+                  className="rounded-lg border border-slate-200 bg-white p-4 space-y-3"
+                >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="font-semibold text-slate-900 leading-tight truncate">{booking.customer.fullName}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{booking.customer.phoneE164}</p>
+                      <p className="font-semibold text-slate-900 leading-tight truncate">
+                        {booking.customer.fullName}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {booking.customer.phoneE164}
+                      </p>
                     </div>
                     <StatusBadge status={booking.status} />
                   </div>
@@ -168,7 +290,9 @@ export default async function BookingsPage() {
                   <div className="space-y-1 text-sm text-slate-600">
                     <p>{booking.service.name}</p>
                     {booking.neighborhood && (
-                      <p className="text-xs text-slate-500">{booking.neighborhood}</p>
+                      <p className="text-xs text-slate-500">
+                        {booking.neighborhood}
+                      </p>
                     )}
                     {booking.scheduledAt && (
                       <span className="flex items-center gap-1 text-xs text-slate-500">
@@ -179,45 +303,114 @@ export default async function BookingsPage() {
                   </div>
 
                   <div className="flex flex-col gap-2 pt-1 border-t border-slate-100">
-                    {booking.status === "DRAFT" && (
-                      <form action={async () => {
-                        "use server";
-                        await dispatchOpportunityAction(booking.id);
-                      }}>
+                    {(booking.status === "DRAFT" ||
+                      booking.status === "PAID" ||
+                      (booking.status === "REVIEW_REQUIRED" &&
+                        opportunity?.status === "EXPIRED")) && (
+                      <BookingMatchingActions
+                        bookingId={booking.id}
+                        neighborhood={booking.neighborhood}
+                        professionalPaymentCents={
+                          booking.professionalPaymentCents
+                        }
+                        address={booking.addressLine1}
+                        expired={opportunity?.status === "EXPIRED"}
+                      />
+                    )}
+
+                    {booking.status === "AWAITING_PAYMENT" && (
+                      <ActionFeedbackForm
+                        action={async () => {
+                          "use server";
+                          return confirmManualPaymentAction(booking.id);
+                        }}
+                      >
+                        <ConfirmButton
+                          message="Confirmar o pagamento manual? Esta ação registra o pedido como pago. Depois, informe bairro e repasse para enviar a oportunidade."
+                          className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900"
+                        >
+                          <CheckCircle2 className="w-3 h-3" /> Confirmar
+                          pagamento manual
+                        </ConfirmButton>
+                      </ActionFeedbackForm>
+                    )}
+
+                    {booking.status === "REVIEW_REQUIRED" &&
+                      booking.customerConversation?.lastQuestionKey ===
+                        "MANUAL_REVIEW" &&
+                      booking.addressLine1 && (
+                        <div className="space-y-1">
+                          <p className="text-xs text-slate-600">
+                            {booking.addressLine1}
+                          </p>
+                          <div className="flex gap-3 flex-wrap">
+                            <ActionFeedbackForm
+                              action={async () => {
+                                "use server";
+                                return validateBookingCoverageAction(
+                                  booking.id,
+                                  true
+                                );
+                              }}
+                            >
+                              <button
+                                type="submit"
+                                className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900"
+                              >
+                                <CheckCircle2 className="w-3 h-3" /> Atendido
+                              </button>
+                            </ActionFeedbackForm>
+                            <ActionFeedbackForm
+                              action={async () => {
+                                "use server";
+                                return validateBookingCoverageAction(
+                                  booking.id,
+                                  false
+                                );
+                              }}
+                            >
+                              <button
+                                type="submit"
+                                className="text-xs font-medium text-amber-700 hover:text-amber-900"
+                              >
+                                Lista de espera
+                              </button>
+                            </ActionFeedbackForm>
+                          </div>
+                        </div>
+                      )}
+
+                    {booking.customerConversation?.state === "PAUSED" && (
+                      <ActionFeedbackForm
+                        action={async () => {
+                          "use server";
+                          return resumeCustomerAutomationAction(booking.id);
+                        }}
+                      >
+                        <button
+                          type="submit"
+                          className="text-xs font-medium text-slate-600 hover:text-slate-900"
+                        >
+                          Retomar automação
+                        </button>
+                      </ActionFeedbackForm>
+                    )}
+
+                    {NEXT_STEP_LABEL[booking.status] && (
+                      <ActionFeedbackForm
+                        action={async () => {
+                          "use server";
+                          return advanceBookingStatusAction(booking.id);
+                        }}
+                      >
                         <button
                           type="submit"
                           className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900"
                         >
-                          <ArrowRight className="w-3 h-3" />
-                          Enviar para matching
+                          <ArrowRight className="w-3 h-3" />{" "}
+                          {NEXT_STEP_LABEL[booking.status]}
                         </button>
-                      </form>
-                    )}
-
-                    {booking.status === "REVIEW_REQUIRED" && booking.customerConversation && booking.addressLine1 && (
-                      <div className="space-y-1">
-                        <p className="text-xs text-slate-600">{booking.addressLine1}</p>
-                        <div className="flex gap-3 flex-wrap">
-                          <form action={async () => { "use server"; await validateBookingCoverageAction(booking.id, true); }}>
-                            <button type="submit" className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900">
-                              <CheckCircle2 className="w-3 h-3" /> Atendido
-                            </button>
-                          </form>
-                          <form action={async () => { "use server"; await validateBookingCoverageAction(booking.id, false); }}>
-                            <button type="submit" className="text-xs font-medium text-amber-700 hover:text-amber-900">
-                              Lista de espera
-                            </button>
-                          </form>
-                        </div>
-                      </div>
-                    )}
-
-                    {booking.customerConversation?.state === "PAUSED" && (
-                      <form action={async () => { "use server"; await resumeCustomerAutomationAction(booking.id); }}>
-                        <button type="submit" className="text-xs font-medium text-slate-600 hover:text-slate-900">
-                          Retomar automação
-                        </button>
-                      </form>
+                      </ActionFeedbackForm>
                     )}
 
                     {opportunity && (

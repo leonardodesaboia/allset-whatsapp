@@ -7,7 +7,8 @@ test("admin faz login e acessa o dashboard, depois faz logout", async ({ page })
   await page.getByRole("button", { name: "Entrar" }).click();
 
   await expect(page).toHaveURL(/\/admin$/);
-  await expect(page.getByText("Bem-vindo ao painel AllSet")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Painel" })).toBeVisible();
+  await expect(page.getByText("Visão geral da operação")).toBeVisible();
 
   await page.getByRole("button", { name: "Sair" }).click();
   await expect(page).toHaveURL(/\/login$/);

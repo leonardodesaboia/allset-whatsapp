@@ -1,5 +1,7 @@
 import dotenv from "dotenv";
+import { execFile } from "node:child_process";
 import path from "path";
+import { promisify } from "node:util";
 
 // globalSetup roda em um processo Node separado do webServer do Playwright
 // (que é o próprio Next.js, e carrega .env sozinho) — precisamos carregar o
@@ -10,6 +12,7 @@ const ADMIN_EMAIL = "admin@allset.test";
 const ADMIN_PASSWORD = "senha-super-segura-1";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+const execFileAsync = promisify(execFile);
 
 /**
  * Trava de segurança: este seed grava uma credencial de admin *conhecida
@@ -59,6 +62,13 @@ function assertSafeSeedTarget(): void {
 export default async function globalSetup(): Promise<void> {
   assertSafeSeedTarget();
 
+  // E2E uses the local development database rather than a disposable
+  // Testcontainer. Apply every checked-in migration before starting Next so
+  // Prisma's generated enum values cannot get ahead of PostgreSQL's enum.
+  await execFileAsync("pnpm", ["prisma", "migrate", "deploy"], {
+    cwd: path.resolve(import.meta.dirname, "../.."),
+  });
+
   const { auth } = await import("../../src/infrastructure/auth/auth");
   const { prisma } = await import("../../src/infrastructure/db/prisma-client");
 
@@ -70,10 +80,15 @@ export default async function globalSetup(): Promise<void> {
         body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD, name: "Admin" },
       });
     }
-    const domainAdmin = await prisma.user.findUnique({ where: { email: ADMIN_EMAIL } });
+    const domainAdmin = await prisma.user.findUnique({
+      where: { email: ADMIN_EMAIL },
+      include: { adminProfile: true },
+    });
     if (!domainAdmin) {
       const user = await prisma.user.create({ data: { role: "ADMIN", fullName: "Admin", email: ADMIN_EMAIL, phoneE164: "+5585990000000" } });
       await prisma.adminProfile.create({ data: { userId: user.id } });
+    } else if (!domainAdmin.adminProfile) {
+      await prisma.adminProfile.create({ data: { userId: domainAdmin.id } });
     }
 
     const seedPhone = "+5585990000001";

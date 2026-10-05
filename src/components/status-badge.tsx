@@ -1,6 +1,9 @@
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 
-const STATUS_MAP: Record<string, { label: string; variant: BadgeProps["variant"] }> = {
+const STATUS_MAP: Record<
+  string,
+  { label: string; variant: BadgeProps["variant"] }
+> = {
   // Recrutamento — funil principal
   LEAD: { label: "Lead", variant: "outline" },
   PRE_CADASTRO: { label: "Pré-cadastro", variant: "secondary" },
@@ -37,14 +40,47 @@ const STATUS_MAP: Record<string, { label: string; variant: BadgeProps["variant"]
   PROFESSIONAL_ASSIGNED: { label: "Prof. designado", variant: "default" },
   SCHEDULED: { label: "Agendado", variant: "success" },
   PROFESSIONAL_CONFIRMED: { label: "Prof. confirmado", variant: "success" },
+  PROFESSIONAL_EN_ROUTE: { label: "Prof. a caminho", variant: "warning" },
   IN_PROGRESS: { label: "Em andamento", variant: "warning" },
+  AWAITING_COMPLETION_CONFIRMATION: {
+    label: "Aguard. conclusão",
+    variant: "warning",
+  },
   COMPLETED: { label: "Concluído", variant: "success" },
   CANCELLED: { label: "Cancelado", variant: "destructive" },
   ISSUE_OPEN: { label: "Problema aberto", variant: "destructive" },
+  REFUND_PENDING: { label: "Reemb. pendente", variant: "destructive" },
+  REFUNDED: { label: "Reembolsado", variant: "secondary" },
+  // Conversas de clientes
+  INTRODUCTION: { label: "Início", variant: "secondary" },
+  NAME: { label: "Identificação", variant: "secondary" },
+  PROPERTY_CHARACTERISTICS: { label: "Imóvel", variant: "secondary" },
+  SCHEDULE_DATE: { label: "Data", variant: "secondary" },
+  SCHEDULE_TIME: { label: "Horário", variant: "secondary" },
+  QUOTE_ACCEPTANCE: { label: "Aceite do orçamento", variant: "warning" },
+  ADDRESS: { label: "Endereço", variant: "secondary" },
+  MANUAL_REVIEW: { label: "Revisão manual", variant: "warning" },
+  FINAL_CONFIRMATION: { label: "Confirmação final", variant: "default" },
+  // Oportunidades e respostas
+  OPEN: { label: "Aberta", variant: "default" },
+  FILLED: { label: "Preenchida", variant: "success" },
+  EXPIRED: { label: "Expirada", variant: "destructive" },
+  ACCEPTED: { label: "Aceita", variant: "success" },
+  DECLINED: { label: "Recusada", variant: "destructive" },
+  AWAITING_RESPONSE: { label: "Aguardando resposta", variant: "outline" },
 };
 
-export function StatusBadge({ status, className }: { status: string; className?: string }) {
-  const config = STATUS_MAP[status] ?? { label: status, variant: "outline" as const };
+export function StatusBadge({
+  status,
+  className,
+}: {
+  status: string;
+  className?: string;
+}) {
+  const config = STATUS_MAP[status] ?? {
+    label: status,
+    variant: "outline" as const,
+  };
   return (
     <Badge variant={config.variant} className={className}>
       {config.label}
