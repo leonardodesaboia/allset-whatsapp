@@ -49,6 +49,34 @@ describe("transitionBookingStatusUseCase", () => {
     expect(audit[0]).toMatchObject({ action: "BOOKING_STATUS_TRANSITION" });
   });
 
+  it("avança pela cadeia completa pós-atribuição até a conclusão", async () => {
+    const booking = await seedBooking();
+    const chain: Array<{ actor: string; target: Parameters<typeof transitionBookingStatusUseCase>[1]["targetStatus"] }> = [
+      { actor: "system:test", target: "MATCHING" },
+      { actor: "system:test", target: "PROFESSIONAL_ASSIGNED" },
+      { actor: "admin:test", target: "SCHEDULED" },
+      { actor: "admin:test", target: "PROFESSIONAL_CONFIRMED" },
+      { actor: "admin:test", target: "PROFESSIONAL_EN_ROUTE" },
+      { actor: "admin:test", target: "IN_PROGRESS" },
+      { actor: "admin:test", target: "AWAITING_COMPLETION_CONFIRMATION" },
+      { actor: "admin:test", target: "COMPLETED" },
+    ];
+
+    for (const step of chain) {
+      const result = await transitionBookingStatusUseCase(prisma, {
+        bookingId: booking.id,
+        targetStatus: step.target,
+        actor: step.actor,
+      });
+      expect(result.ok).toBe(true);
+    }
+
+    const final = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
+    expect(final.status).toBe("COMPLETED");
+    const history = await prisma.bookingStatusHistory.findMany({ where: { bookingId: booking.id } });
+    expect(history).toHaveLength(chain.length);
+  });
+
   it("rejeita transição inválida sem escrever nada", async () => {
     const booking = await seedBooking();
 

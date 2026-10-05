@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Plus, Clock, CheckCircle2, ArrowRight } from "lucide-react";
 import { prisma } from "@/infrastructure/db/prisma-client";
-import { confirmManualPaymentAction, resumeCustomerAutomationAction, validateBookingCoverageAction } from "./actions";
+import { advanceBookingStatusAction, confirmManualPaymentAction, resumeCustomerAutomationAction, validateBookingCoverageAction } from "./actions";
 import { BookingMatchingActions } from "./booking-matching-actions";
 import { CustomerMessageForm } from "./customer-message-form";
 import { StatusBadge } from "@/components/status-badge";
@@ -16,6 +16,15 @@ const formatDateTime = (date: Date) =>
     timeStyle: "short",
     timeZone: "America/Fortaleza",
   }).format(date);
+
+const NEXT_STEP_LABEL: Record<string, string> = {
+  PROFESSIONAL_ASSIGNED: "Marcar como agendado",
+  SCHEDULED: "Profissional confirmou",
+  PROFESSIONAL_CONFIRMED: "Profissional a caminho",
+  PROFESSIONAL_EN_ROUTE: "Atendimento iniciado",
+  IN_PROGRESS: "Atendimento concluído",
+  AWAITING_COMPLETION_CONFIRMATION: "Confirmar conclusão",
+};
 
 export default async function BookingsPage() {
   const bookings = await prisma.booking.findMany({
@@ -131,6 +140,14 @@ export default async function BookingsPage() {
                             </ActionFeedbackForm>
                           )}
 
+                          {NEXT_STEP_LABEL[booking.status] && (
+                            <ActionFeedbackForm action={async () => { "use server"; return advanceBookingStatusAction(booking.id); }}>
+                              <button type="submit" className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900">
+                                <ArrowRight className="w-3 h-3" /> {NEXT_STEP_LABEL[booking.status]}
+                              </button>
+                            </ActionFeedbackForm>
+                          )}
+
                           {opportunity && (
                             <Link
                               href={`/admin/bookings/${booking.id}/opportunity`}
@@ -217,6 +234,14 @@ export default async function BookingsPage() {
                       <ActionFeedbackForm action={async () => { "use server"; return resumeCustomerAutomationAction(booking.id); }}>
                         <button type="submit" className="text-xs font-medium text-slate-600 hover:text-slate-900">
                           Retomar automação
+                        </button>
+                      </ActionFeedbackForm>
+                    )}
+
+                    {NEXT_STEP_LABEL[booking.status] && (
+                      <ActionFeedbackForm action={async () => { "use server"; return advanceBookingStatusAction(booking.id); }}>
+                        <button type="submit" className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900">
+                          <ArrowRight className="w-3 h-3" /> {NEXT_STEP_LABEL[booking.status]}
                         </button>
                       </ActionFeedbackForm>
                     )}

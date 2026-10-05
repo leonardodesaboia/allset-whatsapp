@@ -9,7 +9,11 @@ import { validateCustomerBookingCoverage } from "@/application/customer/validate
 import { sendManualCustomerMessage } from "@/application/customer/send-manual-customer-message.usecase";
 import { resumeCustomerBookingConversation } from "@/application/customer/customer-booking-conversation.usecase";
 import { recordAuditLog } from "@/application/audit/record-audit-log.usecase";
-import { transitionBookingStatusInTransaction } from "@/application/booking/transition-booking-status.usecase";
+import {
+  transitionBookingStatusInTransaction,
+  transitionBookingStatusUseCase,
+} from "@/application/booking/transition-booking-status.usecase";
+import type { BookingStatus } from "@/domain/booking/booking-status";
 import { enqueueOutboundMessage } from "@/application/messaging/enqueue-outbound-message.usecase";
 import { textPayload } from "@/domain/messaging/message";
 import { DomainError } from "@/domain/shared/domain-error";
@@ -254,6 +258,41 @@ export async function resumeCustomerAutomationAction(bookingId: string): Promise
     return { ok: true, bookingId };
   } catch (error) {
     return { ok: false, error: errorMessage(error, "Não foi possível retomar a automação.") };
+  }
+}
+
+/**
+ * Advances a booking to the next step of the post-assignment lifecycle the
+ * state machine already defines. Deliberately a single next-step button
+ * (not a free-form status picker): each current status maps to exactly one
+ * forward transition, matching the happy path the WhatsApp/matching flow
+ * already follows up to PROFESSIONAL_ASSIGNED.
+ */
+const NEXT_BOOKING_STATUS: Partial<Record<BookingStatus, BookingStatus>> = {
+  PROFESSIONAL_ASSIGNED: "SCHEDULED",
+  SCHEDULED: "PROFESSIONAL_CONFIRMED",
+  PROFESSIONAL_CONFIRMED: "PROFESSIONAL_EN_ROUTE",
+  PROFESSIONAL_EN_ROUTE: "IN_PROGRESS",
+  IN_PROGRESS: "AWAITING_COMPLETION_CONFIRMATION",
+  AWAITING_COMPLETION_CONFIRMATION: "COMPLETED",
+};
+
+export async function advanceBookingStatusAction(bookingId: string): Promise<BookingActionResult> {
+  const actor = await currentActor();
+  if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
+  if (!bookingIdSchema.safeParse(bookingId).success) {
+    return { ok: false, error: "Identificador de agendamento inválido." };
+  }
+  try {
+    const booking = await prisma.booking.findUnique({ where: { id: bookingId }, select: { status: true } });
+    const targetStatus = booking ? NEXT_BOOKING_STATUS[booking.status as BookingStatus] : undefined;
+    if (!targetStatus) return { ok: false, error: "Este pedido não pode avançar de etapa agora." };
+    const result = await transitionBookingStatusUseCase(prisma, { bookingId, targetStatus, actor });
+    if (!result.ok) return { ok: false, error: result.error.message };
+    revalidatePath("/admin/bookings");
+    return { ok: true, bookingId };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Não foi possível avançar a etapa do atendimento.") };
   }
 }
 

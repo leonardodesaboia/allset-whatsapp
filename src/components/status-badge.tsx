@@ -37,10 +37,14 @@ const STATUS_MAP: Record<string, { label: string; variant: BadgeProps["variant"]
   PROFESSIONAL_ASSIGNED: { label: "Prof. designado", variant: "default" },
   SCHEDULED: { label: "Agendado", variant: "success" },
   PROFESSIONAL_CONFIRMED: { label: "Prof. confirmado", variant: "success" },
+  PROFESSIONAL_EN_ROUTE: { label: "Prof. a caminho", variant: "warning" },
   IN_PROGRESS: { label: "Em andamento", variant: "warning" },
+  AWAITING_COMPLETION_CONFIRMATION: { label: "Aguard. conclusão", variant: "warning" },
   COMPLETED: { label: "Concluído", variant: "success" },
   CANCELLED: { label: "Cancelado", variant: "destructive" },
   ISSUE_OPEN: { label: "Problema aberto", variant: "destructive" },
+  REFUND_PENDING: { label: "Reemb. pendente", variant: "destructive" },
+  REFUNDED: { label: "Reembolsado", variant: "secondary" },
 };
 
 export function StatusBadge({ status, className }: { status: string; className?: string }) {
