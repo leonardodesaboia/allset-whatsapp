@@ -77,21 +77,14 @@ function Column({ column }: { column: KanbanColumnData }) {
       <section
         ref={setNodeRef}
         data-testid={`column-${column.status}`}
-        title={column.label}
+        aria-label={`Etapa ${column.label}, sem profissionais`}
         className={cn(
-          "flex flex-col items-center min-w-[44px] w-[44px] shrink-0 rounded-lg bg-slate-50 border border-slate-200 py-3 px-1 gap-2 cursor-default",
+          "flex min-w-[128px] w-[128px] shrink-0 flex-col rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3",
           isOver && "bg-blue-50 border-blue-300"
         )}
       >
-        <span className="text-[10px] font-bold text-slate-300 tabular-nums">
-          0
-        </span>
-        <span
-          className="text-[9px] font-semibold text-slate-300 uppercase tracking-wide leading-tight select-none"
-          style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
-        >
-          {column.label}
-        </span>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-600">{column.label}</h2>
+        <p className="mt-1 text-xs text-slate-600">Nenhuma profissional</p>
       </section>
     );
   }
@@ -100,6 +93,7 @@ function Column({ column }: { column: KanbanColumnData }) {
     <section
       ref={setNodeRef}
       data-testid={`column-${column.status}`}
+      aria-label={`Etapa ${column.label}, ${column.leads.length} profissionais`}
       className={cn(
         "flex flex-col min-w-[200px] w-[200px] shrink-0 rounded-lg bg-slate-50 border border-slate-200",
         isOver && "bg-blue-50 border-blue-300"
@@ -154,6 +148,13 @@ export function KanbanBoard({ columns }: { columns: KanbanColumnData[] }) {
     }
     keyboardColumnOffsetRef.current = 0;
     if (!targetStatus) return;
+    const sourceStatus = columns.find((column) =>
+      column.leads.some((lead) => lead.id === String(event.active.id))
+    )?.status;
+    if (!sourceStatus || sourceStatus === targetStatus) return;
+    const targetLabel = columns.find((column) => column.status === targetStatus)?.label ?? "a nova etapa";
+    const requiresConfirmation = ["ATIVA", "PREFERENCIAL", "REPROVADA", "DESISTIU", "SUSPENSA"].includes(targetStatus);
+    if (requiresConfirmation && !window.confirm(`Mover a profissional para “${targetLabel}”? Esta mudança pode exigir uma nova avaliação para ser revertida.`)) return;
     setIsMoving(true);
     try {
       const moved = await moveLeadAction({

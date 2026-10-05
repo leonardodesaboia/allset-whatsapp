@@ -21,6 +21,23 @@ import { recordAuditLog } from "../audit/record-audit-log.usecase";
 import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
 import { enqueueCustomerQuestion } from "./customer-question-outbox";
 import { customerBookingSummary } from "../../domain/customer/customer-booking-summary";
+import { env } from "../../env";
+
+function buildPaymentInstructionsText(tier: PropertyPricingTier | null): string {
+  const lines = ["✅ Pedido confirmado! Para finalizar, realize o pagamento via PIX:"];
+  if (env.PIX_KEY) lines.push(`\n🔑 Chave PIX: ${env.PIX_KEY}`);
+  if (tier) lines.push(`💰 Valor: R$ ${(tier.priceCents / 100).toFixed(2).replace(".", ",")}`);
+  lines.push("\nAssim que confirmarmos o recebimento, seu agendamento estará garantido. Você tem até 24 horas para realizar o pagamento.");
+  return lines.join("\n");
+}
+
+function buildPaymentFollowUpText(tier: PropertyPricingTier | null): string {
+  const lines = ["Seu pedido ainda aguarda pagamento. Realize o PIX para confirmar o agendamento:"];
+  if (env.PIX_KEY) lines.push(`\n🔑 Chave PIX: ${env.PIX_KEY}`);
+  if (tier) lines.push(`💰 Valor: R$ ${(tier.priceCents / 100).toFixed(2).replace(".", ",")}`);
+  lines.push("\nApós o pagamento, confirmamos em breve.");
+  return lines.join("\n");
+}
 
 function pricingTierText(tiers: readonly PropertyPricingTier[]): string {
   return [
@@ -339,8 +356,19 @@ export async function startCustomerBookingConversation(
       // with a read/create pair that races on the unique phone constraint.
       update: { phoneE164: input.phoneE164 },
     });
-    if (customer.role !== "CUSTOMER")
+    if (customer.role !== "CUSTOMER") {
+      await enqueueOutboundMessage(tx, {
+        provider: input.provider,
+        recipient: input.phoneE164,
+        payload: textPayload(
+          "Este número está cadastrado como profissional AllSet. Responda *2* para acessar o menu de profissional."
+        ),
+        idempotencyKey: `phone-already-used:${input.inboundMessageId ?? input.phoneE164}`,
+        correlationId: input.inboundMessageId ?? input.phoneE164,
+        actor: "system:customer-conversation",
+      });
       return { started: false as const, reason: "PHONE_ALREADY_USED" as const };
+    }
     // Serialize starts and answers for the same customer, even for distinct inbound IDs.
     await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${customer.id} FOR UPDATE`;
     await tx.customerProfile.upsert({
@@ -455,18 +483,25 @@ export async function processCustomerBookingAnswer(
         return { advanced: false, reason: "QUESTION_REPEATED" as const };
       }
       if (latest?.state === "PAUSED") {
-        await tx.inboundMessage.updateMany({
+        const claimed = await tx.inboundMessage.updateMany({
           where: { id: inbound.id, processedAt: null },
           data: { processedAt: new Date() },
         });
+        if (claimed.count) {
+          await enqueueOutboundMessage(tx, {
+            provider: inbound.provider,
+            recipient: customer.phoneE164,
+            payload: textPayload(
+              "Seu atendimento está com nossa equipe. Em breve entraremos em contato."
+            ),
+            idempotencyKey: `customer-booking:${latest.id}:paused-ack:${inbound.id}`,
+            correlationId: latest.id,
+            actor: "system:customer-conversation",
+          });
+        }
+        return { advanced: false, reason: "CONVERSATION_PAUSED" as const };
       }
-      return {
-        advanced: false,
-        reason:
-          latest?.state === "PAUSED"
-            ? ("CONVERSATION_PAUSED" as const)
-            : ("CONVERSATION_NOT_ACTIVE" as const),
-      };
+      return { advanced: false, reason: "CONVERSATION_NOT_ACTIVE" as const };
     }
 
     const claimed = await tx.inboundMessage.updateMany({
@@ -562,6 +597,12 @@ export async function processCustomerBookingAnswer(
       return { advanced: false, reason: "MANUAL_REVIEW" as const };
     }
     if (current === "AWAITING_PAYMENT") {
+      const bookingWithTier = conversation.bookingId
+        ? await tx.booking.findUnique({
+            where: { id: conversation.bookingId },
+            include: { propertyPricingTier: true },
+          })
+        : null;
       const updated = await tx.customerBookingConversation.update({
         where: { id: conversation.id },
         data: { lastInboundAt: new Date() },
@@ -570,7 +611,7 @@ export async function processCustomerBookingAnswer(
         provider: updated.provider,
         recipient: customer.phoneE164,
         payload: textPayload(
-          "Seu pedido continua aguardando pagamento. Enviaremos as instruções por aqui."
+          buildPaymentFollowUpText(bookingWithTier?.propertyPricingTier ?? null)
         ),
         idempotencyKey: `customer-booking:${updated.id}:awaiting-payment-follow-up:${updated.updatedAt.getTime()}`,
         correlationId: updated.id,
@@ -953,8 +994,36 @@ export async function processCustomerBookingAnswer(
         where: { id: conversation.bookingId },
         include: { propertyPricingTier: true },
       });
-      if (!booking?.propertyPricingTier)
+      if (!booking?.propertyPricingTier) {
+        if (booking) {
+          const review = await transitionBookingStatusInTransaction(tx, {
+            bookingId: booking.id,
+            targetStatus: "REVIEW_REQUIRED",
+            actor: "system:customer-conversation",
+            reason: "Configuração de preço removida durante o agendamento",
+          });
+          if (!review.ok) throw review.error;
+        }
+        const updated = await tx.customerBookingConversation.update({
+          where: { id: conversation.id },
+          data: {
+            state: "MANUAL_REVIEW",
+            lastQuestionKey: "MANUAL_REVIEW",
+            lastInboundAt: new Date(),
+          },
+        });
+        await enqueueOutboundMessage(tx, {
+          provider: updated.provider,
+          recipient: customer.phoneE164,
+          payload: textPayload(
+            "Houve uma atualização nos serviços disponíveis. Nossa equipe entrará em contato para concluir seu agendamento."
+          ),
+          idempotencyKey: `customer-booking:${updated.id}:booking-misconfigured:${updated.updatedAt.getTime()}`,
+          correlationId: updated.id,
+          actor: "system:customer-conversation",
+        });
         return { advanced: false, reason: "BOOKING_NOT_CONFIGURED" as const };
+      }
       await tx.booking.update({
         where: { id: booking.id },
         data: { scheduledAt },
@@ -1208,6 +1277,10 @@ export async function processCustomerBookingAnswer(
         actor: "customer:whatsapp",
       });
       if (!awaitingPayment.ok) throw awaitingPayment.error;
+      const bookingWithTier = await tx.booking.findUnique({
+        where: { id: conversation.bookingId },
+        include: { propertyPricingTier: true },
+      });
       const updated = await tx.customerBookingConversation.update({
         where: { id: conversation.id },
         data: {
@@ -1217,12 +1290,13 @@ export async function processCustomerBookingAnswer(
           version: { increment: 1 },
         },
       });
+      const paymentText = buildPaymentInstructionsText(
+        bookingWithTier?.propertyPricingTier ?? null
+      );
       await enqueueOutboundMessage(tx, {
         provider: updated.provider,
         recipient: customer.phoneE164,
-        payload: textPayload(
-          "Recebemos a confirmação do pedido. Nossa equipe vai preparar e enviar as instruções de pagamento por aqui."
-        ),
+        payload: textPayload(paymentText),
         idempotencyKey: `customer-booking:${updated.id}:AWAITING_PAYMENT:${updated.updatedAt.getTime()}`,
         correlationId: updated.id,
         actor: "system:customer-conversation",

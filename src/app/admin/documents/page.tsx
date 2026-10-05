@@ -220,14 +220,16 @@ function RejectDocumentInlineForm({ documentId, leadId }: { documentId: string; 
       }}
     >
       <input
+        id={`document-rejection-reason-${documentId}`}
         name="reason"
         placeholder="Motivo"
         required
         className="rounded border border-slate-300 px-2 py-0.5 text-xs w-28 focus:outline-none focus:ring-1 focus:ring-red-400"
       />
+      <label htmlFor={`document-rejection-reason-${documentId}`} className="sr-only">Motivo da rejeição</label>
       <button
         type="submit"
-        className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium bg-red-50 text-red-700 hover:bg-red-100 border border-red-200"
+        className="inline-flex min-h-8 items-center gap-1 rounded px-2 py-1 text-xs font-medium bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700"
       >
         <FileX className="w-3 h-3" />
         Rejeitar

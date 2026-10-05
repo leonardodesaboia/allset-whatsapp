@@ -72,8 +72,9 @@ export function BookingForm({ services }: { services: { id: string; name: string
     <form onSubmit={(e) => void submit(e)} className="rounded-lg border border-slate-200 bg-white p-5 space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="sm:col-span-2 space-y-1">
-          <label className="text-xs font-medium text-slate-600">Serviço</label>
+          <label htmlFor="booking-service" className="text-xs font-medium text-slate-600">Serviço</label>
           <select
+            id="booking-service"
             required
             value={form.serviceId}
             onChange={set("serviceId")}
@@ -86,8 +87,9 @@ export function BookingForm({ services }: { services: { id: string; name: string
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600">Nome do cliente</label>
+          <label htmlFor="booking-customer-name" className="text-xs font-medium text-slate-600">Nome do cliente</label>
           <Input
+            id="booking-customer-name"
             required
             value={form.customerName}
             onChange={set("customerName")}
@@ -96,8 +98,9 @@ export function BookingForm({ services }: { services: { id: string; name: string
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600">Telefone do cliente</label>
+          <label htmlFor="booking-customer-phone" className="text-xs font-medium text-slate-600">Telefone do cliente</label>
           <Input
+            id="booking-customer-phone"
             required
             placeholder="+5585…"
             value={form.customerPhone}
@@ -106,8 +109,9 @@ export function BookingForm({ services }: { services: { id: string; name: string
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600">Bairro</label>
+          <label htmlFor="booking-neighborhood" className="text-xs font-medium text-slate-600">Bairro</label>
           <Input
+            id="booking-neighborhood"
             required
             value={form.neighborhood}
             onChange={set("neighborhood")}
@@ -116,8 +120,9 @@ export function BookingForm({ services }: { services: { id: string; name: string
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600">Data</label>
+          <label htmlFor="booking-date" className="text-xs font-medium text-slate-600">Data</label>
           <Input
+            id="booking-date"
             required
             type="date"
             value={form.scheduledDate}
@@ -126,8 +131,9 @@ export function BookingForm({ services }: { services: { id: string; name: string
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600">Horário</label>
+          <label htmlFor="booking-time" className="text-xs font-medium text-slate-600">Horário</label>
           <Input
+            id="booking-time"
             required
             type="time"
             value={form.scheduledTime}
@@ -136,8 +142,9 @@ export function BookingForm({ services }: { services: { id: string; name: string
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600">Duração (minutos)</label>
+          <label htmlFor="booking-duration" className="text-xs font-medium text-slate-600">Duração (minutos)</label>
           <Input
+            id="booking-duration"
             required
             type="number"
             min="30"
@@ -148,8 +155,9 @@ export function BookingForm({ services }: { services: { id: string; name: string
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600">Pagamento à profissional (centavos)</label>
+          <label htmlFor="booking-professional-payment" className="text-xs font-medium text-slate-600">Pagamento à profissional (centavos)</label>
           <Input
+            id="booking-professional-payment"
             required
             type="number"
             min="1"

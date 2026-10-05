@@ -3,7 +3,6 @@ import Link from "next/link";
 import { ArrowLeft, Clock } from "lucide-react";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { StatusBadge } from "@/components/status-badge";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 
 const formatDateTime = (date: Date) =>
@@ -62,9 +61,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ id
             <div className="flex items-center justify-between">
               <CardTitle>Respostas</CardTitle>
               <div className="flex items-center gap-2">
-                <Badge variant={opportunity.status === "FILLED" ? "success" : opportunity.status === "EXPIRED" || opportunity.status === "CANCELLED" ? "destructive" : "secondary"}>
-                  {opportunity.status}
-                </Badge>
+                <StatusBadge status={opportunity.status} />
                 <span className="flex items-center gap-1 text-xs text-slate-500">
                   <Clock className="w-3 h-3" />
                   Expira {formatDateTime(opportunity.expiresAt)}
@@ -95,11 +92,9 @@ export default async function OpportunityPage({ params }: { params: Promise<{ id
                     <td className="px-5 py-3 text-xs text-slate-500">{formatDateTime(response.sentAt)}</td>
                     <td className="px-5 py-3">
                       {response.response ? (
-                        <Badge variant={response.response === "ACCEPTED" ? "success" : response.response === "DECLINED" ? "destructive" : "secondary"}>
-                          {response.response}
-                        </Badge>
+                        <StatusBadge status={response.response} />
                       ) : (
-                        <Badge variant="outline">Aguardando</Badge>
+                        <StatusBadge status="AWAITING_RESPONSE" />
                       )}
                     </td>
                     <td className="px-5 py-3 text-xs text-slate-500 hidden lg:table-cell">

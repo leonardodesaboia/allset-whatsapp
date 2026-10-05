@@ -29,7 +29,7 @@ export function QrCodePanel() {
   return (
     <div className="border-t border-slate-100 pt-4">
       <p className="text-sm text-slate-600 mb-3">Para conectar, escaneie o QR Code com o WhatsApp do número que será usado pelo bot.</p>
-      <button type="button" onClick={() => void generate()} disabled={pending} className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-700 hover:text-blue-900 disabled:opacity-60">
+      <button type="button" onClick={() => void generate()} disabled={pending} className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-blue-700 hover:bg-blue-50 hover:text-blue-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 disabled:opacity-60">
         <QrCode className="w-4 h-4" />
         {pending ? "Gerando…" : "Gerar QR Code"}
       </button>

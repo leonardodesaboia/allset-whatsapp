@@ -45,7 +45,7 @@ export function CustomerConversationMessageForm({
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900"
+        className="inline-flex min-h-8 items-center gap-1 rounded px-2 text-xs font-medium text-blue-700 hover:bg-blue-50 hover:text-blue-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
       >
         <MessageSquare className="w-3 h-3" />
         Enviar msg
@@ -74,6 +74,7 @@ export function CustomerConversationMessageForm({
             </div>
 
             <textarea
+              id="conversation-customer-message"
               value={text}
               autoFocus
               data-autofocus
@@ -84,6 +85,7 @@ export function CustomerConversationMessageForm({
               rows={5}
               className="w-full resize-none rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+            <label htmlFor="conversation-customer-message" className="sr-only">Mensagem para o cliente</label>
 
             {error && (
               <p role="alert" className="text-xs text-red-600">

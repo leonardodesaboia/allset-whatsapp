@@ -19,5 +19,14 @@
 2. Configurar todas as variáveis `S3_*`, incluindo a URL pública assinável.
 3. Rodar migrations, gerar o admin com uma senha provida por secret manager e
    verificar o login no painel.
-4. Agendar dispatch, expiração, reengajamento e processamento de áudio.
+4. Agendar os cinco crons via Easypanel — todos usam `GET` com header
+   `Authorization: Bearer $CRON_SECRET`:
+
+   | Rota                                      | Intervalo sugerido | Finalidade                                 |
+   |-------------------------------------------|--------------------|--------------------------------------------|
+   | `/api/cron/messaging/dispatch`            | 1 min              | Despacha outbox e processa dead letters    |
+   | `/api/cron/messaging/download-audio`      | 1 min              | Baixa mídia da Evolution e aciona Whisper  |
+   | `/api/cron/marketplace/expire`            | 2 min              | Expira oportunidades sem aceite no prazo   |
+   | `/api/cron/customer/expire-stale`         | 30 min             | Lembra/cancela agendamentos sem pagamento  |
+   | `/api/cron/recruitment/reengage`          | 4 h                | Reengaja pré-cadastros silenciosos         |
 5. Rotacionar qualquer credencial que tenha aparecido em documentação anterior.
