@@ -10,7 +10,7 @@ export async function processPendingReceivedAudio(prisma: PrismaClient, storage:
   const ids = input.inboundMessageId ? [input.inboundMessageId] : (await prisma.inboundMessage.findMany({
     // A transcript may already exist when routing failed. Keep recovering the
     // inbound until the conversation transaction has actually consumed it.
-    where: { provider: "evolution", type: "AUDIO", processedAt: null },
+    where: { type: "AUDIO", processedAt: null },
     orderBy: { receivedAt: "asc" }, take: input.limit, select: { id: true },
   })).map((message) => message.id);
   const results = [] as Array<{ inboundMessageId: string; ok: boolean; error?: string }>;

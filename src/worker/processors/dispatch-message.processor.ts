@@ -9,6 +9,7 @@ import { JOB_NAME } from "@/infrastructure/jobs/job-names";
 
 const batchLimit = 20;
 
+// Shared runtime includes WhatsMiau and the legacy evolution alias when Evolution is absent.
 // Registry is created once per worker process lifecycle.
 let registry: ReturnType<typeof createMessagingGatewayRegistry> | null = null;
 function getRegistry() {

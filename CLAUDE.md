@@ -10,7 +10,7 @@ Decisão registrada em `docs/adr/0001-arquitetura-monolito-modular.md`.
 ```
 src/domain/          regras puras — sem I/O, sem frameworks
 src/application/     casos de uso transacionais e read models
-src/infrastructure/  Prisma, Better Auth, adapters (Evolution, Whisper, Storage)
+src/infrastructure/  Prisma, Better Auth, adapters (WhatsMiau, Evolution legado, Whisper, Storage)
 src/app/             Next.js App Router: Server Components, Server Actions, rotas HTTP
 prisma/              schema + migrations aditivas
 ```
@@ -22,7 +22,7 @@ prisma/              schema + migrations aditivas
 ## Convenções críticas
 
 - **Transições de status**: sempre via `transitionLeadStatusInTransaction`. Nunca `update({ status })` direto — a função aplica a máquina de estados, lock otimista, histórico, evento e auditoria em uma transação.
-- **Mensagens de saída**: sempre `enqueueOutboundMessage` dentro de uma transação. Nunca chamar Evolution API diretamente de Server Actions ou casos de uso.
+- **Mensagens de saída**: sempre `enqueueOutboundMessage` dentro de uma transação. Nunca chamar APIs de WhatsApp diretamente de Server Actions ou casos de uso.
 - **Erros recuperáveis**: padrão `Result<T, E>` com `ok()` / `err()` de `src/domain/shared/result.ts`. Usar `throw` somente para falhas inesperadas.
 - **Concorrência**: lock otimista com campo `version`. Usar `updateMany({ where: { id, version } })` e checar `.count` — zero significa conflito.
 - **Transações atômicas**: `prisma.$transaction(async (tx) => { ... })` para qualquer operação multi-tabela. Passar `tx` adiante, nunca o `prisma` global dentro de uma transação.
@@ -39,7 +39,7 @@ prisma/              schema + migrations aditivas
 | `src/application/recruitment/transition-lead-status.usecase.ts` | única entrada para transições de status de lead |
 | `src/application/recruitment/kanban-read-model.ts` | colunas do Kanban e queries de leitura |
 | `src/application/messaging/dispatch-outbox.usecase.ts` | lease, retry exponencial e dead letter da outbox |
-| `src/infrastructure/messaging/evolution-webhook.ts` | normalização e validação do webhook da Evolution |
+| `src/infrastructure/messaging/whatsmiau-webhook.ts` | normalização e validação do webhook do WhatsMiau |
 | `src/infrastructure/auth/compare-secret.ts` | comparação de segredos em tempo constante (timing-safe) |
 | `src/env.ts` | validação de variáveis de ambiente com Zod |
 
@@ -57,17 +57,22 @@ Após qualquer alteração, no mínimo: `pnpm tsc --noEmit && pnpm architecture:
 
 ## Estado de produção
 
-Os fluxos de **texto** e **áudio** estão implementados de ponta a ponta: o worker BullMQ
-(`src/worker/processors/process-received-audio.processor.ts`) baixa a mídia da Evolution,
-chama `recordReceivedAudio` e `POST /api/internal/messaging/transcribe` automaticamente.
+Os fluxos de **texto** e **áudio** usam WhatsMiau Cloud como novo provider.
+Com REDIS_URL, o webhook publica RECEIVED_AUDIO para o worker BullMQ; sem Redis,
+o webhook WhatsMiau inicia download + transcrição + conversa imediatamente.
+Mantenha o cron `/api/cron/messaging/download-audio` como rede de segurança.
+Evolution continua opcional, inclusive durante rollout com apenas EVOLUTION_*.
+A outbox usa o provider persistido; sem Evolution configurada, WhatsMiau também
+atende o alias legado `evolution`, sem migrar dados.
 Pendências atuais são de homologação de infraestrutura, não de implementação:
 
 - validar a mesma matriz de testes/build em **Node 24** (exigido pelo projeto; auditorias
   locais rodaram em Node 22);
 - upgrade planejado **Prisma 6 → 7** (alerta alto transitivo em `deepmerge-ts`);
-- homologação com credenciais reais de Evolution, S3/MinIO e OpenAI em staging/produção.
+- homologação com credenciais reais de WhatsMiau/Evolution, S3/MinIO e OpenAI em staging/produção.
 
-Runbook completo: `docs/runbooks/evolution-messaging.md`.
+Runbook principal: `docs/runbooks/whatsmiau-messaging.md`.
+Legado: `docs/runbooks/evolution-messaging.md`.
 Inventário de entregas: `docs/analise-correcoes-completa-2026-08-19.md`.
 
 <!-- BEGIN:nextjs-agent-rules -->

@@ -43,6 +43,8 @@ export default defineConfig({
   ],
 
   webServer: {
+    // Existing E2E fixtures exercise the Evolution webhook without real API credentials.
+    env: { MESSAGING_DEFAULT_PROVIDER: "evolution" },
     command: `EVOLUTION_WEBHOOK_SECRET=${e2eWebhookSecret} pnpm build --webpack && mkdir -p .next/standalone/.next/static .next/standalone/public && cp -R .next/static/. .next/standalone/.next/static/ && cp -R public/. .next/standalone/public/ && E2E_DISABLE_AUTH_RATE_LIMIT=true EVOLUTION_WEBHOOK_SECRET=${e2eWebhookSecret} BETTER_AUTH_URL=${e2eBaseUrl} PORT=${e2ePort} node .next/standalone/server.js`,
     url: e2eBaseUrl,
     reuseExistingServer: !process.env.CI,

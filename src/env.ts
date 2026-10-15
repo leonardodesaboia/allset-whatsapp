@@ -63,6 +63,11 @@ const envSchema = z
         .regex(/^\d{10,15}$/, "deve conter apenas dígitos, com código do país")
     ),
     EVOLUTION_WEBHOOK_SECRET: optionalEnv(z.string().min(32)),
+    WHATSMIAU_BASE_URL: z.string().url().default("https://api.whatsmiau.dev/v2"),
+    WHATSMIAU_API_KEY: optionalEnv(z.string().min(1)),
+    WHATSMIAU_INSTANCE: optionalEnv(z.string().min(1)),
+    WHATSMIAU_WEBHOOK_SECRET: optionalEnv(z.string().min(32)),
+    WHATSMIAU_MEDIA_HOSTS: z.string().default("storage.whatsmiau.io").transform((value) => value.split(",").map((host) => host.trim().toLowerCase())).pipe(z.array(z.string().regex(/^(?=.{1,253}$)[a-z0-9]+(?:[.-][a-z0-9]+)*\.[a-z]{2,}$/)).min(1)),
     INTERNAL_JOB_SECRET: optionalEnv(z.string().min(32)),
     CRON_SECRET: optionalEnv(z.string().min(32)),
     OPENAI_API_KEY: optionalEnv(z.string().min(1)),
@@ -85,7 +90,7 @@ const envSchema = z
       .trim()
       .min(1)
       .max(64)
-      .default("evolution"),
+      .default("whatsmiau"),
     PIX_KEY: optionalEnv(z.string().min(1).max(255)),
     // Storage S3-compatível (MinIO local ou AWS S3 em produção).
     // Todas as cinco variáveis abaixo devem ser definidas juntas; deixar vazias
@@ -114,7 +119,8 @@ const envSchema = z
 
     if (value.NODE_ENV !== "production") return;
     for (const key of [
-      "EVOLUTION_WEBHOOK_SECRET",
+      ...(value.EVOLUTION_API_KEY || value.MESSAGING_DEFAULT_PROVIDER === "evolution" ? ["EVOLUTION_WEBHOOK_SECRET" as const] : []),
+      ...(value.WHATSMIAU_API_KEY || value.MESSAGING_DEFAULT_PROVIDER === "whatsmiau" ? ["WHATSMIAU_WEBHOOK_SECRET" as const] : []),
       "INTERNAL_JOB_SECRET",
       "CRON_SECRET",
     ] as const) {
@@ -134,6 +140,7 @@ const BUILD_AUTH_SECRET = "build-only-secret-not-valid-for-runtime";
 const BUILD_AUTH_URL = "http://localhost:3000";
 const BUILD_EVOLUTION_WEBHOOK_SECRET =
   "build-only-webhook-secret-not-valid-for-runtime";
+const BUILD_WHATSMIAU_WEBHOOK_SECRET = "build-only-whatsmiau-secret-not-valid-for-runtime";
 const BUILD_INTERNAL_JOB_SECRET =
   "build-only-internal-job-secret-not-valid-for-runtime";
 const BUILD_CRON_SECRET = "build-only-cron-secret-not-valid-for-runtime";
@@ -155,6 +162,8 @@ export function sourceForModuleEvaluation(
     BETTER_AUTH_URL: source.BETTER_AUTH_URL ?? BUILD_AUTH_URL,
     EVOLUTION_WEBHOOK_SECRET:
       source.EVOLUTION_WEBHOOK_SECRET ?? BUILD_EVOLUTION_WEBHOOK_SECRET,
+    WHATSMIAU_WEBHOOK_SECRET:
+      source.WHATSMIAU_WEBHOOK_SECRET ?? BUILD_WHATSMIAU_WEBHOOK_SECRET,
     INTERNAL_JOB_SECRET:
       source.INTERNAL_JOB_SECRET ?? BUILD_INTERNAL_JOB_SECRET,
     CRON_SECRET: source.CRON_SECRET ?? BUILD_CRON_SECRET,
@@ -162,7 +171,13 @@ export function sourceForModuleEvaluation(
 }
 
 export function parseEnv(source: Record<string, string | undefined>): Env {
-  const result = envSchema.safeParse(source);
+  // Existing Evolution-only deployments retain the old default during rollout.
+  // New installations (and the new template) default to WhatsMiau.
+  const result = envSchema.safeParse({
+    ...source,
+    MESSAGING_DEFAULT_PROVIDER: source.MESSAGING_DEFAULT_PROVIDER ??
+      (source.EVOLUTION_API_KEY && !source.WHATSMIAU_API_KEY ? "evolution" : undefined),
+  });
   if (!result.success) {
     throw new Error(
       `Variáveis de ambiente inválidas: ${result.error.issues

@@ -1,7 +1,7 @@
 import type { Job } from "bullmq";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { processPendingReceivedAudio } from "@/application/messaging/process-pending-received-audio.usecase";
-import { EvolutionMediaDownloader } from "@/infrastructure/messaging/evolution-media-downloader";
+import { createInboundMediaDownloader } from "@/infrastructure/messaging/messaging-runtime";
 import { createRuntimeStorage } from "@/infrastructure/storage/storage-runtime";
 import { createAudioTranscriber } from "@/infrastructure/transcription/transcription-runtime";
 import { logger } from "@/infrastructure/observability/logger";
@@ -15,18 +15,14 @@ export async function processReceivedAudioProcessor(
 ): Promise<void> {
   const { inboundMessageId } = job.data;
 
-  if (!env.EVOLUTION_BASE_URL || !env.EVOLUTION_API_KEY || !env.EVOLUTION_INSTANCE || !env.OPENAI_API_KEY) {
-    throw new Error("Worker de áudio não configurado: EVOLUTION_* e OPENAI_API_KEY são obrigatórios");
+  if (!env.OPENAI_API_KEY) {
+    throw new Error("Worker de áudio não configurado: OPENAI_API_KEY é obrigatória");
   }
 
   const results = await processPendingReceivedAudio(
     prisma,
     createRuntimeStorage(),
-    new EvolutionMediaDownloader({
-      baseUrl: env.EVOLUTION_BASE_URL,
-      apiKey: env.EVOLUTION_API_KEY,
-      instance: env.EVOLUTION_INSTANCE,
-    }),
+    createInboundMediaDownloader(),
     createAudioTranscriber(),
     { inboundMessageId, limit: 1 },
   );

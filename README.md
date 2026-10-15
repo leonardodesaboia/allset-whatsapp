@@ -5,7 +5,7 @@ funil de recrutamento, mensageria com outbox, `ConversationEngine`, assets de
 áudio e os primeiros adapters de integração.
 
 Para a operação de WhatsApp e transcrição, consulte o
-[runbook da Evolution e áudio](docs/runbooks/evolution-messaging.md) e a
+[runbook do WhatsMiau e áudio](docs/runbooks/whatsmiau-messaging.md) e a
 [decisão de transcrição](docs/adr/0004-transcricao-whisper.md). O inventário
 completo do que já foi entregue e do que ainda depende de homologação está em
 [estado consolidado da implementação](docs/product/implementation-status-2026-08-07.md).
@@ -27,7 +27,7 @@ cp .env.example .env
 
 > O `.env.example` já traz valores prontos para MinIO local. Para o fluxo
 > de texto puro, os campos `S3_*` podem ficar em branco — o provider local
-> é ativado automaticamente. Para áudio (Evolution + Whisper), MinIO é necessário.
+> é ativado automaticamente. Para áudio (WhatsMiau + Whisper), MinIO é necessário.
 
 ⚠️ Edite o `.env` e **gere um `BETTER_AUTH_SECRET` real** — o valor de
 placeholder do `.env.example` é rejeitado de propósito por `src/env.ts` (ele é
@@ -119,18 +119,20 @@ solicita ligação (2ª vez).
 
 ## Pendências de produção
 
-O fluxo de **texto** funciona de ponta a ponta. Para áudio, o worker interno já
-está disponível, mas precisa ser acionado por um scheduler externo para cada
-inbound pendente:
+Texto e áudio usam WhatsMiau Cloud por padrão. O webhook recebe mensagens em
+`POST /api/messaging/whatsmiau/webhook` e publica o processamento de
+áudio no worker BullMQ quando há Redis. Sem Redis, inicia o download e a
+transcrição imediatamente após persistir. Mantenha os cron jobs de download e despacho
+ativos como rede de segurança.
 
-1. O webhook recebe o evento de áudio e devolve `{ needsMediaDownload: true }`
-2. O worker chama `POST /api/internal/messaging/download-media`, que baixa,
-   armazena e transcreve de forma idempotente
-3. Sem um scheduler chamando esse worker, áudios chegam ao webhook mas não são
-   processados automaticamente pelo Whisper
+A Evolution continua opcional. Sem ela configurada, o gateway WhatsMiau também
+atende mensagens/conversas com o provider legado `evolution`, sem migrar dados.
+Áudios antigos criptografados ainda precisam da API Evolution original: drene
+essas pendências antes de desligá-la. Retries de envio podem duplicar mensagens,
+pois o WhatsMiau não documenta idempotência remota.
 
-Detalhes operacionais, variáveis de ambiente e checklist de homologação:
-`docs/runbooks/evolution-messaging.md`.
+Configuração, QR Code e homologação: [runbook WhatsMiau](docs/runbooks/whatsmiau-messaging.md).
+Configuração antiga: [runbook Evolution](docs/runbooks/evolution-messaging.md).
 
 ## Estrutura
 

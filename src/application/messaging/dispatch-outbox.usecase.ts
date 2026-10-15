@@ -4,9 +4,9 @@ import type { OutboundMessagePayload } from "../../domain/messaging/message";
 import { recordAuditLog } from "../audit/record-audit-log.usecase";
 
 const maxAttempts = 8;
-// A Evolution pode demorar em redes móveis. Uma lease mais longa reduz a
+// A API pode demorar em redes móveis. Uma lease mais longa reduz a
 // reivindicação concorrente durante uma entrega ainda em curso; o protocolo de
-// entrega permanece at-least-once e usa a chave de idempotência do provider.
+// entrega permanece at-least-once; nem todo provider oferece idempotência remota.
 const leaseMs = 5 * 60_000;
 const retryDelayMs = (attempt: number) => Math.min(3_600_000, 1_000 * 2 ** Math.min(attempt, 10));
 const safeError = (error: unknown) =>

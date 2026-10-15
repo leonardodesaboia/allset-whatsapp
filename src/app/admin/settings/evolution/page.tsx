@@ -8,55 +8,58 @@ import {
   AlertTriangle,
   ExternalLink,
 } from "lucide-react";
-import { env } from "@/env";
+import { getMessagingIntegrationConfig } from "@/infrastructure/messaging/messaging-runtime";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { QrCodePanel } from "./qr-code-panel";
 
-async function fetchEvolutionState(): Promise<{
+const config = getMessagingIntegrationConfig();
+
+async function fetchMessagingState(): Promise<{
   ok: boolean;
   state?: "open" | "connecting" | "close" | string;
   error?: string;
 }> {
-  if (!env.EVOLUTION_BASE_URL || !env.EVOLUTION_API_KEY || !env.EVOLUTION_INSTANCE) {
+  if (!config.baseUrl || !config.apiKey || !config.instance) {
     return { ok: false, error: "NOT_CONFIGURED" };
   }
   try {
-    const base = env.EVOLUTION_BASE_URL.replace(/\/$/, "");
+    const base = config.baseUrl.replace(/\/$/, "");
     const res = await fetch(
-      `${base}/instance/connectionState/${encodeURIComponent(env.EVOLUTION_INSTANCE)}`,
+      `${base}/instance/connectionState/${encodeURIComponent(config.instance)}`,
       {
-        headers: { apikey: env.EVOLUTION_API_KEY },
+        headers: { apikey: config.apiKey },
         cache: "no-store",
         signal: AbortSignal.timeout(5000),
       }
     );
+    const data = await res.json() as { state?: string; suspended?: boolean; suspension_reason?: string; instance?: { state?: string } };
+    if (res.status === 423 || data.suspended) return { ok: false, state: "Suspensa", error: `Suspensa: ${data.suspension_reason ?? "motivo indisponível"}` };
     if (!res.ok) return { ok: false, error: `HTTP_${res.status}` };
-    const data = await res.json() as { instance?: { state?: string } };
-    return { ok: true, state: (data.instance?.state ?? "unknown") as string };
+    return { ok: true, state: data.state ?? data.instance?.state ?? "unknown" };
   } catch (err) {
     return { ok: false, error: String(err instanceof Error ? err.message : err) };
   }
 }
 
-export default async function EvolutionSettingsPage() {
-  const stateResult = await fetchEvolutionState();
+export default async function MessagingSettingsPage() {
+  const stateResult = await fetchMessagingState();
 
-  const configured = env.EVOLUTION_BASE_URL && env.EVOLUTION_API_KEY && env.EVOLUTION_INSTANCE;
+  const configured = config.baseUrl && config.apiKey && config.instance;
   const connected = stateResult.ok && stateResult.state === "open";
   const connecting = stateResult.ok && stateResult.state === "connecting";
 
   return (
     <div className="p-6 max-w-xl space-y-6">
       <div>
-        <h1 className="text-xl font-bold text-slate-900">Integração Evolution</h1>
+        <h1 className="text-xl font-bold text-slate-900">Integração {config.label}</h1>
         <p className="text-sm text-slate-500 mt-0.5">Status da instância WhatsApp</p>
-        {env.EVOLUTION_BASE_URL && (
+        {config.baseUrl && (
           <Button asChild variant="outline" size="sm" className="mt-3">
-            <a href={`${env.EVOLUTION_BASE_URL.replace(/\/$/, "")}/manager/`} target="_blank" rel="noopener noreferrer">
+            <a href={config.provider === "whatsmiau" ? "https://whatsmiau.dev" : `${config.baseUrl.replace(/\/$/, "")}/manager/`} target="_blank" rel="noopener noreferrer">
               <ExternalLink className="w-3.5 h-3.5" />
-              Abrir painel da Evolution
+              Abrir painel {config.label}
             </a>
           </Button>
         )}
@@ -70,9 +73,9 @@ export default async function EvolutionSettingsPage() {
             Variáveis de ambiente não configuradas
           </div>
           <p className="text-amber-700">
-            Defina <code className="font-mono bg-amber-100 px-1 rounded">EVOLUTION_BASE_URL</code>,{" "}
-            <code className="font-mono bg-amber-100 px-1 rounded">EVOLUTION_API_KEY</code> e{" "}
-            <code className="font-mono bg-amber-100 px-1 rounded">EVOLUTION_INSTANCE</code> no ambiente de produção.
+            Defina <code className="font-mono bg-amber-100 px-1 rounded">{config.prefix}_BASE_URL</code>,{" "}
+            <code className="font-mono bg-amber-100 px-1 rounded">{config.prefix}_API_KEY</code> e{" "}
+            <code className="font-mono bg-amber-100 px-1 rounded">{config.prefix}_INSTANCE</code> no ambiente de produção.
           </p>
         </div>
       ) : (
@@ -108,9 +111,9 @@ export default async function EvolutionSettingsPage() {
               </div>
               <div>
                 <p className="text-sm font-semibold text-slate-900">
-                  {env.EVOLUTION_INSTANCE}
+                  {config.instance}
                 </p>
-                <p className="text-xs text-slate-500">{env.EVOLUTION_BASE_URL}</p>
+                <p className="text-xs text-slate-500">{config.baseUrl}</p>
               </div>
               <Badge
                 variant={connected ? "success" : connecting ? "warning" : "destructive"}
@@ -149,14 +152,14 @@ export default async function EvolutionSettingsPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             <p className="text-sm text-slate-600">
-              Configure o webhook da Evolution para receber mensagens:
+              Configure o webhook {config.label} para receber mensagens:
             </p>
             <div className="font-mono text-xs bg-slate-900 text-slate-100 rounded-md px-3 py-2 break-all">
-              POST /api/messaging/evolution/webhook
+              POST /api/messaging/{config.provider}/webhook
             </div>
             <p className="text-xs text-slate-500">
-              Protegido por <code className="bg-slate-100 px-1 rounded">EVOLUTION_WEBHOOK_SECRET</code>.
-              Eventos necessários: <code className="bg-slate-100 px-1 rounded">MESSAGES_UPSERT</code>.
+              Protegido por <code className="bg-slate-100 px-1 rounded">{config.prefix}_WEBHOOK_SECRET</code>.
+              Eventos necessários: <code className="bg-slate-100 px-1 rounded">{config.provider === "whatsmiau" ? "messages.upsert, connection.update" : "MESSAGES_UPSERT"}</code>.
             </p>
           </CardContent>
         </Card>

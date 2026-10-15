@@ -2,6 +2,31 @@ import { describe, expect, it } from "vitest";
 import { BETTER_AUTH_SECRET_PLACEHOLDER, parseEnv, sourceForModuleEvaluation } from "@/env";
 
 describe("parseEnv", () => {
+  const base = { DATABASE_URL: "postgresql://user:pass@localhost:5432/db", BETTER_AUTH_SECRET: "a".repeat(32), BETTER_AUTH_URL: "http://localhost:3000" };
+  const production = { ...base, NODE_ENV: "production", INTERNAL_JOB_SECRET: "b".repeat(32), CRON_SECRET: "c".repeat(32) };
+  const evolution = { EVOLUTION_BASE_URL: "http://evolution:8080", EVOLUTION_API_KEY: "old", EVOLUTION_INSTANCE: "AllSet", EVOLUTION_WEBHOOK_SECRET: "d".repeat(32) };
+  it("preserves an Evolution-only production rollout without WhatsMiau variables", () => {
+    expect(parseEnv({ ...production, ...evolution }).MESSAGING_DEFAULT_PROVIDER).toBe("evolution");
+    expect(parseEnv({ ...production, ...evolution }).WHATSMIAU_API_KEY).toBeUndefined();
+    expect(parseEnv({ ...production, ...evolution, MESSAGING_DEFAULT_PROVIDER: "evolution" }).MESSAGING_DEFAULT_PROVIDER).toBe("evolution");
+  });
+  it("requires only the configured provider secrets after cutover", () => {
+    const migrated = { ...production, WHATSMIAU_API_KEY: "new", WHATSMIAU_INSTANCE: "AllSet", WHATSMIAU_WEBHOOK_SECRET: "e".repeat(32) };
+    expect(parseEnv(migrated).MESSAGING_DEFAULT_PROVIDER).toBe("whatsmiau");
+    expect(() => parseEnv({ ...migrated, WHATSMIAU_WEBHOOK_SECRET: undefined })).toThrow(/WHATSMIAU_WEBHOOK_SECRET/);
+    expect(() => parseEnv({ ...migrated, ...evolution, EVOLUTION_WEBHOOK_SECRET: undefined })).toThrow(/EVOLUTION_WEBHOOK_SECRET/);
+  });
+  it("injects WhatsMiau build secrets only during build evaluation", () => {
+    const build = sourceForModuleEvaluation({ NEXT_PHASE: "phase-production-build", NODE_ENV: "production", WHATSMIAU_API_KEY: "new", WHATSMIAU_INSTANCE: "AllSet" });
+    expect(parseEnv(build).WHATSMIAU_WEBHOOK_SECRET).toMatch(/^build-only-whatsmiau-/);
+    expect(sourceForModuleEvaluation({ NODE_ENV: "production" }).WHATSMIAU_WEBHOOK_SECRET).toBeUndefined();
+  });
+  it("defaults to WhatsMiau and parses its host allowlist", () => {
+    expect(parseEnv(base)).toMatchObject({ MESSAGING_DEFAULT_PROVIDER: "whatsmiau", WHATSMIAU_BASE_URL: "https://api.whatsmiau.dev/v2", WHATSMIAU_MEDIA_HOSTS: ["storage.whatsmiau.io"] });
+    expect(parseEnv({ ...base, WHATSMIAU_MEDIA_HOSTS: "storage.whatsmiau.io, MEDIA.example" }).WHATSMIAU_MEDIA_HOSTS).toEqual(["storage.whatsmiau.io", "media.example"]);
+    expect(() => parseEnv({ ...base, WHATSMIAU_WEBHOOK_SECRET: "short" })).toThrow(/WHATSMIAU_WEBHOOK_SECRET/);
+    for (const hosts of ["", "https://storage.whatsmiau.io", "*.whatsmiau.io", "127.0.0.1"]) expect(() => parseEnv({ ...base, WHATSMIAU_MEDIA_HOSTS: hosts })).toThrow(/WHATSMIAU_MEDIA_HOSTS/);
+  });
   it("aceita um conjunto válido de variáveis", () => {
     const result = parseEnv({
       DATABASE_URL: "postgresql://user:pass@localhost:5432/db",
@@ -83,7 +108,7 @@ describe("parseEnv", () => {
         BETTER_AUTH_URL: "https://allset.example",
         NODE_ENV: "production",
       }),
-    ).toThrow(/EVOLUTION_WEBHOOK_SECRET.*INTERNAL_JOB_SECRET.*CRON_SECRET/);
+    ).toThrow(/WHATSMIAU_WEBHOOK_SECRET.*INTERNAL_JOB_SECRET.*CRON_SECRET/);
   });
 
   it("exige o segredo do webhook Evolution em produção", () => {
@@ -93,6 +118,7 @@ describe("parseEnv", () => {
         BETTER_AUTH_SECRET: "a".repeat(32),
         BETTER_AUTH_URL: "https://allset.example",
         NODE_ENV: "production",
+        MESSAGING_DEFAULT_PROVIDER: "evolution",
         INTERNAL_JOB_SECRET: "b".repeat(32),
         CRON_SECRET: "c".repeat(32),
       }),
@@ -105,6 +131,7 @@ describe("parseEnv", () => {
       BETTER_AUTH_SECRET: "a".repeat(32),
       BETTER_AUTH_URL: "https://allset.example",
       NODE_ENV: "production",
+      MESSAGING_DEFAULT_PROVIDER: "evolution",
       EVOLUTION_WEBHOOK_SECRET: "d".repeat(32),
       INTERNAL_JOB_SECRET: "b".repeat(32),
       CRON_SECRET: "c".repeat(32),
