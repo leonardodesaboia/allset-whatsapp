@@ -13,7 +13,11 @@ describe("getOperationsOverview", () => {
     const db = await startTestDatabase();
     prisma = db.prisma;
     stop = db.stop;
-    serviceId = (await prisma.serviceDefinition.create({ data: { code: "OVERVIEW", name: "Limpeza" } })).id;
+    serviceId = (
+      await prisma.serviceDefinition.create({
+        data: { code: "OVERVIEW", name: "Limpeza" },
+      })
+    ).id;
   }, 60_000);
 
   afterAll(async () => {
@@ -22,7 +26,11 @@ describe("getOperationsOverview", () => {
 
   async function customer() {
     return prisma.user.create({
-      data: { role: "CUSTOMER", fullName: "Cliente", phoneE164: `+5585977${String(++seq).padStart(6, "0")}` },
+      data: {
+        role: "CUSTOMER",
+        fullName: "Cliente",
+        phoneE164: `+5585977${String(++seq).padStart(6, "0")}`,
+      },
     });
   }
 
@@ -30,7 +38,12 @@ describe("getOperationsOverview", () => {
     const now = new Date();
     const reviewer = await customer();
     const reviewBooking = await prisma.booking.create({
-      data: { customerId: reviewer.id, serviceId, status: "REVIEW_REQUIRED", addressLine1: "Rua A, 1" },
+      data: {
+        customerId: reviewer.id,
+        serviceId,
+        status: "REVIEW_REQUIRED",
+        addressLine1: "Rua A, 1",
+      },
     });
     await prisma.customerBookingConversation.create({
       data: {
@@ -50,18 +63,49 @@ describe("getOperationsOverview", () => {
     // Revisão necessária por outro motivo (sem cobertura manual) não entra em "cobertura".
     const otherReview = await customer();
     await prisma.booking.create({
-      data: { customerId: otherReview.id, serviceId, status: "REVIEW_REQUIRED" },
+      data: {
+        customerId: otherReview.id,
+        serviceId,
+        status: "REVIEW_REQUIRED",
+      },
     });
 
     await prisma.outboxMessage.createMany({
       data: [
-        { provider: "whatsmiau", recipient: "+5585900000001", type: "TEXT", payload: {}, status: "DEAD_LETTER", idempotencyKey: "ov-dead" },
-        { provider: "whatsmiau", recipient: "+5585900000002", type: "TEXT", payload: {}, status: "FAILED", idempotencyKey: "ov-failed" },
         {
-          provider: "whatsmiau", recipient: "+5585900000003", type: "TEXT", payload: {}, status: "PENDING",
-          idempotencyKey: "ov-old", availableAt: new Date(now.getTime() - 60 * 60 * 1000),
+          provider: "whatsmiau",
+          recipient: "+5585900000001",
+          type: "TEXT",
+          payload: {},
+          status: "DEAD_LETTER",
+          idempotencyKey: "ov-dead",
         },
-        { provider: "whatsmiau", recipient: "+5585900000004", type: "TEXT", payload: {}, status: "SENT", sentAt: now, idempotencyKey: "ov-sent" },
+        {
+          provider: "whatsmiau",
+          recipient: "+5585900000002",
+          type: "TEXT",
+          payload: {},
+          status: "FAILED",
+          idempotencyKey: "ov-failed",
+        },
+        {
+          provider: "whatsmiau",
+          recipient: "+5585900000003",
+          type: "TEXT",
+          payload: {},
+          status: "PENDING",
+          idempotencyKey: "ov-old",
+          availableAt: new Date(now.getTime() - 60 * 60 * 1000),
+        },
+        {
+          provider: "whatsmiau",
+          recipient: "+5585900000004",
+          type: "TEXT",
+          payload: {},
+          status: "SENT",
+          sentAt: now,
+          idempotencyKey: "ov-sent",
+        },
       ],
     });
 
@@ -76,7 +120,10 @@ describe("getOperationsOverview", () => {
       },
     });
 
-    const overview = await getOperationsOverview(prisma, { staleAfterHours: 24, now });
+    const overview = await getOperationsOverview(prisma, {
+      staleAfterHours: 24,
+      now,
+    });
 
     expect(overview.coverageAwaitingValidation).toBe(1);
     expect(overview.conversationsManualReview).toBe(1);

@@ -71,6 +71,10 @@ const STATUS_MAP: Record<
   AWAITING_RESPONSE: { label: "Aguardando resposta", variant: "outline" },
 };
 
+export function statusLabel(status: string): string {
+  return STATUS_MAP[status]?.label ?? status;
+}
+
 export function StatusBadge({
   status,
   className,
