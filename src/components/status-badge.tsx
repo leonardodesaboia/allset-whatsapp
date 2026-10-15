@@ -60,6 +60,7 @@ const STATUS_MAP: Record<
   QUOTE_ACCEPTANCE: { label: "Aceite do orçamento", variant: "warning" },
   ADDRESS: { label: "Endereço", variant: "secondary" },
   MANUAL_REVIEW: { label: "Revisão manual", variant: "warning" },
+  PAUSED: { label: "Pausada", variant: "warning" },
   FINAL_CONFIRMATION: { label: "Confirmação final", variant: "default" },
   // Oportunidades e respostas
   OPEN: { label: "Aberta", variant: "default" },

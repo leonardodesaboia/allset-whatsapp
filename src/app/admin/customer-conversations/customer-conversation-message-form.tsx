@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { MessageSquare, X } from "lucide-react";
 import { sendManualCustomerConversationMessageAction } from "../bookings/actions";
@@ -8,9 +9,13 @@ import { ModalDialog } from "@/components/ui/modal-dialog";
 
 export function CustomerConversationMessageForm({
   conversationId,
+  version,
 }: {
   conversationId: string;
+  version: number;
 }) {
+  const router = useRouter();
+  const [success, setSuccess] = useState(false);
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +28,8 @@ export function CustomerConversationMessageForm({
     try {
       const result = await sendManualCustomerConversationMessageAction(
         conversationId,
-        text
+        text,
+        version
       );
       if (!result.ok) {
         setError(result.error);
@@ -31,6 +37,8 @@ export function CustomerConversationMessageForm({
       }
       setText("");
       setOpen(false);
+      setSuccess(true);
+      router.refresh();
     } catch {
       setError("Não foi possível enviar a mensagem. Tente novamente.");
     } finally {
@@ -40,6 +48,11 @@ export function CustomerConversationMessageForm({
 
   return (
     <>
+      {success && (
+        <p role="status" className="text-xs text-green-700">
+          Mensagem enfileirada; automação pausada.
+        </p>
+      )}
       <button
         type="button"
         onClick={() => setOpen(true)}
@@ -85,7 +98,9 @@ export function CustomerConversationMessageForm({
               rows={5}
               className="w-full resize-none rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
-            <label htmlFor="conversation-customer-message" className="sr-only">Mensagem para o cliente</label>
+            <label htmlFor="conversation-customer-message" className="sr-only">
+              Mensagem para o cliente
+            </label>
 
             {error && (
               <p role="alert" className="text-xs text-red-600">
