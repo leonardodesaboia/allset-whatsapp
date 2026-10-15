@@ -101,7 +101,8 @@ export function isEligibleForOpportunity(
 
   const area = lead.canServeInitialArea;
   if (!area || area === "NAO") return false;
-  if (area === "TALVEZ" && lead.neighborhood !== opportunity.neighborhood) return false;
+  // O bairro do pedido vem de texto livre do cliente: compara sem caixa/acentos.
+  if (area === "TALVEZ" && (!lead.neighborhood || normalizeText(lead.neighborhood) !== normalizeText(opportunity.neighborhood))) return false;
 
   const days = parseDays(lead.availabilityDays);
   const oppDay = fortalezaDate(opportunity.scheduledAt);

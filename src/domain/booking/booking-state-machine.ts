@@ -8,10 +8,13 @@ export const ALLOWED_TRANSITIONS: Record<BookingStatus, BookingStatus[]> = {
   // In the short conversational flow, coverage can be validated before the
   // customer gives the single final confirmation.
   QUOTED: ["QUOTE_ACCEPTED", "COLLECTING_DATA", "REVIEW_REQUIRED", "AWAITING_CUSTOMER_CONFIRMATION", "CANCELLED"],
-  QUOTE_ACCEPTED: ["COLLECTING_DATA", "REVIEW_REQUIRED", "AWAITING_PAYMENT", "CANCELLED"],
+  // A AllSet não cobra pelo serviço: depois do aceite do cliente o pedido segue
+  // direto para o matching. Os estados de pagamento existem só para dados legados.
+  QUOTE_ACCEPTED: ["COLLECTING_DATA", "REVIEW_REQUIRED", "AWAITING_PAYMENT", "MATCHING", "CANCELLED"],
   REVIEW_REQUIRED: ["AWAITING_CUSTOMER_CONFIRMATION", "MATCHING", "CANCELLED"],
-  AWAITING_CUSTOMER_CONFIRMATION: ["COLLECTING_DATA", "AWAITING_PAYMENT", "CANCELLED"],
-  AWAITING_PAYMENT: ["PAID", "PAYMENT_FAILED", "CANCELLED"],
+  AWAITING_CUSTOMER_CONFIRMATION: ["COLLECTING_DATA", "AWAITING_PAYMENT", "MATCHING", "CANCELLED"],
+  // Pedidos que já aguardavam pagamento quando a cobrança deixou de existir.
+  AWAITING_PAYMENT: ["PAID", "PAYMENT_FAILED", "MATCHING", "CANCELLED"],
   PAYMENT_FAILED: ["AWAITING_PAYMENT", "CANCELLED"],
   PAID: ["MATCHING", "REFUND_PENDING"],
   MATCHING: ["PROFESSIONAL_ASSIGNED", "REVIEW_REQUIRED", "ISSUE_OPEN", "CANCELLED"],

@@ -1,5 +1,6 @@
 import {
   Prisma,
+  type Booking,
   type CustomerBookingConversation,
   type PrismaClient,
   type PropertyPricingTier,
@@ -9,18 +10,24 @@ import {
   type CustomerConversationState,
 } from "../../domain/customer/customer-conversation-definition";
 import {
-  parseScheduleDateTime,
   customerScheduleDateChoices,
-  parseScheduleDateChoice,
+  interpretScheduleReply,
   parseScheduleTimeChoice,
   scheduledAtFromFortalezaLocal,
 } from "../../domain/customer/customer-schedule";
+import { extractNeighborhood } from "../../domain/customer/customer-address";
 import { textPayload } from "../../domain/messaging/message";
 import { transitionBookingStatusInTransaction } from "../booking/transition-booking-status.usecase";
 import { recordAuditLog } from "../audit/record-audit-log.usecase";
 import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
+import { notifyOpportunityInTransaction } from "../marketplace/notify-opportunity.usecase";
 import { enqueueCustomerQuestion } from "./customer-question-outbox";
-import { customerBookingSummary } from "../../domain/customer/customer-booking-summary";
+import {
+  customerBookingDetails,
+  customerBookingSummary,
+  estimatedValueText,
+  formatScheduleForCustomer,
+} from "../../domain/customer/customer-booking-summary";
 import { supersedeCustomerPrompts } from "./supersede-customer-prompts";
 import { z } from "zod";
 import { ok, err } from "../../domain/shared/result";
@@ -28,23 +35,6 @@ import { DomainError } from "../../domain/shared/domain-error";
 import { customerResumeStep, isCustomerAdminStep } from "../../domain/customer/customer-admin-controls";
 import type { BookingStatus } from "../../domain/booking/booking-status";
 import { ALLOWED_TRANSITIONS } from "../../domain/booking/booking-state-machine";
-import { env } from "../../env";
-
-function buildPaymentInstructionsText(tier: PropertyPricingTier | null): string {
-  const lines = ["✅ Pedido confirmado! Para finalizar, realize o pagamento via PIX:"];
-  if (env.PIX_KEY) lines.push(`\n🔑 Chave PIX: ${env.PIX_KEY}`);
-  if (tier) lines.push(`💰 Valor: R$ ${(tier.priceCents / 100).toFixed(2).replace(".", ",")}`);
-  lines.push("\nAssim que confirmarmos o recebimento, seu agendamento estará garantido. Você tem até 24 horas para realizar o pagamento.");
-  return lines.join("\n");
-}
-
-function buildPaymentFollowUpText(tier: PropertyPricingTier | null): string {
-  const lines = ["Seu pedido ainda aguarda pagamento. Realize o PIX para confirmar o agendamento:"];
-  if (env.PIX_KEY) lines.push(`\n🔑 Chave PIX: ${env.PIX_KEY}`);
-  if (tier) lines.push(`💰 Valor: R$ ${(tier.priceCents / 100).toFixed(2).replace(".", ",")}`);
-  lines.push("\nApós o pagamento, confirmamos em breve.");
-  return lines.join("\n");
-}
 
 function pricingTierText(tiers: readonly PropertyPricingTier[]): string {
   return [
@@ -54,20 +44,30 @@ function pricingTierText(tiers: readonly PropertyPricingTier[]): string {
   ].join("\n");
 }
 
-function quoteText(booking: {
+/** Confirms what was understood (day, time, estimated value) before moving on. */
+function scheduleConfirmationText(booking: {
+  scheduledAt: Date | null;
   totalCents: number;
   durationMinutes: number | null;
 }): string {
   return [
-    "Este é o valor para a limpeza completa:",
+    booking.scheduledAt
+      ? `Entendi: ${formatScheduleForCustomer(booking.scheduledAt)}.`
+      : "Confira o dia e horário:",
     "",
-    `Valor: R$ ${(booking.totalCents / 100).toFixed(2).replace(".", ",")}`,
+    estimatedValueText(booking.totalCents),
     `Duração prevista: ${booking.durationMinutes ?? 180} minutos`,
+    "",
+    "Está correto?",
+    "",
+    "1 — Confirmar",
+    "2 — Alterar dia ou horário",
   ].join("\n");
 }
 
-function scheduleDateText(): string {
+function scheduleDateText(prefix?: string): string {
   return [
+    ...(prefix ? [prefix, ""] : []),
     "Para qual dia e horário você precisa?",
     "Ex.: amanhã às 14h.",
     "",
@@ -79,6 +79,27 @@ function scheduleDateText(): string {
     ),
   ].join("\n");
 }
+
+function scheduleTimeText(isoDate?: string | null, prefix?: string): string {
+  const day = isoDate ? isoDate.split("-").reverse().slice(0, 2).join("/") : null;
+  return [
+    ...(prefix ? [prefix, ""] : []),
+    day ? `Para ${day}, qual horário você prefere?` : "Qual horário você prefere?",
+    "",
+    "1 — 08:00",
+    "2 — 09:00",
+    "3 — 13:00",
+    "4 — 14:00",
+  ].join("\n");
+}
+
+function unavailableTimeText(hour: number, minute: number): string {
+  const label = minute === 0 ? `${hour}h` : `${hour}h${String(minute).padStart(2, "0")}`;
+  return `Não atendemos às ${label}. Os horários disponíveis são 8h, 9h, 13h ou 14h.`;
+}
+
+const ADDRESS_PROMPT =
+  "Agora envie o endereço completo do atendimento (rua, número e bairro).";
 
 function asInputJson(
   value: Prisma.JsonValue
@@ -108,16 +129,13 @@ async function enqueueQuestion(
 async function enqueueManualReviewNotice(
   tx: Prisma.TransactionClient,
   conversation: CustomerBookingConversation,
-  recipient: string,
-  reason: "COVERAGE_REVIEW" | "CONFIGURATION_MISSING"
+  recipient: string
 ): Promise<void> {
   await enqueueOutboundMessage(tx, {
     provider: conversation.provider,
     recipient,
     payload: textPayload(
-      reason === "COVERAGE_REVIEW"
-        ? "Recebemos seus dados. Vamos validar o endereço e continuaremos por aqui."
-        : "Recebemos seu pedido. Nossa equipe vai continuar o atendimento por aqui em breve."
+      "Recebemos seu pedido. Nossa equipe vai continuar o atendimento por aqui em breve."
     ),
     idempotencyKey: `customer-booking:${conversation.id}:manual-review:v${conversation.version}:${conversation.updatedAt.getTime()}`,
     correlationId: conversation.id,
@@ -225,38 +243,40 @@ async function resendCurrentQuestion(
     );
     return;
   }
+  if (state === "SCHEDULE_TIME") {
+    await enqueueQuestion(
+      tx,
+      conversation,
+      recipient,
+      state,
+      scheduleTimeText(conversation.pendingScheduleDate),
+      actor,
+    );
+    return;
+  }
   if (state === "QUOTE_ACCEPTANCE" && conversation.bookingId) {
     const booking = await tx.booking.findUnique({
       where: { id: conversation.bookingId },
-      include: { propertyPricingTier: true },
     });
-    if (booking?.propertyPricingTier) {
+    if (booking?.scheduledAt) {
       await enqueueQuestion(
         tx,
         conversation,
         recipient,
         state,
-        `${quoteText(booking)}\n\nQuer seguir com este valor?\n\n1 — Confirmar e continuar\n2 — Alterar informações`,
+        scheduleConfirmationText(booking),
         actor,
       );
       return;
     }
   }
   if (state === "ADDRESS") {
-    await enqueueQuestion(
-      tx,
-      conversation,
-      recipient,
-      state,
-      "Envie o endereço completo do atendimento para validarmos a área atendida.",
-      actor,
-    );
+    await enqueueQuestion(tx, conversation, recipient, state, ADDRESS_PROMPT, actor);
     return;
   }
   if (state === "FINAL_CONFIRMATION" && conversation.bookingId) {
     const booking = await tx.booking.findUnique({
       where: { id: conversation.bookingId },
-      include: { propertyPricingTier: true },
     });
     if (booking) {
       await enqueueQuestion(
@@ -270,14 +290,12 @@ async function resendCurrentQuestion(
       return;
     }
   }
-  if (state === "AWAITING_PAYMENT" || state === "MANUAL_REVIEW") {
+  if (state === "MANUAL_REVIEW") {
     await enqueueOutboundMessage(tx, {
       provider: conversation.provider,
       recipient,
       payload: textPayload(
-        state === "AWAITING_PAYMENT"
-          ? buildPaymentInstructionsText(conversation.bookingId ? (await tx.booking.findUnique({ where: { id: conversation.bookingId }, include: { propertyPricingTier: true } }))?.propertyPricingTier ?? null : null)
-          : "Seu pedido está sendo revisado. Vamos continuar por aqui assim que possível."
+        "Seu pedido está sendo revisado. Vamos continuar por aqui assim que possível."
       ),
       idempotencyKey: `customer-booking:${conversation.id}:${state}:resumed:v${conversation.version}:${conversation.updatedAt.getTime()}`,
       correlationId: conversation.id,
@@ -286,6 +304,226 @@ async function resendCurrentQuestion(
     return;
   }
   await enqueueQuestion(tx, conversation, recipient, state, undefined, actor);
+}
+
+/**
+ * Hands the booking to matching: the opportunity is offered to professionals
+ * in the same transaction that closes the customer conversation. There is no
+ * payment step — AllSet only connects customer and professional.
+ */
+async function sendBookingToMatching(
+  tx: Prisma.TransactionClient,
+  conversation: CustomerBookingConversation,
+  recipient: string,
+  booking: Booking,
+  neighborhood: string,
+  options: { prefix?: string } = {},
+) {
+  const actor = "system:customer-conversation";
+  // Bring bookings that are still collecting data to the state matching expects.
+  let status = booking.status as BookingStatus;
+  if (status === "COLLECTING_DATA") {
+    const quoted = await transitionBookingStatusInTransaction(tx, {
+      bookingId: booking.id,
+      targetStatus: "QUOTED",
+      actor,
+    });
+    if (!quoted.ok) throw quoted.error;
+    status = "QUOTED";
+  }
+  if (status === "QUOTED") {
+    const confirmed = await transitionBookingStatusInTransaction(tx, {
+      bookingId: booking.id,
+      targetStatus: "AWAITING_CUSTOMER_CONFIRMATION",
+      actor,
+      reason: "Pedido completo; segue direto para as profissionais",
+    });
+    if (!confirmed.ok) throw confirmed.error;
+  }
+  const prepared = await tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      neighborhood,
+      // Sem validação de cobertura: o endereço é registrado e o pedido segue.
+      coverageValidatedAt: booking.coverageValidatedAt ?? new Date(),
+      outsideCoverageArea: false,
+      professionalPaymentCents:
+        booking.professionalPaymentCents ??
+        (booking.totalCents > 0 ? booking.totalCents : null),
+    },
+  });
+  const result = await notifyOpportunityInTransaction(tx, {
+    bookingId: booking.id,
+    actor,
+  });
+  const updated = await tx.customerBookingConversation.update({
+    where: { id: conversation.id },
+    data: {
+      state: "COMPLETED",
+      lastQuestionKey: "COMPLETED",
+      pendingScheduleDate: null,
+      lastInboundAt: new Date(),
+      version: { increment: 1 },
+    },
+  });
+  if (result.dispatched) {
+    await enqueueOutboundMessage(tx, {
+      provider: updated.provider,
+      recipient,
+      payload: textPayload(
+        [
+          ...(options.prefix ? [options.prefix, ""] : []),
+          "Pronto! Enviamos o seu pedido para as profissionais disponíveis:",
+          "",
+          ...customerBookingDetails(prepared),
+          "",
+          "Assim que uma delas aceitar, você recebe aqui o nome e o WhatsApp dela para combinarem direto o horário e o valor.",
+          "A AllSet apenas conecta vocês; não há cobrança pela plataforma.",
+        ].join("\n")
+      ),
+      idempotencyKey: `customer-booking:${updated.id}:matching-requested:${updated.updatedAt.getTime()}`,
+      correlationId: updated.id,
+      actor,
+    });
+  }
+  return {
+    advanced: true,
+    state: "COMPLETED" as const,
+    bookingId: booking.id,
+    dispatched: result.dispatched,
+    reason: undefined,
+  };
+}
+
+/**
+ * After the address is known: ask the bairro only when it cannot be read from
+ * the address, otherwise go straight to matching.
+ */
+async function continueAfterAddress(
+  tx: Prisma.TransactionClient,
+  conversation: CustomerBookingConversation,
+  recipient: string,
+  bookingId: string,
+  options: { prefix?: string } = {},
+) {
+  const booking = await tx.booking.findUniqueOrThrow({ where: { id: bookingId } });
+  const neighborhood =
+    booking.neighborhood ??
+    (booking.addressLine1 ? extractNeighborhood(booking.addressLine1) : undefined);
+  if (!neighborhood) {
+    const updated = await tx.customerBookingConversation.update({
+      where: { id: conversation.id },
+      data: {
+        state: "NEIGHBORHOOD",
+        lastQuestionKey: "NEIGHBORHOOD",
+        lastInboundAt: new Date(),
+        version: { increment: 1 },
+      },
+    });
+    await enqueueQuestion(tx, updated, recipient, "NEIGHBORHOOD");
+    return { advanced: true, state: "NEIGHBORHOOD" as const, reason: undefined };
+  }
+  return sendBookingToMatching(tx, conversation, recipient, booking, neighborhood, options);
+}
+
+/**
+ * Stores a day/time the customer asked for and asks them to confirm exactly
+ * what was understood. Anything not understood or in the past is asked again.
+ */
+async function proposeSchedule(
+  tx: Prisma.TransactionClient,
+  conversation: CustomerBookingConversation,
+  recipient: string,
+  date: string,
+  time: string,
+) {
+  const retry = (prefix: string) =>
+    recordInvalidAnswer(
+      tx,
+      conversation,
+      recipient,
+      "SCHEDULE_DATE",
+      (updated) =>
+        enqueueQuestion(tx, updated, recipient, "SCHEDULE_DATE", scheduleDateText(prefix)),
+      {
+        pendingScheduleDate: null,
+        state: "SCHEDULE_DATE",
+        lastQuestionKey: "SCHEDULE_DATE",
+      }
+    );
+  const scheduledAt = scheduledAtFromFortalezaLocal(date, time);
+  if (!scheduledAt || scheduledAt <= new Date() || !conversation.bookingId) {
+    return retry("Esse dia e horário não estão disponíveis (já passaram ou são inválidos).");
+  }
+  const booking = await tx.booking.findUnique({
+    where: { id: conversation.bookingId },
+    include: { propertyPricingTier: true },
+  });
+  if (!booking?.propertyPricingTier) {
+    if (booking) {
+      const review = await transitionBookingStatusInTransaction(tx, {
+        bookingId: booking.id,
+        targetStatus: "REVIEW_REQUIRED",
+        actor: "system:customer-conversation",
+        reason: "Configuração de preço removida durante o agendamento",
+      });
+      if (!review.ok) throw review.error;
+    }
+    const updated = await tx.customerBookingConversation.update({
+      where: { id: conversation.id },
+      data: {
+        state: "MANUAL_REVIEW",
+        lastQuestionKey: "MANUAL_REVIEW",
+        lastInboundAt: new Date(),
+      },
+    });
+    await enqueueOutboundMessage(tx, {
+      provider: updated.provider,
+      recipient,
+      payload: textPayload(
+        "Houve uma atualização nos serviços disponíveis. Nossa equipe entrará em contato para concluir seu agendamento."
+      ),
+      idempotencyKey: `customer-booking:${updated.id}:booking-misconfigured:${updated.updatedAt.getTime()}`,
+      correlationId: updated.id,
+      actor: "system:customer-conversation",
+    });
+    return { advanced: false, reason: "BOOKING_NOT_CONFIGURED" as const };
+  }
+  const withSchedule = await tx.booking.update({
+    where: { id: booking.id },
+    data: { scheduledAt, quotedAt: new Date() },
+  });
+  if (booking.status !== "QUOTED") {
+    const quoted = await transitionBookingStatusInTransaction(tx, {
+      bookingId: booking.id,
+      targetStatus: "QUOTED",
+      actor: "system:customer-conversation",
+    });
+    if (!quoted.ok) throw quoted.error;
+  }
+  const updated = await tx.customerBookingConversation.update({
+    where: { id: conversation.id },
+    data: {
+      pendingScheduleDate: null,
+      state: "QUOTE_ACCEPTANCE",
+      lastQuestionKey: "QUOTE_ACCEPTANCE",
+      lastInboundAt: new Date(),
+      version: { increment: 1 },
+    },
+  });
+  await enqueueQuestion(
+    tx,
+    updated,
+    recipient,
+    "QUOTE_ACCEPTANCE",
+    scheduleConfirmationText(withSchedule)
+  );
+  return {
+    advanced: true,
+    state: "QUOTE_ACCEPTANCE" as const,
+    bookingId: booking.id,
+    reason: undefined,
+  };
 }
 
 const adminControlSchema = z.object({
@@ -337,7 +575,7 @@ export async function controlCustomerConversation(
             ? "COMPLETED"
             : "INTRODUCTION";
 
-    // Validate prerequisites before writing anything. Never fabricate customer consent or coverage.
+    // Validate prerequisites before writing anything. Never fabricate customer consent.
     if (target === "PROPERTY_CHARACTERISTICS" && !(await activePricingTiers(tx)).length)
       return err("Configure as opções de preço antes de retomar esta etapa.");
     const needsBooking = [
@@ -345,9 +583,9 @@ export async function controlCustomerConversation(
       "SCHEDULE_TIME",
       "QUOTE_ACCEPTANCE",
       "ADDRESS",
+      "NEIGHBORHOOD",
       "FINAL_CONFIRMATION",
       "EDIT_SELECTION",
-      "AWAITING_PAYMENT",
     ].includes(target);
     if (needsBooking && !booking)
       return err(
@@ -364,15 +602,9 @@ export async function controlCustomerConversation(
       return err("Esta etapa exige imóvel e horário definidos.");
     if (
       ["FINAL_CONFIRMATION", "EDIT_SELECTION"].includes(target) &&
-      (!booking?.addressLine1 ||
-        !booking.coverageValidatedAt ||
-        booking.outsideCoverageArea)
+      !booking?.addressLine1
     )
-      return err(
-        "Valide a cobertura do endereço em Agendamentos antes de continuar."
-      );
-    if (target === "AWAITING_PAYMENT" && booking?.status !== "AWAITING_PAYMENT")
-      return err("O cliente precisa confirmar o pedido antes do pagamento.");
+      return err("Esta etapa exige o endereço do cliente.");
 
     let bookingTarget: BookingStatus | null = null;
     if (
@@ -403,7 +635,7 @@ export async function controlCustomerConversation(
       if (["FINAL_CONFIRMATION", "EDIT_SELECTION"].includes(target))
         bookingTarget = "AWAITING_CUSTOMER_CONFIRMATION";
       if (
-        target === "ADDRESS" &&
+        ["ADDRESS", "NEIGHBORHOOD"].includes(target) &&
         [
           "PAID",
           "CANCELLED",
@@ -619,7 +851,7 @@ export async function startCustomerBookingConversation(
         pricingTierText(tiers)
       );
     if (!active && !needsName && !tiers.length) {
-      await enqueueManualReviewNotice(tx, conversation, customer.phoneE164, "CONFIGURATION_MISSING");
+      await enqueueManualReviewNotice(tx, conversation, customer.phoneE164);
       return { started: true as const, conversation, reason: "PRICING_NOT_CONFIGURED" as const };
     }
     return { started: true as const, conversation };
@@ -784,7 +1016,19 @@ export async function processCustomerBookingAnswer(
       return { advanced: false, reason: "STOPPED" as const };
     }
 
+    // Conversas que pararam em revisão de cobertura antes de a validação
+    // deixar de existir: no próximo contato do cliente seguem para o matching.
     if (current === "MANUAL_REVIEW") {
+      const stuck = conversation.bookingId
+        ? await tx.booking.findUnique({ where: { id: conversation.bookingId } })
+        : null;
+      if (
+        stuck?.addressLine1 &&
+        stuck.scheduledAt &&
+        ["REVIEW_REQUIRED", "AWAITING_CUSTOMER_CONFIRMATION", "QUOTE_ACCEPTED"].includes(stuck.status)
+      ) {
+        return continueAfterAddress(tx, conversation, customer.phoneE164, stuck.id);
+      }
       const updated = await tx.customerBookingConversation.update({
         where: { id: conversation.id },
         data: { lastInboundAt: new Date() },
@@ -801,28 +1045,15 @@ export async function processCustomerBookingAnswer(
       });
       return { advanced: false, reason: "MANUAL_REVIEW" as const };
     }
+    // Pedidos que aguardavam pagamento: a plataforma não cobra mais, então
+    // seguem direto para as profissionais.
     if (current === "AWAITING_PAYMENT") {
-      const bookingWithTier = conversation.bookingId
-        ? await tx.booking.findUnique({
-            where: { id: conversation.bookingId },
-            include: { propertyPricingTier: true },
-          })
-        : null;
-      const updated = await tx.customerBookingConversation.update({
-        where: { id: conversation.id },
-        data: { lastInboundAt: new Date() },
-      });
-      await enqueueOutboundMessage(tx, {
-        provider: updated.provider,
-        recipient: customer.phoneE164,
-        payload: textPayload(
-          buildPaymentFollowUpText(bookingWithTier?.propertyPricingTier ?? null)
-        ),
-        idempotencyKey: `customer-booking:${updated.id}:awaiting-payment-follow-up:${updated.updatedAt.getTime()}`,
-        correlationId: updated.id,
-        actor: "system:customer-conversation",
-      });
-      return { advanced: false, reason: "AWAITING_PAYMENT" as const };
+      if (conversation.bookingId) {
+        return continueAfterAddress(tx, conversation, customer.phoneE164, conversation.bookingId, {
+          prefix: "Não é mais necessário pagamento pela AllSet. Seu pedido segue direto para as profissionais.",
+        });
+      }
+      return { advanced: false, reason: "CONVERSATION_NOT_ACTIVE" as const };
     }
 
     if (current === "INTRODUCTION") {
@@ -894,7 +1125,7 @@ export async function processCustomerBookingAnswer(
         },
       });
       if (!tiers.length) {
-        await enqueueManualReviewNotice(tx, updated, customer.phoneE164, "CONFIGURATION_MISSING");
+        await enqueueManualReviewNotice(tx, updated, customer.phoneE164);
         return { advanced: false, reason: "PRICING_NOT_CONFIGURED" as const };
       }
       await enqueueQuestion(
@@ -968,7 +1199,7 @@ export async function processCustomerBookingAnswer(
             lastInboundAt: new Date(),
           },
         });
-        await enqueueManualReviewNotice(tx, updated, customer.phoneE164, "CONFIGURATION_MISSING");
+        await enqueueManualReviewNotice(tx, updated, customer.phoneE164);
         return { advanced: false, reason: "SERVICE_NOT_CONFIGURED" as const };
       }
       const booking = conversation.bookingId
@@ -1035,273 +1266,120 @@ export async function processCustomerBookingAnswer(
     }
 
     if (current === "SCHEDULE_DATE") {
-      const naturalSlot = parseScheduleDateTime(input.text);
-      if (naturalSlot && conversation.bookingId) {
-        const scheduledAt = scheduledAtFromFortalezaLocal(
-          naturalSlot.date,
-          naturalSlot.time
-        );
-        const booking = await tx.booking.findUnique({
-          where: { id: conversation.bookingId },
-          include: { propertyPricingTier: true },
-        });
-        if (
-          scheduledAt &&
-          scheduledAt > new Date() &&
-          booking?.propertyPricingTier
-        ) {
-          await tx.booking.update({
-            where: { id: booking.id },
-            data: { scheduledAt },
-          });
-          const quoted = await transitionBookingStatusInTransaction(tx, {
-            bookingId: booking.id,
-            targetStatus: "QUOTED",
-            actor: "system:customer-conversation",
-          });
-          if (!quoted.ok) throw quoted.error;
-          await tx.booking.update({
-            where: { id: booking.id },
-            data: { quotedAt: new Date() },
-          });
-          if (
-            booking.addressLine1 &&
-            booking.coverageValidatedAt &&
-            !booking.outsideCoverageArea
-          ) {
-            const awaitingConfirmation =
-              await transitionBookingStatusInTransaction(tx, {
-                bookingId: booking.id,
-                targetStatus: "AWAITING_CUSTOMER_CONFIRMATION",
-                actor: "system:customer-conversation",
-                reason: "Horário alterado; endereço já validado",
-              });
-            if (!awaitingConfirmation.ok) throw awaitingConfirmation.error;
-            const updated = await tx.customerBookingConversation.update({
-              where: { id: conversation.id },
-              data: {
-                pendingScheduleDate: null,
-                state: "FINAL_CONFIRMATION",
-                lastQuestionKey: "FINAL_CONFIRMATION",
-                lastInboundAt: new Date(),
-                version: { increment: 1 },
-              },
-            });
-            await resendCurrentQuestion(
-              tx,
-              updated,
-              customer.phoneE164,
-              "FINAL_CONFIRMATION"
-            );
-            return {
-              advanced: true,
-              state: "FINAL_CONFIRMATION" as const,
-              bookingId: booking.id,
-            };
-          }
-          const updated = await tx.customerBookingConversation.update({
-            where: { id: conversation.id },
-            data: {
-              pendingScheduleDate: null,
-              state: "ADDRESS",
-              lastQuestionKey: "ADDRESS",
-              lastInboundAt: new Date(),
-              version: { increment: 1 },
-            },
-          });
-          await enqueueQuestion(
-            tx,
-            updated,
-            customer.phoneE164,
-            "ADDRESS",
-            `${quoteText(booking)}\n\nAgora envie o endereço completo para validarmos a área atendida.`
-          );
-          return {
-            advanced: true,
-            state: "ADDRESS" as const,
-            bookingId: booking.id,
-          };
-        }
-      }
-      const scheduleDate = parseScheduleDateChoice(input.text);
-      if (!scheduleDate || !conversation.bookingId) {
-        return recordInvalidAnswer(
+      const understood = interpretScheduleReply(input.text);
+      if (understood.status === "slot" && conversation.bookingId) {
+        return proposeSchedule(
           tx,
           conversation,
           customer.phoneE164,
-          "SCHEDULE_DATE",
-          (updated) =>
-            enqueueQuestion(
-              tx,
-              updated,
-              customer.phoneE164,
-              "SCHEDULE_DATE",
-              scheduleDateText()
-            )
+          understood.date,
+          understood.time
         );
       }
-      const updated = await tx.customerBookingConversation.update({
-        where: { id: conversation.id },
-        data: {
-          pendingScheduleDate: scheduleDate,
-          state: "SCHEDULE_TIME",
-          lastQuestionKey: "SCHEDULE_TIME",
-          lastInboundAt: new Date(),
-          version: { increment: 1 },
-        },
-      });
-      await enqueueQuestion(tx, updated, customer.phoneE164, "SCHEDULE_TIME");
-      return { advanced: true, state: "SCHEDULE_TIME" as const };
+      if (understood.status === "date_only" && conversation.bookingId) {
+        const updated = await tx.customerBookingConversation.update({
+          where: { id: conversation.id },
+          data: {
+            pendingScheduleDate: understood.date,
+            state: "SCHEDULE_TIME",
+            lastQuestionKey: "SCHEDULE_TIME",
+            misunderstandingCount: 0,
+            misunderstandingState: null,
+            lastInboundAt: new Date(),
+            version: { increment: 1 },
+          },
+        });
+        await enqueueQuestion(
+          tx,
+          updated,
+          customer.phoneE164,
+          "SCHEDULE_TIME",
+          scheduleTimeText(understood.date)
+        );
+        return { advanced: true, state: "SCHEDULE_TIME" as const };
+      }
+      const prefix =
+        understood.status === "time_unavailable"
+          ? unavailableTimeText(understood.hour, understood.minute)
+          : understood.status === "time_only"
+            ? `Entendi o horário das ${Number(understood.time.slice(0, 2))}h, mas preciso saber o dia.`
+            : "Não consegui entender o dia e o horário.";
+      return recordInvalidAnswer(
+        tx,
+        conversation,
+        customer.phoneE164,
+        "SCHEDULE_DATE",
+        (updated) =>
+          enqueueQuestion(
+            tx,
+            updated,
+            customer.phoneE164,
+            "SCHEDULE_DATE",
+            scheduleDateText(prefix)
+          )
+      );
     }
 
     if (current === "SCHEDULE_TIME") {
-      const scheduleTime = parseScheduleTimeChoice(input.text);
-      if (
-        !scheduleTime ||
-        !conversation.pendingScheduleDate ||
-        !conversation.bookingId
-      ) {
+      if (!conversation.pendingScheduleDate || !conversation.bookingId) {
         return recordInvalidAnswer(
           tx,
           conversation,
           customer.phoneE164,
           "SCHEDULE_TIME",
           (updated) =>
-            enqueueQuestion(tx, updated, customer.phoneE164, "SCHEDULE_TIME")
+            enqueueQuestion(
+              tx,
+              updated,
+              customer.phoneE164,
+              "SCHEDULE_TIME",
+              scheduleTimeText(updated.pendingScheduleDate)
+            )
         );
       }
-      const scheduledAt = scheduledAtFromFortalezaLocal(
-        conversation.pendingScheduleDate,
-        scheduleTime
-      );
-      if (!scheduledAt || scheduledAt <= new Date()) {
+      // A reply that carries its own day ("amanhã 14h") wins; otherwise the
+      // answer is the time for the day already chosen.
+      const understood = interpretScheduleReply(input.text);
+      if (understood.status === "slot") {
+        return proposeSchedule(
+          tx,
+          conversation,
+          customer.phoneE164,
+          understood.date,
+          understood.time
+        );
+      }
+      const scheduleTime =
+        understood.status === "time_unavailable"
+          ? undefined
+          : parseScheduleTimeChoice(input.text);
+      if (!scheduleTime) {
+        const prefix =
+          understood.status === "time_unavailable"
+            ? unavailableTimeText(understood.hour, understood.minute)
+            : "Não consegui entender o horário.";
         return recordInvalidAnswer(
           tx,
           conversation,
           customer.phoneE164,
-          "SCHEDULE_DATE",
+          "SCHEDULE_TIME",
           (updated) =>
             enqueueQuestion(
               tx,
               updated,
               customer.phoneE164,
-              "SCHEDULE_DATE",
-              scheduleDateText()
-            ),
-          {
-            pendingScheduleDate: null,
-            state: "SCHEDULE_DATE",
-            lastQuestionKey: "SCHEDULE_DATE",
-          }
+              "SCHEDULE_TIME",
+              scheduleTimeText(updated.pendingScheduleDate, prefix)
+            )
         );
       }
-      const booking = await tx.booking.findUnique({
-        where: { id: conversation.bookingId },
-        include: { propertyPricingTier: true },
-      });
-      if (!booking?.propertyPricingTier) {
-        if (booking) {
-          const review = await transitionBookingStatusInTransaction(tx, {
-            bookingId: booking.id,
-            targetStatus: "REVIEW_REQUIRED",
-            actor: "system:customer-conversation",
-            reason: "Configuração de preço removida durante o agendamento",
-          });
-          if (!review.ok) throw review.error;
-        }
-        const updated = await tx.customerBookingConversation.update({
-          where: { id: conversation.id },
-          data: {
-            state: "MANUAL_REVIEW",
-            lastQuestionKey: "MANUAL_REVIEW",
-            lastInboundAt: new Date(),
-          },
-        });
-        await enqueueOutboundMessage(tx, {
-          provider: updated.provider,
-          recipient: customer.phoneE164,
-          payload: textPayload(
-            "Houve uma atualização nos serviços disponíveis. Nossa equipe entrará em contato para concluir seu agendamento."
-          ),
-          idempotencyKey: `customer-booking:${updated.id}:booking-misconfigured:${updated.updatedAt.getTime()}`,
-          correlationId: updated.id,
-          actor: "system:customer-conversation",
-        });
-        return { advanced: false, reason: "BOOKING_NOT_CONFIGURED" as const };
-      }
-      await tx.booking.update({
-        where: { id: booking.id },
-        data: { scheduledAt },
-      });
-      const quoted = await transitionBookingStatusInTransaction(tx, {
-        bookingId: booking.id,
-        targetStatus: "QUOTED",
-        actor: "system:customer-conversation",
-      });
-      if (!quoted.ok) throw quoted.error;
-      await tx.booking.update({
-        where: { id: booking.id },
-        data: { quotedAt: new Date() },
-      });
-      if (
-        booking.addressLine1 &&
-        booking.coverageValidatedAt &&
-        !booking.outsideCoverageArea
-      ) {
-        const awaitingConfirmation = await transitionBookingStatusInTransaction(
-          tx,
-          {
-            bookingId: booking.id,
-            targetStatus: "AWAITING_CUSTOMER_CONFIRMATION",
-            actor: "system:customer-conversation",
-            reason: "Horário alterado; endereço já validado",
-          }
-        );
-        if (!awaitingConfirmation.ok) throw awaitingConfirmation.error;
-        const updated = await tx.customerBookingConversation.update({
-          where: { id: conversation.id },
-          data: {
-            pendingScheduleDate: null,
-            state: "FINAL_CONFIRMATION",
-            lastQuestionKey: "FINAL_CONFIRMATION",
-            lastInboundAt: new Date(),
-            version: { increment: 1 },
-          },
-        });
-        await resendCurrentQuestion(
-          tx,
-          updated,
-          customer.phoneE164,
-          "FINAL_CONFIRMATION"
-        );
-        return {
-          advanced: true,
-          state: "FINAL_CONFIRMATION" as const,
-          bookingId: booking.id,
-        };
-      }
-      const updated = await tx.customerBookingConversation.update({
-        where: { id: conversation.id },
-        data: {
-          pendingScheduleDate: null,
-          state: "QUOTE_ACCEPTANCE",
-          lastQuestionKey: "QUOTE_ACCEPTANCE",
-          lastInboundAt: new Date(),
-          version: { increment: 1 },
-        },
-      });
-      await enqueueQuestion(
+      return proposeSchedule(
         tx,
-        updated,
+        conversation,
         customer.phoneE164,
-        "QUOTE_ACCEPTANCE",
-        `${quoteText(booking)}\n\nQuer seguir com este valor?\n\n1 — Confirmar e continuar\n2 — Alterar informações`
+        conversation.pendingScheduleDate,
+        scheduleTime
       );
-      return {
-        advanced: true,
-        state: "QUOTE_ACCEPTANCE" as const,
-        bookingId: booking.id,
-      };
     }
 
     if (current === "QUOTE_ACCEPTANCE") {
@@ -1313,14 +1391,21 @@ export async function processCustomerBookingAnswer(
           bookingId: conversation.bookingId,
           targetStatus: "COLLECTING_DATA",
           actor: "customer:whatsapp",
-          reason: "Cliente solicitou alteração no orçamento",
+          reason: "Cliente solicitou alteração de dia ou horário",
         });
         if (!collecting.ok) throw collecting.error;
+        await tx.booking.update({
+          where: { id: conversation.bookingId },
+          data: { scheduledAt: null },
+        });
         const updated = await tx.customerBookingConversation.update({
           where: { id: conversation.id },
           data: {
-            state: "PROPERTY_CHARACTERISTICS",
-            lastQuestionKey: "PROPERTY_CHARACTERISTICS",
+            pendingScheduleDate: null,
+            state: "SCHEDULE_DATE",
+            lastQuestionKey: "SCHEDULE_DATE",
+            misunderstandingCount: 0,
+            misunderstandingState: null,
             lastInboundAt: new Date(),
             version: { increment: 1 },
           },
@@ -1329,16 +1414,15 @@ export async function processCustomerBookingAnswer(
           tx,
           updated,
           customer.phoneE164,
-          "PROPERTY_CHARACTERISTICS",
-          pricingTierText(await activePricingTiers(tx))
+          "SCHEDULE_DATE",
+          scheduleDateText()
         );
-        return { advanced: true, state: "PROPERTY_CHARACTERISTICS" as const };
+        return { advanced: true, state: "SCHEDULE_DATE" as const };
       }
       if (answer !== "ACCEPT" || !conversation.bookingId) {
         const booking = conversation.bookingId
           ? await tx.booking.findUnique({
               where: { id: conversation.bookingId },
-              include: { propertyPricingTier: true },
             })
           : null;
         return recordInvalidAnswer(
@@ -1346,31 +1430,43 @@ export async function processCustomerBookingAnswer(
           conversation,
           customer.phoneE164,
           "QUOTE_ACCEPTANCE",
-          (updated) => {
-            const text = booking?.propertyPricingTier
-              ? `${quoteText(booking)}\n\nQuer seguir com este valor?\n\n1 — Confirmar e continuar\n2 — Alterar informações`
-              : undefined;
-            return enqueueQuestion(
+          (updated) =>
+            enqueueQuestion(
               tx,
               updated,
               customer.phoneE164,
               "QUOTE_ACCEPTANCE",
-              text
-            );
-          }
+              booking?.scheduledAt ? scheduleConfirmationText(booking) : undefined
+            )
         );
       }
-      const accepted = await transitionBookingStatusInTransaction(tx, {
-        bookingId: conversation.bookingId,
-        targetStatus: "QUOTE_ACCEPTED",
-        actor: "customer:whatsapp",
+      const pending = await tx.booking.findUniqueOrThrow({
+        where: { id: conversation.bookingId },
       });
-      if (!accepted.ok) throw accepted.error;
+      if (pending.status === "QUOTED") {
+        const accepted = await transitionBookingStatusInTransaction(tx, {
+          bookingId: conversation.bookingId,
+          targetStatus: "QUOTE_ACCEPTED",
+          actor: "customer:whatsapp",
+        });
+        if (!accepted.ok) throw accepted.error;
+      }
+      // Customers editing only the schedule already gave the address.
+      if (pending.addressLine1) {
+        return continueAfterAddress(
+          tx,
+          conversation,
+          customer.phoneE164,
+          conversation.bookingId
+        );
+      }
       const updated = await tx.customerBookingConversation.update({
         where: { id: conversation.id },
         data: {
           state: "ADDRESS",
           lastQuestionKey: "ADDRESS",
+          misunderstandingCount: 0,
+          misunderstandingState: null,
           lastInboundAt: new Date(),
           version: { increment: 1 },
         },
@@ -1380,7 +1476,7 @@ export async function processCustomerBookingAnswer(
         provider: updated.provider,
         recipient: customer.phoneE164,
         state: "ADDRESS",
-        text: "Agora envie o endereço completo do atendimento. Ele será usado apenas para validar a área atendida.",
+        text: ADDRESS_PROMPT,
         idempotencyKey: `customer-booking:${updated.id}:ADDRESS:${updated.updatedAt.getTime()}`,
       });
       return { advanced: true, state: "ADDRESS" as const };
@@ -1404,43 +1500,56 @@ export async function processCustomerBookingAnswer(
               provider: updated.provider,
               recipient: customer.phoneE164,
               state: "ADDRESS",
-              text: "Envie o endereço completo do atendimento para validarmos a área atendida.",
+              text: `Não consegui ler o endereço. ${ADDRESS_PROMPT}`,
               idempotencyKey: `customer-booking:${updated.id}:ADDRESS:retry:${updated.updatedAt.getTime()}`,
             })
         );
       }
+      // O endereço é guardado no pedido, sem etapa de validação de cobertura:
+      // o pedido segue direto para as profissionais.
       await tx.booking.update({
         where: { id: conversation.bookingId },
         data: {
           addressLine1: address,
-          coverageValidatedAt: null,
+          coverageValidatedAt: new Date(),
           outsideCoverageArea: false,
-          neighborhood: null,
-          professionalPaymentCents: null,
+          neighborhood: extractNeighborhood(address) ?? null,
         },
       });
-      const booking = await tx.booking.findUniqueOrThrow({ where: { id: conversation.bookingId } });
-      // A resumed review may recollect an address while the booking still awaits coverage.
-      if (booking.status !== "REVIEW_REQUIRED") {
-        const review = await transitionBookingStatusInTransaction(tx, {
-          bookingId: conversation.bookingId,
-          targetStatus: "REVIEW_REQUIRED",
-          actor: "system:customer-conversation",
-          reason: "Endereço aguarda validação de cobertura",
-        });
-        if (!review.ok) throw review.error;
+      return continueAfterAddress(
+        tx,
+        conversation,
+        customer.phoneE164,
+        conversation.bookingId
+      );
+    }
+
+    if (current === "NEIGHBORHOOD") {
+      const neighborhood = input.text.trim();
+      if (
+        neighborhood.length < 2 ||
+        neighborhood.length > 120 ||
+        !conversation.bookingId
+      ) {
+        return recordInvalidAnswer(
+          tx,
+          conversation,
+          customer.phoneE164,
+          "NEIGHBORHOOD",
+          (updated) =>
+            enqueueQuestion(tx, updated, customer.phoneE164, "NEIGHBORHOOD")
+        );
       }
-      const updated = await tx.customerBookingConversation.update({
-        where: { id: conversation.id },
-        data: {
-          state: "MANUAL_REVIEW",
-          lastQuestionKey: "MANUAL_REVIEW",
-          lastInboundAt: new Date(),
-          version: { increment: 1 },
-        },
+      await tx.booking.update({
+        where: { id: conversation.bookingId },
+        data: { neighborhood },
       });
-      await enqueueManualReviewNotice(tx, updated, customer.phoneE164, "COVERAGE_REVIEW");
-      return { advanced: true, state: "MANUAL_REVIEW" as const };
+      return continueAfterAddress(
+        tx,
+        conversation,
+        customer.phoneE164,
+        conversation.bookingId
+      );
     }
 
     if (current === "FINAL_CONFIRMATION") {
@@ -1465,7 +1574,7 @@ export async function processCustomerBookingAnswer(
         );
         return { advanced: true, state: "EDIT_SELECTION" as const };
       }
-      if (answer !== "PAY") {
+      if (answer !== "CONFIRM") {
         return recordInvalidAnswer(
           tx,
           conversation,
@@ -1480,37 +1589,12 @@ export async function processCustomerBookingAnswer(
             )
         );
       }
-      const awaitingPayment = await transitionBookingStatusInTransaction(tx, {
-        bookingId: conversation.bookingId,
-        targetStatus: "AWAITING_PAYMENT",
-        actor: "customer:whatsapp",
-      });
-      if (!awaitingPayment.ok) throw awaitingPayment.error;
-      const bookingWithTier = await tx.booking.findUnique({
-        where: { id: conversation.bookingId },
-        include: { propertyPricingTier: true },
-      });
-      const updated = await tx.customerBookingConversation.update({
-        where: { id: conversation.id },
-        data: {
-          state: "AWAITING_PAYMENT",
-          lastQuestionKey: "AWAITING_PAYMENT",
-          lastInboundAt: new Date(),
-          version: { increment: 1 },
-        },
-      });
-      const paymentText = buildPaymentInstructionsText(
-        bookingWithTier?.propertyPricingTier ?? null
+      return continueAfterAddress(
+        tx,
+        conversation,
+        customer.phoneE164,
+        conversation.bookingId
       );
-      await enqueueOutboundMessage(tx, {
-        provider: updated.provider,
-        recipient: customer.phoneE164,
-        payload: textPayload(paymentText),
-        idempotencyKey: `customer-booking:${updated.id}:AWAITING_PAYMENT:${updated.updatedAt.getTime()}`,
-        correlationId: updated.id,
-        actor: "system:customer-conversation",
-      });
-      return { advanced: true, state: "AWAITING_PAYMENT" as const };
     }
 
     if (current === "EDIT_SELECTION") {
@@ -1584,7 +1668,7 @@ export async function processCustomerBookingAnswer(
         updated,
         customer.phoneE164,
         "ADDRESS",
-        "Envie o novo endereço completo para validarmos a área atendida."
+        "Envie o novo endereço completo (rua, número e bairro)."
       );
       return { advanced: true, state: "ADDRESS" as const };
     }
