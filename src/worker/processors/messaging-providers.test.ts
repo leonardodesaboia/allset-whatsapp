@@ -41,7 +41,7 @@ describe("worker messaging providers", () => {
     else Object.assign(mocks.env, { EVOLUTION_API_KEY: "old", EVOLUTION_BASE_URL: "http://evolution:8080", EVOLUTION_INSTANCE: "AllSet" });
     const { processReceivedAudioProcessor } = await import("./process-received-audio.processor");
     await processReceivedAudioProcessor({ id: "job", data: { inboundMessageId: "audio" } } as Job<ReceivedAudioPayload>);
-    expect(mocks.processAudio).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ download: expect.any(Function) }), expect.anything(), { inboundMessageId: "audio", limit: 1 });
+    expect(mocks.processAudio).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ download: expect.any(Function) }), expect.anything(), expect.objectContaining({ inboundMessageId: "audio", limit: 1, logger: expect.objectContaining({ error: expect.any(Function) }) }));
     expect(mocks.publish).toHaveBeenCalledWith(expect.objectContaining({ jobId: "message-dispatch:audio:audio" }));
   });
   it("propagates audio failure so BullMQ can retry", async () => {

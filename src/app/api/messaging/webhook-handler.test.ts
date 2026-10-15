@@ -34,7 +34,7 @@ describe("WhatsMiau webhook route", () => {
   it("persists text with the new provider and routes the conversation with inline dispatch", async () => {
     expect((await POST(request(event))).status).toBe(200);
     expect(mocks.persist).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ provider: "whatsmiau" }));
-    expect(mocks.route).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ provider: "whatsmiau", inboundMessageId: "inbound" }));
+    expect(mocks.route).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ provider: "whatsmiau", inboundMessageId: "inbound" }), expect.objectContaining({ error: expect.any(Function) }));
     expect(mocks.dispatch).toHaveBeenCalledWith(expect.anything(), expect.anything(), { actor: "system:webhook-dispatch", limit: 20 });
   });
   it("starts audio processing immediately after persistence without awaiting completion", async () => {
@@ -64,7 +64,7 @@ describe("WhatsMiau webhook route", () => {
   it("retains Evolution routing and queue publication during the first rollout deploy", async () => {
     await evolutionPOST(request(event));
     expect(mocks.persist).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ provider: "evolution", recipient: "+5511888888888" }));
-    expect(mocks.route).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ provider: "evolution" }));
+    expect(mocks.route).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ provider: "evolution" }), expect.objectContaining({ error: expect.any(Function) }));
     await evolutionPOST(request({ ...event, data: { ...event.data, message: { audioMessage: { mimetype: "audio/ogg", mediaKey: "old" } } } }));
     expect(mocks.publish).toHaveBeenCalledWith(expect.objectContaining({ payload: { inboundMessageId: "inbound" } }));
     expect(mocks.audio).not.toHaveBeenCalled();

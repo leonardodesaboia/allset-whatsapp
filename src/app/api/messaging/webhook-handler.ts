@@ -90,7 +90,7 @@ export async function handleMessagingWebhook(request: Request, config: { provide
       phoneE164: event.sender,
       text: event.payload.text,
       provider: config.provider,
-    });
+    }, logger);
     // Schedule a delayed reengagement check whenever a recruitment message is processed.
     // Stable jobId = at most one pending check per conversation (BullMQ dedup).
     // The processor re-verifies lastInboundAt before sending, so a late message is safe.

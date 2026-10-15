@@ -15,10 +15,11 @@ describe("pending inbound audio", () => {
       findMany: vi.fn(({ where }: { where: { provider?: string } }) => Promise.resolve(rows.filter((row) => !where.provider || row.provider === where.provider))),
       findUnique: vi.fn(({ where }: { where: { id: string } }) => Promise.resolve(rows.find((row) => row.id === where.id))),
     } } as unknown as PrismaClient;
-    const results = await processPendingReceivedAudio(prisma, new InMemoryStorageProvider(), { download: vi.fn() }, { transcribe: vi.fn() }, { limit: 10 });
+    const logger = { error: vi.fn() };
+    const results = await processPendingReceivedAudio(prisma, new InMemoryStorageProvider(), { download: vi.fn() }, { transcribe: vi.fn() }, { limit: 10, logger });
     expect(results).toEqual([{ inboundMessageId: "new", ok: true }, { inboundMessageId: "old", ok: true }]);
     expect(prisma.inboundMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { type: "AUDIO", processedAt: null, mediaProcessingFailedAt: null } }));
-    expect(routeInboundText).toHaveBeenCalledWith(prisma, expect.objectContaining({ provider: "whatsmiau", inboundMessageId: "new", text: "Oi" }));
-    expect(routeInboundText).toHaveBeenCalledWith(prisma, expect.objectContaining({ provider: "evolution", inboundMessageId: "old" }));
+    expect(routeInboundText).toHaveBeenCalledWith(prisma, expect.objectContaining({ provider: "whatsmiau", inboundMessageId: "new", text: "Oi" }), logger);
+    expect(routeInboundText).toHaveBeenCalledWith(prisma, expect.objectContaining({ provider: "evolution", inboundMessageId: "old" }), logger);
   });
 });

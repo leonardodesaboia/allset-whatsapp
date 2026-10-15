@@ -37,7 +37,7 @@ export async function POST(request: Request) {
       phoneE164: inbound.sender,
       text: transcription.value.text,
       provider: inbound.provider,
-    });
+    }, logger);
     return Response.json({ ok: true, transcription: transcription.value.text, conversation });
   } catch (error) {
     logger.error({ err: error, inboundMessageId: input.inboundMessageId }, "Falha ao transcrever áudio recebido");
