@@ -9,6 +9,7 @@ export interface TransitionBookingStatusInput {
   bookingId: string;
   targetStatus: BookingStatus;
   actor: string;
+  expectedVersion?: number;
   reason?: string;
 }
 
@@ -30,7 +31,7 @@ export async function transitionBookingStatusInTransaction(
   if (!transition.ok) return err(transition.error);
 
   const updateResult = await tx.booking.updateMany({
-    where: { id: input.bookingId, status: current.status },
+    where: { id: input.bookingId, status: current.status, ...(input.expectedVersion !== undefined ? { version: input.expectedVersion } : {}) },
     data: { status: input.targetStatus, version: { increment: 1 } },
   });
   if (!updateResult.count) {

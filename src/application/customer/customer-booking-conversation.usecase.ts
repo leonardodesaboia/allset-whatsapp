@@ -21,6 +21,13 @@ import { recordAuditLog } from "../audit/record-audit-log.usecase";
 import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
 import { enqueueCustomerQuestion } from "./customer-question-outbox";
 import { customerBookingSummary } from "../../domain/customer/customer-booking-summary";
+import { supersedeCustomerPrompts } from "./supersede-customer-prompts";
+import { z } from "zod";
+import { ok, err } from "../../domain/shared/result";
+import { DomainError } from "../../domain/shared/domain-error";
+import { customerResumeStep, isCustomerAdminStep } from "../../domain/customer/customer-admin-controls";
+import type { BookingStatus } from "../../domain/booking/booking-status";
+import { ALLOWED_TRANSITIONS } from "../../domain/booking/booking-state-machine";
 import { env } from "../../env";
 
 function buildPaymentInstructionsText(tier: PropertyPricingTier | null): string {
@@ -84,15 +91,17 @@ async function enqueueQuestion(
   conversation: CustomerBookingConversation,
   recipient: string,
   state: CustomerConversationState,
-  text?: string
+  text?: string,
+  actor = "system:customer-conversation",
 ): Promise<void> {
   await enqueueCustomerQuestion(tx, {
     conversationId: conversation.id,
     provider: conversation.provider,
     recipient,
     state,
+    actor,
     ...(text !== undefined ? { text } : {}),
-    idempotencyKey: `customer-booking:${conversation.id}:${state}:${conversation.updatedAt.getTime()}`,
+    idempotencyKey: `customer-booking:${conversation.id}:${state}:v${conversation.version}:${conversation.updatedAt.getTime()}`,
   });
 }
 
@@ -107,7 +116,7 @@ async function enqueueManualReviewNotice(
     payload: textPayload(
       "Recebemos seus dados. Vamos validar o endereço e continuaremos por aqui."
     ),
-    idempotencyKey: `customer-booking:${conversation.id}:manual-review:${conversation.updatedAt.getTime()}`,
+    idempotencyKey: `customer-booking:${conversation.id}:manual-review:v${conversation.version}:${conversation.updatedAt.getTime()}`,
     correlationId: conversation.id,
     actor: "system:customer-conversation",
   });
@@ -188,7 +197,8 @@ async function resendCurrentQuestion(
   tx: Prisma.TransactionClient,
   conversation: CustomerBookingConversation,
   recipient: string,
-  state: CustomerConversationState
+  state: CustomerConversationState,
+  actor = "system:customer-conversation",
 ): Promise<void> {
   if (state === "PROPERTY_CHARACTERISTICS") {
     await enqueueQuestion(
@@ -196,7 +206,8 @@ async function resendCurrentQuestion(
       conversation,
       recipient,
       state,
-      pricingTierText(await activePricingTiers(tx))
+      pricingTierText(await activePricingTiers(tx)),
+      actor,
     );
     return;
   }
@@ -206,7 +217,8 @@ async function resendCurrentQuestion(
       conversation,
       recipient,
       state,
-      scheduleDateText()
+      scheduleDateText(),
+      actor,
     );
     return;
   }
@@ -221,7 +233,8 @@ async function resendCurrentQuestion(
         conversation,
         recipient,
         state,
-        `${quoteText(booking)}\n\nQuer seguir com este valor?\n\n1 — Confirmar e continuar\n2 — Alterar informações`
+        `${quoteText(booking)}\n\nQuer seguir com este valor?\n\n1 — Confirmar e continuar\n2 — Alterar informações`,
+        actor,
       );
       return;
     }
@@ -232,7 +245,8 @@ async function resendCurrentQuestion(
       conversation,
       recipient,
       state,
-      "Envie o endereço completo do atendimento para validarmos a área atendida."
+      "Envie o endereço completo do atendimento para validarmos a área atendida.",
+      actor,
     );
     return;
   }
@@ -247,7 +261,8 @@ async function resendCurrentQuestion(
         conversation,
         recipient,
         state,
-        customerBookingSummary(booking)
+        customerBookingSummary(booking),
+        actor,
       );
       return;
     }
@@ -258,77 +273,262 @@ async function resendCurrentQuestion(
       recipient,
       payload: textPayload(
         state === "AWAITING_PAYMENT"
-          ? "Seu pedido continua aguardando pagamento. Enviaremos as instruções por aqui."
+          ? buildPaymentInstructionsText(conversation.bookingId ? (await tx.booking.findUnique({ where: { id: conversation.bookingId }, include: { propertyPricingTier: true } }))?.propertyPricingTier ?? null : null)
           : "Seu pedido está sendo revisado. Vamos continuar por aqui assim que possível."
       ),
-      idempotencyKey: `customer-booking:${conversation.id}:${state}:resumed:${conversation.updatedAt.getTime()}`,
+      idempotencyKey: `customer-booking:${conversation.id}:${state}:resumed:v${conversation.version}:${conversation.updatedAt.getTime()}`,
       correlationId: conversation.id,
-      actor: "system:customer-conversation",
+      actor,
     });
     return;
   }
-  await enqueueQuestion(tx, conversation, recipient, state);
+  await enqueueQuestion(tx, conversation, recipient, state, undefined, actor);
+}
+
+const adminControlSchema = z.object({
+  conversationId: z.string().uuid(),
+  expectedVersion: z.number().int().nonnegative(),
+  actor: z.string().trim().min(1).max(160),
+  action: z.enum(["resume", "pause", "step", "restart", "close"]),
+  step: z.string().optional(),
+});
+
+/** Administrative overrides share the inbound engine's customer lock and transaction. */
+export async function controlCustomerConversation(
+  prisma: PrismaClient,
+  rawInput: z.input<typeof adminControlSchema>
+) {
+  const parsed = adminControlSchema.safeParse(rawInput);
+  if (!parsed.success) return err("Dados da ação inválidos.");
+  const input = parsed.data;
+  return prisma.$transaction(async (tx) => {
+    const owner = await tx.customerBookingConversation.findUnique({
+      where: { id: input.conversationId },
+      select: { customerId: true },
+    });
+    if (!owner) return err("Conversa não encontrada.");
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${owner.customerId} FOR UPDATE`;
+    const current = await tx.customerBookingConversation.findUniqueOrThrow({
+      where: { id: input.conversationId },
+      include: { customer: true, booking: true },
+    });
+    if (current.version !== input.expectedVersion)
+      return err("A conversa mudou. Atualize a página e tente novamente.");
+    if (current.state === "COMPLETED" && input.action !== "restart")
+      return err("Esta conversa está encerrada. Reinicie para continuar.");
+    const booking = current.booking;
+    let target: CustomerConversationState;
+    if (input.action === "resume") {
+      const step = customerResumeStep({ ...current, hasBooking: !!booking });
+      if (!step) return err("Esta conversa não está pausada ou em revisão.");
+      target = step;
+    } else if (input.action === "step") {
+      if (!isCustomerAdminStep(input.step ?? null))
+        return err("Etapa inválida.");
+      target = input.step as CustomerConversationState;
+    } else
+      target =
+        input.action === "pause"
+          ? "PAUSED"
+          : input.action === "close"
+            ? "COMPLETED"
+            : "INTRODUCTION";
+
+    // Validate prerequisites before writing anything. Never fabricate customer consent or coverage.
+    if (target === "PROPERTY_CHARACTERISTICS" && !(await activePricingTiers(tx)).length)
+      return err("Configure as opções de preço antes de retomar esta etapa.");
+    const needsBooking = [
+      "SCHEDULE_DATE",
+      "SCHEDULE_TIME",
+      "QUOTE_ACCEPTANCE",
+      "ADDRESS",
+      "FINAL_CONFIRMATION",
+      "EDIT_SELECTION",
+      "AWAITING_PAYMENT",
+    ].includes(target);
+    if (needsBooking && !booking)
+      return err(
+        "Esta etapa exige um pedido. Colete primeiro as características do imóvel."
+      );
+    if (target === "SCHEDULE_TIME" && !current.pendingScheduleDate)
+      return err("Escolha primeiro uma data na etapa SCHEDULE_DATE.");
+    if (
+      ["QUOTE_ACCEPTANCE", "FINAL_CONFIRMATION", "EDIT_SELECTION"].includes(
+        target
+      ) &&
+      (!booking?.propertyPricingTierId || !booking.scheduledAt)
+    )
+      return err("Esta etapa exige imóvel e horário definidos.");
+    if (
+      ["FINAL_CONFIRMATION", "EDIT_SELECTION"].includes(target) &&
+      (!booking?.addressLine1 ||
+        !booking.coverageValidatedAt ||
+        booking.outsideCoverageArea)
+    )
+      return err(
+        "Valide a cobertura do endereço em Agendamentos antes de continuar."
+      );
+    if (target === "AWAITING_PAYMENT" && booking?.status !== "AWAITING_PAYMENT")
+      return err("O cliente precisa confirmar o pedido antes do pagamento.");
+
+    let bookingTarget: BookingStatus | null = null;
+    if (
+      booking &&
+      ["restart", "close"].includes(input.action) &&
+      booking.status !== "CANCELLED"
+    )
+      bookingTarget = "CANCELLED";
+    else if (booking && !["pause", "close", "restart"].includes(input.action)) {
+      if (
+        [
+          "INTRODUCTION",
+          "NAME",
+          "PROPERTY_CHARACTERISTICS",
+          "SCHEDULE_DATE",
+          "SCHEDULE_TIME",
+        ].includes(target)
+      )
+        bookingTarget = "COLLECTING_DATA";
+      if (target === "QUOTE_ACCEPTANCE") bookingTarget = "QUOTED";
+      if (
+        target === "ADDRESS" &&
+        !["COLLECTING_DATA", "QUOTE_ACCEPTED", "REVIEW_REQUIRED"].includes(
+          booking.status
+        )
+      )
+        bookingTarget = "COLLECTING_DATA";
+      if (["FINAL_CONFIRMATION", "EDIT_SELECTION"].includes(target))
+        bookingTarget = "AWAITING_CUSTOMER_CONFIRMATION";
+      if (
+        target === "ADDRESS" &&
+        [
+          "PAID",
+          "CANCELLED",
+          "COMPLETED",
+          "MATCHING",
+          "AWAITING_PAYMENT",
+        ].includes(booking.status)
+      )
+        return err("O status deste pedido não permite retornar ao endereço.");
+    }
+    if (
+      booking &&
+      bookingTarget &&
+      booking.status !== bookingTarget &&
+      !ALLOWED_TRANSITIONS[booking.status].includes(bookingTarget)
+    )
+      return err(
+        "O status do pedido não permite esta alteração. Resolva o pedido em Agendamentos."
+      );
+    if (!["PAUSED", "COMPLETED"].includes(target)) {
+      const other = await tx.customerBookingConversation.findFirst({
+        where: {
+          customerId: current.customerId,
+          id: { not: current.id },
+          state: { not: "COMPLETED" },
+        },
+        select: { id: true },
+      });
+      if (other)
+        return err(
+          "Este cliente possui outra conversa aberta. Encerre a outra conversa antes de ativar esta."
+        );
+    }
+    const claimed = await tx.customerBookingConversation.updateMany({
+      where: { id: current.id, version: input.expectedVersion },
+      data: {
+        state: target,
+        lastQuestionKey:
+          target === "PAUSED"
+            ? isCustomerAdminStep(current.state)
+              ? current.state
+              : current.lastQuestionKey
+            : target,
+        automationPausedAt: ["PAUSED", "COMPLETED"].includes(target)
+          ? new Date()
+          : null,
+        misunderstandingCount: 0,
+        misunderstandingState: null,
+        lastInboundAt: new Date(),
+        lastReengagementAt: null,
+        ...(input.action === "restart"
+          ? { bookingId: null, pendingScheduleDate: null }
+          : {}),
+        ...(target === "SCHEDULE_DATE" ? { pendingScheduleDate: null } : {}),
+        version: { increment: 1 },
+      },
+    });
+    if (!claimed.count)
+      return err("A conversa mudou. Atualize a página e tente novamente.");
+    if (booking && bookingTarget && booking.status !== bookingTarget) {
+      const transition = await transitionBookingStatusInTransaction(tx, {
+        bookingId: booking.id,
+        expectedVersion: booking.version,
+        targetStatus: bookingTarget,
+        actor: input.actor,
+        reason: `Controle administrativo: ${input.action}`,
+      });
+      // Roll back the conversation claim if the booking changed concurrently.
+      if (!transition.ok) throw transition.error;
+    }
+    const conversation = await tx.customerBookingConversation.findUniqueOrThrow(
+      { where: { id: current.id } }
+    );
+    const superseded = await supersedeCustomerPrompts(tx, current.id);
+    await recordAuditLog(tx, {
+      actor: input.actor,
+      action: `CUSTOMER_CONVERSATION_${input.action.toUpperCase()}`,
+      entityType: "CustomerBookingConversation",
+      entityId: current.id,
+      metadata: {
+        fromState: current.state,
+        toState: target,
+        bookingId: current.bookingId,
+        fromVersion: current.version,
+        version: conversation.version,
+        supersededPrompts: superseded.count,
+        reason:
+          input.action === "pause"
+            ? "Admin assumiu o atendimento"
+            : input.action,
+      },
+    });
+    if (!["PAUSED", "COMPLETED"].includes(target))
+      await resendCurrentQuestion(
+        tx,
+        conversation,
+        current.customer.phoneE164,
+        target,
+        input.actor
+      );
+    return ok({ conversationId: conversation.id });
+  }).catch((error: unknown) => {
+    // Domain failures must abort all writes, then become recoverable UI errors.
+    if (error instanceof DomainError) return err(error.message);
+    throw error;
+  });
 }
 
 export async function resumeCustomerBookingConversation(
   prisma: PrismaClient,
-  input: { bookingId: string; actor: string }
+  input: {
+    bookingId?: string;
+    conversationId?: string;
+    expectedVersion?: number;
+    actor: string;
+  }
 ) {
-  return prisma.$transaction(async (tx) => {
-    const booking = await tx.booking.findUnique({
-      where: { id: input.bookingId },
-      include: {
-        customerConversation: true,
-        customer: { select: { phoneE164: true } },
-      },
-    });
-    const paused = booking?.customerConversation;
-    const state = paused?.lastQuestionKey as CustomerConversationState | null;
-    if (
-      !booking ||
-      !paused ||
-      paused.state !== "PAUSED" ||
-      !state ||
-      ["PAUSED", "COMPLETED", "QUOTE"].includes(state)
-    ) {
-      return {
-        ok: false as const,
-        reason: "CONVERSATION_NOT_RESUMABLE" as const,
-      };
-    }
-    const resumeClaimed = await tx.customerBookingConversation.updateMany({
-      where: { id: paused.id, version: paused.version },
-      data: {
-        state,
-        automationPausedAt: null,
-        misunderstandingCount: 0,
-        misunderstandingState: null,
-        lastInboundAt: new Date(),
-        version: { increment: 1 },
-      },
-    });
-    if (!resumeClaimed.count)
-      return {
-        ok: false as const,
-        reason: "CONVERSATION_NOT_RESUMABLE" as const,
-      };
-    const conversation = await tx.customerBookingConversation.findUniqueOrThrow(
-      { where: { id: paused.id } }
-    );
-    await recordAuditLog(tx, {
-      actor: input.actor,
-      action: "CUSTOMER_CONVERSATION_RESUMED",
-      entityType: "CustomerBookingConversation",
-      entityId: conversation.id,
-      metadata: { bookingId: booking.id, state },
-    });
-    await resendCurrentQuestion(
-      tx,
-      conversation,
-      booking.customer.phoneE164,
-      state
-    );
-    return { ok: true as const, conversationId: conversation.id };
+  const current = await prisma.customerBookingConversation.findUnique({
+    where: input.conversationId
+      ? { id: input.conversationId }
+      : { bookingId: input.bookingId ?? "" },
+  });
+  if (!current) return err("Conversa não encontrada.");
+  return controlCustomerConversation(prisma, {
+    conversationId: current.id,
+    expectedVersion: input.expectedVersion ?? current.version,
+    actor: input.actor,
+    action: "resume",
   });
 }
 
@@ -1214,13 +1414,17 @@ export async function processCustomerBookingAnswer(
           professionalPaymentCents: null,
         },
       });
-      const review = await transitionBookingStatusInTransaction(tx, {
-        bookingId: conversation.bookingId,
-        targetStatus: "REVIEW_REQUIRED",
-        actor: "system:customer-conversation",
-        reason: "Endereço aguarda validação de cobertura",
-      });
-      if (!review.ok) throw review.error;
+      const booking = await tx.booking.findUniqueOrThrow({ where: { id: conversation.bookingId } });
+      // A resumed review may recollect an address while the booking still awaits coverage.
+      if (booking.status !== "REVIEW_REQUIRED") {
+        const review = await transitionBookingStatusInTransaction(tx, {
+          bookingId: conversation.bookingId,
+          targetStatus: "REVIEW_REQUIRED",
+          actor: "system:customer-conversation",
+          reason: "Endereço aguarda validação de cobertura",
+        });
+        if (!review.ok) throw review.error;
+      }
       const updated = await tx.customerBookingConversation.update({
         where: { id: conversation.id },
         data: {

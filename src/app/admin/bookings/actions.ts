@@ -297,13 +297,15 @@ export async function sendManualCustomerMessageAction(
 
 export async function sendManualCustomerConversationMessageAction(
   conversationId: string,
-  text: string
+  text: string,
+  expectedVersion: number,
 ): Promise<BookingActionResult> {
   const actor = await currentActor();
   if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
   if (
     !conversationIdSchema.safeParse(conversationId).success ||
-    typeof text !== "string"
+    typeof text !== "string" ||
+    !z.number().int().nonnegative().safeParse(expectedVersion).success
   ) {
     return { ok: false, error: "Dados da mensagem inválidos." };
   }
@@ -312,14 +314,17 @@ export async function sendManualCustomerConversationMessageAction(
       conversationId,
       text,
       actor,
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
     });
-    if (!result.ok) return { ok: false, error: "Conversa não encontrada." };
+    if (!result.ok) return { ok: false, error: result.error };
     publishJobSafe({
       name: JOB_NAME.MESSAGE_DISPATCH,
       jobId: `message-dispatch:drain:${Math.floor(Date.now() / 5000)}`,
       payload: {},
     }).catch(() => undefined);
     revalidatePath("/admin/customer-conversations");
+    revalidatePath(`/admin/customer-conversations/${conversationId}`);
+    revalidatePath("/admin/bookings");
     return { ok: true };
   } catch (error) {
     return {

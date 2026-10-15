@@ -43,7 +43,7 @@ describe("sendManualCustomerMessage", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.conversationId).toBe(conversation.id);
+    expect(result.value.conversationId).toBe(conversation.id);
 
     const updated = await prisma.customerBookingConversation.findUniqueOrThrow({ where: { id: conversation.id } });
     expect(updated.state).toBe("PAUSED");
@@ -75,7 +75,7 @@ describe("sendManualCustomerMessage", () => {
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.reason).toBe("CUSTOMER_CONVERSATION_NOT_FOUND");
+    expect(result.error).toBe("Conversa não encontrada.");
   });
 
   it("lock otimista: segunda modificação após envio bem-sucedido usa versão atualizada", async () => {

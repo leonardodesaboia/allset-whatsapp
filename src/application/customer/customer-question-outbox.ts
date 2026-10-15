@@ -10,7 +10,7 @@ export function customerQuestionText(state: CustomerConversationState): string |
   return [question.text, "", ...question.choices.map((choice, index) => `${index + 1} — ${choice.label}`)].join("\n");
 }
 
-export async function enqueueCustomerQuestion(tx: Prisma.TransactionClient, input: { conversationId: string; provider: string; recipient: string; state: CustomerConversationState; idempotencyKey: string; text?: string }) {
+export async function enqueueCustomerQuestion(tx: Prisma.TransactionClient, input: { conversationId: string; provider: string; recipient: string; state: CustomerConversationState; idempotencyKey: string; text?: string; actor?: string }) {
   const text = input.text ?? customerQuestionText(input.state);
   if (!text) return;
   await enqueueOutboundMessage(tx, {
@@ -19,6 +19,6 @@ export async function enqueueCustomerQuestion(tx: Prisma.TransactionClient, inpu
     payload: textPayload(text),
     idempotencyKey: input.idempotencyKey,
     correlationId: input.conversationId,
-    actor: "system:customer-conversation",
+    actor: input.actor ?? "system:customer-conversation",
   });
 }
