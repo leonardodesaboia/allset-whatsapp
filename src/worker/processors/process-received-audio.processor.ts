@@ -34,6 +34,10 @@ export async function processReceivedAudioProcessor(
   }
 
   if (!result.ok) {
+    if (result.terminal) {
+      logger.warn({ jobId: job.id, ...result }, "Audio requires manual review; automatic retry disabled");
+      return;
+    }
     throw new Error(`Falha ao processar áudio ${inboundMessageId}: ${result.error}`);
   }
 

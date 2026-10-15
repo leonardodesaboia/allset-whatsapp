@@ -5,15 +5,17 @@ import type { StorageProvider } from "../../domain/ports/storage-provider";
 import { routeInboundText } from "./route-inbound-text.usecase";
 import { downloadReceivedAudio } from "./download-received-audio.usecase";
 import { transcribeReceivedAudio } from "./transcribe-received-audio.usecase";
+import { MediaDownloaderUnavailableError } from "../../domain/messaging/media-downloader-unavailable-error";
+import { recordAuditLog } from "../audit/record-audit-log.usecase";
 
 export async function processPendingReceivedAudio(prisma: PrismaClient, storage: StorageProvider, downloader: InboundMediaDownloader, transcriber: AudioTranscriber, input: { inboundMessageId?: string; limit: number }) {
-  const ids = input.inboundMessageId ? [input.inboundMessageId] : (await prisma.inboundMessage.findMany({
+  const ids = (await prisma.inboundMessage.findMany({
     // A transcript may already exist when routing failed. Keep recovering the
     // inbound until the conversation transaction has actually consumed it.
-    where: { type: "AUDIO", processedAt: null },
+    where: { type: "AUDIO", processedAt: null, mediaProcessingFailedAt: null, ...(input.inboundMessageId ? { id: input.inboundMessageId } : {}) },
     orderBy: { receivedAt: "asc" }, take: input.limit, select: { id: true },
   })).map((message) => message.id);
-  const results = [] as Array<{ inboundMessageId: string; ok: boolean; error?: string }>;
+  const results = [] as Array<{ inboundMessageId: string; ok: boolean; error?: string; terminal?: boolean }>;
   for (const inboundMessageId of ids) {
     try {
       const downloaded = await downloadReceivedAudio(prisma, storage, downloader, { inboundMessageId });
@@ -35,7 +37,27 @@ export async function processPendingReceivedAudio(prisma: PrismaClient, storage:
         provider: inbound.provider,
       });
       results.push({ inboundMessageId, ok: true });
-    } catch (error) { results.push({ inboundMessageId, ok: false, error: error instanceof Error ? error.message : "MEDIA_DOWNLOAD_FAILED" }); }
+    } catch (error) {
+      if (error instanceof MediaDownloaderUnavailableError) {
+        const recorded = await prisma.$transaction(async (tx) => {
+          const claimed = await tx.inboundMessage.updateMany({
+            where: { id: inboundMessageId, processedAt: null, mediaProcessingFailedAt: null },
+            data: { mediaProcessingFailedAt: new Date(), mediaProcessingError: error.code },
+          });
+          if (!claimed.count) return false;
+          await recordAuditLog(tx, {
+            actor: "system:audio-recovery", action: "INBOUND_MEDIA_NEEDS_MANUAL_REVIEW", entityType: "InboundMessage", entityId: inboundMessageId,
+            metadata: { code: error.code, provider: error.provider ?? "unknown" },
+          });
+          return true;
+        });
+        // Only the winner reports this terminal failure. Periodic AND explicit
+        // processing exclude it until an operator deliberately clears the marker.
+        if (recorded) results.push({ inboundMessageId, ok: false, error: error.code, terminal: true });
+        continue;
+      }
+      results.push({ inboundMessageId, ok: false, error: error instanceof Error ? error.message : "MEDIA_DOWNLOAD_FAILED" });
+    }
   }
   return results;
 }

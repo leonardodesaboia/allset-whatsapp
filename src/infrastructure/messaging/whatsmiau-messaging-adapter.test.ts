@@ -1,10 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WhatsMiauMessagingAdapter } from "./whatsmiau-messaging-adapter";
+import { ProviderAuthenticationError } from "../../domain/messaging/provider-authentication-error";
 
 afterEach(() => vi.unstubAllGlobals());
 const storage = { get: vi.fn(), getSignedUrl: vi.fn().mockResolvedValue("https://media.example/a.ogg"), put: vi.fn(), delete: vi.fn() };
 const adapter = () => new WhatsMiauMessagingAdapter({ baseUrl: "https://api.whatsmiau.dev/v2", apiKey: "secret", instance: "Atendimento01" }, storage);
 describe("WhatsMiauMessagingAdapter", () => {
+  it.each([401, 403])("classifies HTTP %s as a configuration failure", async (status) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("Invalid API Key", { status })));
+    await expect(adapter().send({ recipient: "+5511999999999", payload: { version: 1, type: "TEXT", text: "Oi" }, idempotencyKey: "auth" })).rejects.toBeInstanceOf(ProviderAuthenticationError);
+  });
+  it("preserves the auth classification when the error response body cannot be read", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new ReadableStream({ start(controller) { controller.error(new Error("body interrupted")); } }), { status: 401 })));
+    await expect(adapter().send({ recipient: "+5511999999999", payload: { version: 1, type: "TEXT", text: "Oi" }, idempotencyKey: "auth" })).rejects.toMatchObject({ httpStatus: 401 });
+  });
   it("rejects LIDs instead of stripping their suffix and sending to a fake phone", async () => {
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
     await expect(adapter().send({ recipient: "123456789012345@lid", payload: { version: 1, type: "TEXT", text: "Oi" }, idempotencyKey: "local" })).rejects.toThrow();

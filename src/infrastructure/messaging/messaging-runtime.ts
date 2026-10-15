@@ -7,6 +7,7 @@ import { EvolutionMediaDownloader } from "./evolution-media-downloader";
 import { WhatsMiauMessagingAdapter } from "./whatsmiau-messaging-adapter";
 import { WhatsMiauMediaDownloader } from "./whatsmiau-media-downloader";
 import { StaticMessagingGatewayRegistry } from "./messaging-gateway-registry";
+import { MediaDownloaderUnavailableError } from "../../domain/messaging/media-downloader-unavailable-error";
 
 function evolutionConfig() {
   const values = [env.EVOLUTION_BASE_URL, env.EVOLUTION_API_KEY, env.EVOLUTION_INSTANCE];
@@ -51,7 +52,7 @@ export function createInboundMediaDownloader(): InboundMediaDownloader {
       // Compatibility for URL-backed records carrying the legacy provider. Old encrypted
       // Evolution media still requires its original configured API; never send it to WhatsMiau.
       if (input.provider === "evolution" && input.providerMetadata && typeof input.providerMetadata === "object" && "mediaUrl" in input.providerMetadata) return whatsmiau.download(input);
-      throw new Error(`Downloader não configurado para provider: ${input.provider}`);
+      throw new MediaDownloaderUnavailableError(input.provider);
     },
   };
 }
