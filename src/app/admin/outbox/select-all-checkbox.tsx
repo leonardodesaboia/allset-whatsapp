@@ -8,7 +8,9 @@ export function SelectAllCheckbox({ formId }: { formId: string }) {
       aria-label="Selecionar todas as mensagens"
       className="h-4 w-4"
       onChange={(event) => {
-        const boxes = document.querySelectorAll<HTMLInputElement>(`input[name="ids"][form="${formId}"]`);
+        const boxes = document.querySelectorAll<HTMLInputElement>(
+          `input[name="ids"][form="${formId}"]`
+        );
         boxes.forEach((box) => {
           box.checked = event.currentTarget.checked;
         });

@@ -30,14 +30,24 @@ describe("formatRelative", () => {
   const now = new Date("2026-10-15T12:00:00Z");
 
   it("usa minutos, horas e dias", () => {
-    expect(formatRelative(new Date("2026-10-15T11:55:00Z"), now)).toBe("há 5 min");
-    expect(formatRelative(new Date("2026-10-15T09:00:00Z"), now)).toBe("há 3 h");
-    expect(formatRelative(new Date("2026-10-13T12:00:00Z"), now)).toBe("há 2 dias");
-    expect(formatRelative(new Date("2026-10-14T12:00:00Z"), now)).toBe("há 1 dia");
+    expect(formatRelative(new Date("2026-10-15T11:55:00Z"), now)).toBe(
+      "há 5 min"
+    );
+    expect(formatRelative(new Date("2026-10-15T09:00:00Z"), now)).toBe(
+      "há 3 h"
+    );
+    expect(formatRelative(new Date("2026-10-13T12:00:00Z"), now)).toBe(
+      "há 2 dias"
+    );
+    expect(formatRelative(new Date("2026-10-14T12:00:00Z"), now)).toBe(
+      "há 1 dia"
+    );
   });
 
   it("trata futuro e agora", () => {
-    expect(formatRelative(new Date("2026-10-15T12:30:00Z"), now)).toBe("em 30 min");
+    expect(formatRelative(new Date("2026-10-15T12:30:00Z"), now)).toBe(
+      "em 30 min"
+    );
     expect(formatRelative(new Date("2026-10-15T12:00:20Z"), now)).toBe("agora");
   });
 });

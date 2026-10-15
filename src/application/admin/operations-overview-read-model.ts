@@ -19,7 +19,11 @@ export type OperationsOverview = {
   providerLastError: string | null;
 };
 
-const STALE_STATUSES = ["AWAITING_PAYMENT", "REVIEW_REQUIRED", "MATCHING"] as const;
+const STALE_STATUSES = [
+  "AWAITING_PAYMENT",
+  "REVIEW_REQUIRED",
+  "MATCHING",
+] as const;
 const OUTBOX_OVERDUE_AFTER_MS = 5 * 60 * 1000;
 
 export async function getOperationsOverview(
@@ -35,10 +39,12 @@ export async function getOperationsOverview(
     | "serviceDefinition"
     | "messagingProviderState"
   >,
-  input: { staleAfterHours: number; now?: Date },
+  input: { staleAfterHours: number; now?: Date }
 ): Promise<OperationsOverview> {
   const now = input.now ?? new Date();
-  const staleCutoff = new Date(now.getTime() - input.staleAfterHours * 60 * 60 * 1000);
+  const staleCutoff = new Date(
+    now.getTime() - input.staleAfterHours * 60 * 60 * 1000
+  );
   const overdueCutoff = new Date(now.getTime() - OUTBOX_OVERDUE_AFTER_MS);
 
   const [
@@ -65,14 +71,22 @@ export async function getOperationsOverview(
       },
     }),
     prisma.customerBookingConversation.count({ where: { state: "PAUSED" } }),
-    prisma.customerBookingConversation.count({ where: { state: "MANUAL_REVIEW" } }),
+    prisma.customerBookingConversation.count({
+      where: { state: "MANUAL_REVIEW" },
+    }),
     prisma.outboxMessage.count({ where: { status: "PENDING" } }),
-    prisma.outboxMessage.count({ where: { status: "PENDING", availableAt: { lt: overdueCutoff } } }),
+    prisma.outboxMessage.count({
+      where: { status: "PENDING", availableAt: { lt: overdueCutoff } },
+    }),
     prisma.outboxMessage.count({ where: { status: "FAILED" } }),
     prisma.outboxMessage.count({ where: { status: "DEAD_LETTER" } }),
     prisma.professionalDocument.count({ where: { status: "RECEIVED" } }),
     prisma.serviceOpportunity.count({
-      where: { status: "OPEN", expiresAt: { gt: now }, responses: { none: {} } },
+      where: {
+        status: "OPEN",
+        expiresAt: { gt: now },
+        responses: { none: {} },
+      },
     }),
     prisma.recruitmentLead.count({
       where: {
@@ -85,7 +99,10 @@ export async function getOperationsOverview(
       },
     }),
     prisma.booking.count({
-      where: { status: { in: [...STALE_STATUSES] }, updatedAt: { lt: staleCutoff } },
+      where: {
+        status: { in: [...STALE_STATUSES] },
+        updatedAt: { lt: staleCutoff },
+      },
     }),
     prisma.propertyPricingTier.count({ where: { isActive: true } }),
     prisma.serviceDefinition.count({ where: { isActive: true } }),
