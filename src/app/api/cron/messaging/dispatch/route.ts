@@ -1,4 +1,4 @@
-import { dispatchNextOutboxMessage } from "@/application/messaging/dispatch-outbox.usecase";
+import { drainOutbox } from "@/infrastructure/messaging/drain-outbox";
 import { compareSecret } from "@/infrastructure/auth/compare-secret";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { createMessagingGatewayRegistry } from "@/infrastructure/messaging/messaging-runtime";
@@ -19,11 +19,7 @@ export async function GET(request: Request) {
   const registry = createMessagingGatewayRegistry();
   let dispatched = 0;
   try {
-    while (dispatched < batchLimit) {
-      const result = await dispatchNextOutboxMessage(prisma, registry);
-      if (!result) break;
-      dispatched += 1;
-    }
+    dispatched = await drainOutbox(prisma, registry, { actor: "system:cron-dispatch", limit: batchLimit });
     return Response.json({ ok: true, dispatched });
   } catch (error) {
     logger.error({ err: error, dispatched }, "Falha ao drenar outbox no cron");

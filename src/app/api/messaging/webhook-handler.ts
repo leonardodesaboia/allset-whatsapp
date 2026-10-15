@@ -1,6 +1,6 @@
 import { env } from "@/env";
 import { processInboundEvent } from "@/application/messaging/process-inbound-event.usecase";
-import { dispatchNextOutboxMessage } from "@/application/messaging/dispatch-outbox.usecase";
+import { drainOutbox } from "@/infrastructure/messaging/drain-outbox";
 import { routeInboundText } from "@/application/messaging/route-inbound-text.usecase";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { logger } from "@/infrastructure/observability/logger";
@@ -171,10 +171,10 @@ export async function handleMessagingWebhook(request: Request, config: { provide
         logger.error({ err }, "Falha ao publicar job de dispatch")
       );
     } else {
-      dispatchNextOutboxMessage(
+      drainOutbox(
         prisma,
         createMessagingGatewayRegistry(),
-        "system:webhook-dispatch"
+        { actor: "system:webhook-dispatch", limit: 20 }
       ).catch((err) =>
         logger.error({ err }, "Falha ao despachar outbox inline no webhook")
       );

@@ -13,14 +13,13 @@ Produção: instância `AllSet`, aplicação
    as variáveis `EVOLUTION_*` atuais. Sem credenciais WhatsMiau, a aplicação,
    a página admin e os workers continuam usando Evolution; quando o default
    não é explícito, ele permanece `evolution` nesse cenário.
-2. Antes do corte, drene áudios pendentes da Evolution e confirme que o worker
-   e os cron jobs estão ativos. Áudios criptografados antigos não podem ser
+2. Antes do corte, drene áudios pendentes da Evolution e confirme que o scheduler
+   interno está ativo nos logs do app. Áudios criptografados antigos não podem ser
    recuperados pela API WhatsMiau.
 3. Prepare a chave e a instância WhatsMiau seguindo os passos abaixo. No
-   Easypanel, atualize as variáveis **do app e do worker**, defina
+   Easypanel, atualize as variáveis **do app** (e do worker somente se usar Redis), defina
    `MESSAGING_DEFAULT_PROVIDER=whatsmiau` e remova juntas as três variáveis
-   de conexão Evolution para ativar o alias legado. Reinicie app e worker
-   (o worker mantém o registry de gateways em memória).
+   de conexão Evolution para ativar o alias legado. Reinicie o app (e o worker, se houver).
 4. Aplique `PUT /instance/update/AllSet` com o webhook abaixo, conecte pelo
    QR e homologue texto, áudio de entrada e áudio de saída. O endpoint real é
    `https://allset-mvp-allset-app.vn6tpb.easypanel.host/api/messaging/whatsmiau/webhook`.
@@ -85,7 +84,10 @@ Produção: instância `AllSet`, aplicação
 ## Recebimento, áudio e recuperação
 
 Somente `messages.upsert` de números `@s.whatsapp.net` é aceito. Grupos,
-ecos `fromMe`, identificadores `@lid` e eventos de atualização são ignorados.
+ecos `fromMe` e eventos de atualização são ignorados. Quando `remoteJid`
+é `@lid`, só aceitamos telefone real explícito em `data.key.remoteJidAlt`,
+`data.key.senderPn` ou `data.senderPn`. LID sem telefone continua ignorado;
+nunca convertemos os dígitos do LID em lead ou destinatário.
 Texto segue o roteamento de oportunidades e conversas existente. Áudio aceita
 `data.message.mediaUrl` com fallback para `data.mediaUrl`, sem exigir `mediaKey`.
 Persistimos apenas `mediaUrl`, `mimetype` e `fileLength` em `providerMetadata`.
@@ -99,16 +101,15 @@ allowlist de hosts, rejeita todos os redirects, tem timeout de 30 segundos e
 limite de 25 MiB durante a leitura, e exige `Content-Type: audio/*`.
 A chave `apikey` nunca é enviada ao storage.
 
-Configure o scheduler para chamar regularmente:
+Na VPS, **crontab não é necessário**. O app Next.js standalone inicia o
+scheduler interno automaticamente em produção sem Redis: drena até 20 linhas
+a cada 15 segundos e recupera até 10 áudios a cada 30 segundos. O webhook
+também drena a fila inline, para o backlog não consumir o único envio da chamada.
+`INTERNAL_SCHEDULER_ENABLED=false` desliga; `true` permite opt-in fora de
+produção. `REDIS_URL` desliga automaticamente o scheduler interno para o modo
+BullMQ. Detalhes de todas as tarefas em [deploy VPS](vps-deploy.md).
 
-```bash
-curl '<APP_URL>/api/cron/messaging/download-audio' \
-  -H 'Authorization: Bearer <CRON_SECRET>'
-curl '<APP_URL>/api/cron/messaging/dispatch' \
-  -H 'Authorization: Bearer <CRON_SECRET>'
-```
-
-O cron de áudio é a rede de segurança para falhas e interrupções do processo
+O scheduler de áudio é a rede de segurança para falhas e interrupções do processo
 inline. O processamento seleciona pendências de qualquer provider e resolve
 o downloader pelo provider persistido. Para reprocessar uma mensagem específica,
 use `POST /api/internal/messaging/download-media`, header
@@ -139,13 +140,26 @@ a pergunta. Não usamos `sendMedia` para áudio nem endpoint de extração base6
 - Envie texto e áudio reais e confira inbound, transcrição, conversa e outbox.
 - Reenvie o mesmo webhook: a deduplicação local usa provider + externalId.
 - Confira a resposta de oportunidade e o áudio das perguntas de pré-cadastro.
-- Simule indisponibilidade temporária do worker e confira recuperação pelo cron.
+- Reinicie o app com pendências e confira recuperação automática pelo scheduler.
 - A validade de `mediaUrl` não é documentada: baixar rapidamente reduz o risco,
-  mas um cron tardio pode encontrar mídia expirada. Fire-and-forget pode ser
+  mas uma recuperação tardia pode encontrar mídia expirada. Fire-and-forget pode ser
   interrompido em ambientes que encerram execução após a resposta HTTP.
 - Não há idempotência de envio documentada no WhatsMiau. Timeout seguido de retry
   pode duplicar mensagens; a outbox é at-least-once. O ID externo usa
   `key.id ?? idempotencyKey`, pois o schema da resposta não é documentado.
-- Mantenha os cron jobs ativos e monitore falhas de download, transcrição e
+- Confirme o scheduler ativo nos logs de startup e monitore falhas de download, transcrição e
   dead letters. Sem credenciais reais, os testes automatizados não substituem
   essa homologação.
+
+## Diagnosticar envio sem resposta
+
+Confira `Outbox delivery failed` nos logs do app: inclui `outboxMessageId`,
+`provider`, `recipient` mascarado, `httpStatus` e `providerError` truncado.
+O adapter captura até 2 KiB do erro, remove a API key e mascara números antes
+de persistir/logar no máximo 400 caracteres de corpo. HTTP 401/403 sugere
+credencial/permissão; 404 exige conferir `WHATSMIAU_BASE_URL` e a instância
+`AllSet`; 400 exige ler a mensagem de validação; 423 indica suspensão.
+O body de texto segue a doc: `{ "number": "5511999999999", "text": "Oi" }`,
+sem sufixo JID. O adapter rejeita `@lid` em vez de enviar ao telefone falso.
+Números falsos já persistidos sem mapeamento confiável não são corrigidos
+automaticamente; revise essas linhas antes de reenviar dead letters.

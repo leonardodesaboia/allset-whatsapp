@@ -72,6 +72,7 @@ const envSchema = z
     CRON_SECRET: optionalEnv(z.string().min(32)),
     OPENAI_API_KEY: optionalEnv(z.string().min(1)),
     REDIS_URL: optionalEnv(z.string().url()),
+    INTERNAL_SCHEDULER_ENABLED: optionalEnv(z.enum(["true", "false"]).transform((value) => value === "true")),
     JOB_QUEUE_PREFIX: z
       .string()
       .trim()

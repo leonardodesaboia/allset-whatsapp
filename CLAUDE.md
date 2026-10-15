@@ -60,7 +60,9 @@ Após qualquer alteração, no mínimo: `pnpm tsc --noEmit && pnpm architecture:
 Os fluxos de **texto** e **áudio** usam WhatsMiau Cloud como novo provider.
 Com REDIS_URL, o webhook publica RECEIVED_AUDIO para o worker BullMQ; sem Redis,
 o webhook WhatsMiau inicia download + transcrição + conversa imediatamente.
-Mantenha o cron `/api/cron/messaging/download-audio` como rede de segurança.
+Sem Redis, `src/instrumentation.ts` inicia o scheduler interno: outbox a cada 15s,
+áudio a cada 30s e manutenção periódica. Crontab não é necessário na VPS.
+`INTERNAL_SCHEDULER_ENABLED=false` desliga esse scheduler.
 Evolution continua opcional, inclusive durante rollout com apenas EVOLUTION_*.
 A outbox usa o provider persistido; sem Evolution configurada, WhatsMiau também
 atende o alias legado `evolution`, sem migrar dados.

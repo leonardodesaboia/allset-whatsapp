@@ -3,6 +3,12 @@ import { BETTER_AUTH_SECRET_PLACEHOLDER, parseEnv, sourceForModuleEvaluation } f
 
 describe("parseEnv", () => {
   const base = { DATABASE_URL: "postgresql://user:pass@localhost:5432/db", BETTER_AUTH_SECRET: "a".repeat(32), BETTER_AUTH_URL: "http://localhost:3000" };
+  it("parses the scheduler opt-out without treating false as a truthy string", () => {
+    expect(parseEnv({ ...base, INTERNAL_SCHEDULER_ENABLED: "false" }).INTERNAL_SCHEDULER_ENABLED).toBe(false);
+    expect(parseEnv({ ...base, INTERNAL_SCHEDULER_ENABLED: "true" }).INTERNAL_SCHEDULER_ENABLED).toBe(true);
+    expect(parseEnv(base).INTERNAL_SCHEDULER_ENABLED).toBeUndefined();
+    expect(() => parseEnv({ ...base, INTERNAL_SCHEDULER_ENABLED: "invalid" })).toThrow(/INTERNAL_SCHEDULER_ENABLED/);
+  });
   const production = { ...base, NODE_ENV: "production", INTERNAL_JOB_SECRET: "b".repeat(32), CRON_SECRET: "c".repeat(32) };
   const evolution = { EVOLUTION_BASE_URL: "http://evolution:8080", EVOLUTION_API_KEY: "old", EVOLUTION_INSTANCE: "AllSet", EVOLUTION_WEBHOOK_SECRET: "d".repeat(32) };
   it("preserves an Evolution-only production rollout without WhatsMiau variables", () => {
