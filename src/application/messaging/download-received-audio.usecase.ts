@@ -14,7 +14,7 @@ export async function downloadReceivedAudio(
   if (!inbound || inbound.type !== "AUDIO" || !inbound.providerMetadata) return err(new DomainError("Mídia inbound não disponível", "INBOUND_MEDIA_NOT_FOUND"));
   const payload = inbound.payload as { externalMediaId?: unknown; contentType?: unknown };
   if (typeof payload.externalMediaId !== "string" || typeof payload.contentType !== "string") return err(new DomainError("Payload de áudio inválido", "INVALID_RECEIVED_AUDIO"));
-  const media = await downloader.download({ externalId: payload.externalMediaId, contentType: payload.contentType, providerMetadata: inbound.providerMetadata });
+  const media = await downloader.download({ externalId: payload.externalMediaId, contentType: payload.contentType, providerMetadata: inbound.providerMetadata, provider: inbound.provider });
   const recorded = await recordReceivedAudio(prisma, storage, { inboundMessageId: inbound.id, contentType: media.contentType, data: media.data });
   return recorded.ok ? ok({ inboundMessageId: inbound.id }) : recorded;
 }

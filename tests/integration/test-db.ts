@@ -7,7 +7,9 @@ export async function startTestDatabase(): Promise<{
   prisma: PrismaClient;
   stop: () => Promise<void>;
 }> {
-  const container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  const database = new PostgreSqlContainer("postgres:17-alpine");
+  if (process.env.AO_SESSION_ID) database.withLabels({ "ao.session": process.env.AO_SESSION_ID });
+  const container = await database.start();
   const databaseUrl = container.getConnectionUri();
 
   try {
