@@ -42,6 +42,11 @@ test("kanban permite mover lead pelo teclado", async ({ page }) => {
   await page.getByTestId("new-lead").click();
   await page.getByLabel("Nome").fill(leadName);
   await page.getByRole("button", { name: "Salvar" }).click();
+  await expect(
+    page.getByTestId("column-LEAD").getByText(leadName)
+  ).toBeVisible();
+  // Aguarda o refresh do servidor assentar para não abortar o arrasto no meio.
+  await page.waitForLoadState("networkidle");
 
   const dragHandle = page.getByRole("button", { name: `Mover ${leadName}` });
   await dragHandle.focus();
