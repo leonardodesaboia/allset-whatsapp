@@ -13,38 +13,12 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { QrCodePanel } from "./qr-code-panel";
+import { fetchMessagingConnectionState } from "@/infrastructure/messaging/connection-state";
 
 const config = getMessagingIntegrationConfig();
 
-async function fetchMessagingState(): Promise<{
-  ok: boolean;
-  state?: "open" | "connecting" | "close" | string;
-  error?: string;
-}> {
-  if (!config.baseUrl || !config.apiKey || !config.instance) {
-    return { ok: false, error: "NOT_CONFIGURED" };
-  }
-  try {
-    const base = config.baseUrl.replace(/\/$/, "");
-    const res = await fetch(
-      `${base}/instance/connectionState/${encodeURIComponent(config.instance)}`,
-      {
-        headers: { apikey: config.apiKey },
-        cache: "no-store",
-        signal: AbortSignal.timeout(5000),
-      }
-    );
-    const data = await res.json() as { state?: string; suspended?: boolean; suspension_reason?: string; instance?: { state?: string } };
-    if (res.status === 423 || data.suspended) return { ok: false, state: "Suspensa", error: `Suspensa: ${data.suspension_reason ?? "motivo indisponível"}` };
-    if (!res.ok) return { ok: false, error: `HTTP_${res.status}` };
-    return { ok: true, state: data.state ?? data.instance?.state ?? "unknown" };
-  } catch (err) {
-    return { ok: false, error: String(err instanceof Error ? err.message : err) };
-  }
-}
-
 export default async function MessagingSettingsPage() {
-  const stateResult = await fetchMessagingState();
+  const stateResult = await fetchMessagingConnectionState(config);
 
   const configured = config.baseUrl && config.apiKey && config.instance;
   const connected = stateResult.ok && stateResult.state === "open";

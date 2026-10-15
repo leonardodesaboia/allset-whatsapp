@@ -11,6 +11,7 @@ import { expireStaleBookings } from "../../application/customer/expire-stale-boo
 import { expireOpportunities } from "../../application/marketplace/expire-opportunities.usecase";
 import { startPeriodicTasks } from "./periodic-runner";
 import { withMaintenanceLock } from "./postgres-maintenance-lock";
+import { resolveInternalSchedulerStatus } from "./internal-scheduler-config";
 
 const hour = 60 * 60 * 1000;
 
@@ -42,8 +43,7 @@ function maintenanceTask(database: PrismaClient) {
 
 export function startInternalScheduler() {
   const state = globalThis as typeof globalThis & { allsetInternalScheduler?: () => void };
-  if (state.allsetInternalScheduler || env.REDIS_URL || env.INTERNAL_SCHEDULER_ENABLED === false) return;
-  if (env.NODE_ENV !== "production" && env.INTERNAL_SCHEDULER_ENABLED !== true) return;
+  if (state.allsetInternalScheduler || !resolveInternalSchedulerStatus(env).enabled) return;
   const tasks = [
     { name: "messaging/dispatch", intervalMs: 15_000, run: () => drainOutbox(prisma, createMessagingGatewayRegistry(), { actor: "system:internal-scheduler", limit: 20 }) },
     { name: "maintenance", intervalMs: 60_000, run: maintenanceTask(prisma) },
