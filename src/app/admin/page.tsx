@@ -72,12 +72,12 @@ export default async function AdminHomePage() {
 
   const actions: ActionItem[] = [
     { key: "dead", count: overview.outboxDeadLetter, label: "mensagens com falha permanente", hint: "O destinatário não recebeu. Recoloque na fila ou descarte.", href: "/admin/outbox", icon: XCircle, tone: "red" as const },
-    { key: "coverage", count: overview.coverageAwaitingValidation, label: "pedidos aguardando validação de cobertura", hint: "Confirme se o endereço é atendido ou envie para a lista de espera.", href: "/admin/bookings", icon: MapPin, tone: "red" as const },
+    { key: "coverage", count: overview.coverageAwaitingValidation, label: "pedidos aguardando validação de cobertura", hint: "Confirme se o endereço é atendido ou envie para a lista de espera.", href: "/admin/bookings?status=REVIEW_REQUIRED", icon: MapPin, tone: "red" as const },
     { key: "manual", count: overview.conversationsManualReview, label: "conversas em revisão manual", hint: "A automação parou e espera uma pessoa.", href: "/admin/customer-conversations?state=MANUAL_REVIEW", icon: AlertTriangle, tone: "red" as const },
     { key: "paused", count: overview.conversationsPaused, label: "conversas pausadas", hint: "Retome a automação ou responda manualmente.", href: "/admin/customer-conversations?state=PAUSED", icon: PauseCircle, tone: "amber" as const },
     { key: "failed", count: overview.outboxFailed, label: "mensagens com falha (nova tentativa automática)", hint: "Serão reenviadas sozinhas; verifique o erro se persistir.", href: "/admin/outbox", icon: Send, tone: "amber" as const },
     { key: "docs", count: overview.documentsPending, label: "documentos aguardando revisão", hint: "Aprove ou rejeite para liberar profissionais.", href: "/admin/documents", icon: FileCheck, tone: "amber" as const },
-    { key: "opps", count: overview.opportunitiesWithoutResponse, label: "oportunidades sem resposta", hint: "Enviadas aos profissionais, ainda sem aceite ou recusa.", href: "/admin/bookings", icon: Megaphone, tone: "amber" as const },
+    { key: "opps", count: overview.opportunitiesWithoutResponse, label: "oportunidades sem resposta", hint: "Enviadas aos profissionais, ainda sem aceite ou recusa.", href: "/admin/bookings?status=MATCHING", icon: Megaphone, tone: "amber" as const },
     { key: "stale", count: overview.staleBookings, label: `pedidos parados há mais de ${env.BOOKING_STALE_AFTER_HOURS} h`, hint: "Pagamento, busca de profissional ou revisão sem andamento.", href: "/admin/bookings", icon: Clock, tone: "amber" as const },
     { key: "leads", count: overview.leadsNeedingAttention, label: "profissionais precisam de atenção", hint: "Ligação solicitada, pedido de ajuda ou próxima ação vencida.", href: "/admin/recruitment?needs=1", icon: Users, tone: "amber" as const },
   ].filter((item) => item.count > 0);
