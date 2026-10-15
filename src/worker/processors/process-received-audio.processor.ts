@@ -24,7 +24,7 @@ export async function processReceivedAudioProcessor(
     createRuntimeStorage(),
     createInboundMediaDownloader(),
     createAudioTranscriber(),
-    { inboundMessageId, limit: 1 },
+    { inboundMessageId, limit: 1, logger },
   );
 
   const result = results[0];

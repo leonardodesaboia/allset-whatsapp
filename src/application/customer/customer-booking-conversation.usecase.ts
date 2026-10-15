@@ -99,13 +99,16 @@ async function enqueueQuestion(
 async function enqueueManualReviewNotice(
   tx: Prisma.TransactionClient,
   conversation: CustomerBookingConversation,
-  recipient: string
+  recipient: string,
+  reason: "COVERAGE_REVIEW" | "CONFIGURATION_MISSING"
 ): Promise<void> {
   await enqueueOutboundMessage(tx, {
     provider: conversation.provider,
     recipient,
     payload: textPayload(
-      "Recebemos seus dados. Vamos validar o endereço e continuaremos por aqui."
+      reason === "COVERAGE_REVIEW"
+        ? "Recebemos seus dados. Vamos validar o endereço e continuaremos por aqui."
+        : "Recebemos seu pedido. Nossa equipe vai continuar o atendimento por aqui em breve."
     ),
     idempotencyKey: `customer-booking:${conversation.id}:manual-review:${conversation.updatedAt.getTime()}`,
     correlationId: conversation.id,
@@ -415,8 +418,10 @@ export async function startCustomerBookingConversation(
         "PROPERTY_CHARACTERISTICS",
         pricingTierText(tiers)
       );
-    if (!active && !needsName && !tiers.length)
-      await enqueueManualReviewNotice(tx, conversation, customer.phoneE164);
+    if (!active && !needsName && !tiers.length) {
+      await enqueueManualReviewNotice(tx, conversation, customer.phoneE164, "CONFIGURATION_MISSING");
+      return { started: true as const, conversation, reason: "PRICING_NOT_CONFIGURED" as const };
+    }
     return { started: true as const, conversation };
   });
 }
@@ -689,7 +694,7 @@ export async function processCustomerBookingAnswer(
         },
       });
       if (!tiers.length) {
-        await enqueueManualReviewNotice(tx, updated, customer.phoneE164);
+        await enqueueManualReviewNotice(tx, updated, customer.phoneE164, "CONFIGURATION_MISSING");
         return { advanced: false, reason: "PRICING_NOT_CONFIGURED" as const };
       }
       await enqueueQuestion(
@@ -763,7 +768,7 @@ export async function processCustomerBookingAnswer(
             lastInboundAt: new Date(),
           },
         });
-        await enqueueManualReviewNotice(tx, updated, customer.phoneE164);
+        await enqueueManualReviewNotice(tx, updated, customer.phoneE164, "CONFIGURATION_MISSING");
         return { advanced: false, reason: "SERVICE_NOT_CONFIGURED" as const };
       }
       const booking = conversation.bookingId
@@ -1230,7 +1235,7 @@ export async function processCustomerBookingAnswer(
           version: { increment: 1 },
         },
       });
-      await enqueueManualReviewNotice(tx, updated, customer.phoneE164);
+      await enqueueManualReviewNotice(tx, updated, customer.phoneE164, "COVERAGE_REVIEW");
       return { advanced: true, state: "MANUAL_REVIEW" as const };
     }
 

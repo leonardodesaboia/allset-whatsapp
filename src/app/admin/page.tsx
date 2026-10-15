@@ -37,6 +37,8 @@ export default async function AdminHomePage() {
     bookingCounts,
     outboxCounts,
     staleBookings,
+    activePricingCount,
+    activeServiceCount,
   ] = await Promise.all([
     prisma.recruitmentLead.count({
       where: {
@@ -98,6 +100,8 @@ export default async function AdminHomePage() {
     countStaleBookings(prisma, {
       staleAfterHours: env.BOOKING_STALE_AFTER_HOURS,
     }),
+    prisma.propertyPricingTier.count({ where: { isActive: true } }),
+    prisma.serviceDefinition.count({ where: { isActive: true } }),
   ]);
 
   const [outboxPending, outboxDeadLetter] = outboxCounts;
@@ -119,12 +123,22 @@ export default async function AdminHomePage() {
       </div>
 
       {/* Alertas */}
-      {(needsMeCount > 0 || outboxDeadLetter > 0 || staleBookings > 0) && (
+      {(needsMeCount > 0 || outboxDeadLetter > 0 || staleBookings > 0 || activePricingCount === 0 || activeServiceCount === 0) && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-2">
           <div className="flex items-center gap-2 text-amber-800 font-semibold text-sm">
             <AlertTriangle className="w-4 h-4" />
             Atenção necessária
           </div>
+          {activePricingCount === 0 && (
+            <Link href="/admin/settings/pricing" className="block text-sm text-amber-700 hover:underline">
+              Nenhuma faixa de preço ativa. Configure os preços para liberar o agendamento automático pelo WhatsApp.
+            </Link>
+          )}
+          {activeServiceCount === 0 && (
+            <p className="text-sm text-amber-700">
+              Nenhum serviço ativo. Ative um serviço no cadastro operacional para liberar o agendamento automático pelo WhatsApp.
+            </p>
+          )}
           {needsMeCount > 0 && (
             <Link
               href="/admin/recruitment?needs=1"

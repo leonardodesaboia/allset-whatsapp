@@ -5,8 +5,9 @@ import type { StorageProvider } from "../../domain/ports/storage-provider";
 import { routeInboundText } from "./route-inbound-text.usecase";
 import { downloadReceivedAudio } from "./download-received-audio.usecase";
 import { transcribeReceivedAudio } from "./transcribe-received-audio.usecase";
+import type { OperationalLogger } from "../../domain/ports/operational-logger";
 
-export async function processPendingReceivedAudio(prisma: PrismaClient, storage: StorageProvider, downloader: InboundMediaDownloader, transcriber: AudioTranscriber, input: { inboundMessageId?: string; limit: number }) {
+export async function processPendingReceivedAudio(prisma: PrismaClient, storage: StorageProvider, downloader: InboundMediaDownloader, transcriber: AudioTranscriber, input: { inboundMessageId?: string; limit: number; logger?: OperationalLogger }) {
   const ids = input.inboundMessageId ? [input.inboundMessageId] : (await prisma.inboundMessage.findMany({
     // A transcript may already exist when routing failed. Keep recovering the
     // inbound until the conversation transaction has actually consumed it.
@@ -33,7 +34,7 @@ export async function processPendingReceivedAudio(prisma: PrismaClient, storage:
         phoneE164: inbound.sender,
         text: transcription.value.text,
         provider: inbound.provider,
-      });
+      }, input.logger);
       results.push({ inboundMessageId, ok: true });
     } catch (error) { results.push({ inboundMessageId, ok: false, error: error instanceof Error ? error.message : "MEDIA_DOWNLOAD_FAILED" }); }
   }
