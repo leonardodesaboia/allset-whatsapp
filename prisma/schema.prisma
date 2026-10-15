@@ -219,6 +219,8 @@ model InboundMessage {
   receivedAt    DateTime @default(now())
   createdAt     DateTime @default(now())
   processedAt   DateTime?
+  mediaProcessingFailedAt DateTime?
+  mediaProcessingError String?
   receivedAudio ReceivedAudio?
 
   @@unique([provider, externalId])
@@ -281,6 +283,17 @@ model OutboxMessage {
   @@index([status, leaseExpiresAt])
   @@index([correlationId])
   @@index([leaseExpiresAt])
+}
+
+// Shared across all dispatch actors/replicas, including aliases of one gateway.
+model MessagingProviderState {
+  provider       String   @id
+  blockedUntil   DateTime?
+  lastError      String?
+  httpStatus     Int?
+  leaseExpiresAt DateTime?
+  leaseToken     String?
+  updatedAt      DateTime @default(now()) @updatedAt
 }
 
 model RecruitmentLead {

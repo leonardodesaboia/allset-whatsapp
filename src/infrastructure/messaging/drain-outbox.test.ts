@@ -10,6 +10,12 @@ beforeEach(() => vi.resetAllMocks());
 const prisma = {} as PrismaClient;
 const registry = { get: vi.fn() };
 describe("drainOutbox", () => {
+  it("logs one configuration error and stops the batch on provider authentication failure", async () => {
+    vi.mocked(dispatchNextOutboxMessage).mockResolvedValue({ id: "auth", provider: "evolution", recipient: "+5511999999999", status: "FAILED", lastError: "WhatsMiau HTTP 401: Invalid API Key" } as never);
+    expect(await drainOutbox(prisma, registry, { actor: "test", limit: 20 })).toBe(1);
+    expect(logger.error).toHaveBeenCalledTimes(1); expect(logger.warn).not.toHaveBeenCalled();
+    expect(dispatchNextOutboxMessage).toHaveBeenCalledTimes(1);
+  });
   it("passes a failed backlog entry and sends the fresh reply in the same drain", async () => {
     vi.mocked(dispatchNextOutboxMessage).mockResolvedValueOnce({ id: "old", provider: "evolution", recipient: "+5511999999999", status: "FAILED", lastError: "WhatsMiau HTTP 400: invalid number" } as never)
       .mockResolvedValueOnce({ id: "new", status: "SENT" } as never).mockResolvedValueOnce(null);

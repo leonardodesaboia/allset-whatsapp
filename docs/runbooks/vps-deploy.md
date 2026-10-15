@@ -337,6 +337,14 @@ Remova agendamentos externos antigos para evitar trabalho redundante.
 O app deve ficar continuamente em execução; durante downtime não há timers.
 Ao reiniciar, as tarefas consultam o banco e recuperam o trabalho pendente.
 
+O backoff de envio começa em 30s e cresce exponencialmente usando `availableAt`,
+compartilhado por todos os dispatchers. HTTP 401/403 pausa o gateway por cinco
+minutos em `MessagingProviderState`, sem gastar tentativas ou gerar uma falha
+por mensagem da fila. Essa pausa inclui aliases e sobrevive ao restart.
+Mídia sem downloader recebe uma marca terminal para revisão manual, com uma
+única auditoria/log; falhas temporárias de storage continuam recuperáveis.
+Detalhes e consulta de revisão em [runbook WhatsMiau](whatsmiau-messaging.md).
+
 ---
 
 ### Webhook da Evolution

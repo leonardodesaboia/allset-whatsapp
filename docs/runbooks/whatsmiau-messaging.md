@@ -163,3 +163,56 @@ O body de texto segue a doc: `{ "number": "5511999999999", "text": "Oi" }`,
 sem sufixo JID. O adapter rejeita `@lid` em vez de enviar ao telefone falso.
 Números falsos já persistidos sem mapeamento confiável não são corrigidos
 automaticamente; revise essas linhas antes de reenviar dead letters.
+
+## Backoff, credenciais rejeitadas e mídia legada
+
+Todos os dispatchers (scheduler, webhook, áudio, cron manual e worker) usam
+`OutboxMessage.availableAt` como próxima tentativa. Erros transitórios têm
+backoff de 30s, 60s, 120s, 240s e assim por diante, com teto de uma hora e
+até oito tentativas. Os antigos atrasos de 2s/4s/8s eram inferiores ao tick
+de 15s; não indicavam que o filtro SQL estava sendo ignorado.
+
+HTTP 401/403 é falha de configuração do gateway. Uma lease persistida em
+`MessagingProviderState` serializa envios e uma pausa de cinco minutos impede
+que outros dispatchers/réplicas testem a mesma credencial repetidamente. O alias
+`evolution` compartilha a pausa de `whatsmiau` quando ambos apontam para o mesmo
+adapter. Outros gateways continuam disponíveis.
+
+A mensagem rejeitada fica `FAILED`, com `availableAt` no fim da pausa; seu
+contador `attempts` é restaurado. As outras mensagens do gateway permanecem
+intactas. O drainer registra um único `error` e encerra aquele lote; chamadas
+durante a pausa não enviam nem geram avisos repetidos. A pausa sobrevive ao
+restart. A correção da chave continua sendo uma configuração do operador no
+Easypanel; depois de corrigida, a retomada pode aguardar até cinco minutos.
+Reenfileirar uma mensagem não ignora a pausa global. Dead letters anteriores
+não são reabertas automaticamente.
+
+Se não existe downloader para a mídia persistida (por exemplo, áudio antigo
+criptografado da Evolution após remover suas credenciais), o inbound recebe
+`mediaProcessingFailedAt` e `mediaProcessingError=MEDIA_DOWNLOADER_UNAVAILABLE`.
+É criada uma única auditoria `INBOUND_MEDIA_NEEDS_MANUAL_REVIEW`. O registro
+fica fora da seleção automática e das tentativas por ID, inclusive BullMQ.
+`processedAt` permanece nulo: a mensagem não foi consumida pela conversa.
+Payload, metadata e arquivos existentes são preservados. Falhas temporárias
+de rede/storage não recebem essa marca e continuam recuperáveis.
+
+Consulta para revisão manual (sem expor remetentes ou URLs):
+
+```sql
+SELECT id, provider, "mediaProcessingError", "mediaProcessingFailedAt"
+FROM "InboundMessage"
+WHERE "mediaProcessingFailedAt" IS NOT NULL AND "processedAt" IS NULL;
+```
+
+Após disponibilizar o downloader original ou recuperar a mídia, o operador
+pode liberar **uma mensagem específica** para nova tentativa:
+
+```sql
+UPDATE "InboundMessage"
+SET "mediaProcessingFailedAt" = NULL, "mediaProcessingError" = NULL
+WHERE id = '<uuid-revisado>' AND "processedAt" IS NULL;
+```
+
+O deploy inclui migração aditiva para esses campos e `MessagingProviderState`.
+O entrypoint do app aplica `prisma migrate deploy` antes de iniciar o servidor.
+Nenhuma credencial é gravada no estado de pausa; o erro é sanitizado pelo adapter.

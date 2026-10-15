@@ -18,6 +18,10 @@ export async function drainOutbox(prisma: PrismaClient, registry: MessagingGatew
         status: result.status, httpStatus: Number(providerError.match(/HTTP (\d{3})/)?.[1]) || null,
         providerError, actor: input.actor,
       };
+      if (details.httpStatus === 401 || details.httpStatus === 403) {
+        logger.error(details, "Outbox provider authentication failed; gateway paused, retry budget preserved");
+        break;
+      }
       if (result.status === "DEAD_LETTER") logger.error(details, "Outbox delivery exhausted retries");
       else logger.warn(details, "Outbox delivery failed; retry scheduled");
     }

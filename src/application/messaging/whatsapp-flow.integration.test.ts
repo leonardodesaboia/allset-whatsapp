@@ -624,6 +624,7 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
       where: { id: queued.id },
       data: { leaseExpiresAt: new Date(0) },
     });
+    await prisma.messagingProviderState.update({ where: { provider: "mock" }, data: { leaseExpiresAt: new Date(0) } });
     expect((await dispatchNextOutboxMessage(prisma, registry))?.status).toBe(
       "SENT"
     );
