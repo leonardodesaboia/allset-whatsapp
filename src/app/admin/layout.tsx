@@ -7,6 +7,8 @@ import { prisma } from "@/infrastructure/db/prisma-client";
 import { NavLinkClient } from "./nav-link-client";
 import { SignOutButton } from "./sign-out-button";
 import { MobileNav } from "./mobile-nav";
+import { getOperationsOverview } from "@/application/admin/operations-overview-read-model";
+import { env } from "@/env";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +21,15 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     select: { id: true, email: true, fullName: true },
   });
   if (!admin) redirect("/login");
+
+  const overview = await getOperationsOverview(prisma, { staleAfterHours: env.BOOKING_STALE_AFTER_HOURS });
+  const badges = {
+    "/admin/bookings": overview.coverageAwaitingValidation,
+    "/admin/recruitment": overview.leadsNeedingAttention,
+    "/admin/customer-conversations": overview.conversationsPaused + overview.conversationsManualReview,
+    "/admin/documents": overview.documentsPending,
+    "/admin/outbox": overview.outboxFailed + overview.outboxDeadLetter,
+  };
 
   const initials = (admin.fullName ?? admin.email)
     .split(/[\s@]/)
@@ -44,12 +55,12 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         {/* Nav */}
         <nav className="flex-1 py-4 px-2 space-y-0.5">
           <NavLinkClient href="/admin" label="Painel" iconName="LayoutDashboard" exact />
-          <NavLinkClient href="/admin/bookings" label="Agendamentos" iconName="Calendar" />
-          <NavLinkClient href="/admin/recruitment" label="Profissionais" iconName="Users" />
-          <NavLinkClient href="/admin/customer-conversations" label="Conversas" iconName="MessageSquare" />
+          <NavLinkClient href="/admin/bookings" badge={badges["/admin/bookings"]} label="Agendamentos" iconName="Calendar" />
+          <NavLinkClient href="/admin/recruitment" badge={badges["/admin/recruitment"]} label="Profissionais" iconName="Users" />
+          <NavLinkClient href="/admin/customer-conversations" badge={badges["/admin/customer-conversations"]} label="Conversas" iconName="MessageSquare" />
           <p className="px-2 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Operação</p>
-          <NavLinkClient href="/admin/documents" label="Documentos" iconName="FileCheck" />
-          <NavLinkClient href="/admin/outbox" label="Mensagens" iconName="Send" />
+          <NavLinkClient href="/admin/documents" badge={badges["/admin/documents"]} label="Documentos" iconName="FileCheck" />
+          <NavLinkClient href="/admin/outbox" badge={badges["/admin/outbox"]} label="Mensagens" iconName="Send" />
           <p className="px-2 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Configurações</p>
           <NavLinkClient href="/admin/settings/pricing" label="Preços" iconName="Settings" />
           <NavLinkClient href="/admin/settings/evolution" label="WhatsApp" iconName="Wifi" />
@@ -74,7 +85,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
 
       {/* Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <MobileNav admin={{ fullName: admin.fullName, email: admin.email ?? "" }} initials={initials} />
+        <MobileNav admin={{ fullName: admin.fullName, email: admin.email ?? "" }} initials={initials} badges={badges} />
         <main className="flex-1 overflow-y-auto">{children}</main>
       </div>
     </div>

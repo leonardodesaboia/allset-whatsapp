@@ -32,12 +32,14 @@ export function NavLinkClient({
   iconName,
   exact,
   onClick,
+  badge,
 }: {
   href: string;
   label: string;
   iconName: string;
   exact?: boolean;
   onClick?: () => void;
+  badge?: number | undefined;
 }) {
   const pathname = usePathname();
   const isActive = exact ? pathname === href : pathname.startsWith(href);
@@ -55,7 +57,18 @@ export function NavLinkClient({
       )}
     >
       {Icon && <Icon className="w-4 h-4 shrink-0" />}
-      {label}
+      <span className="flex-1">{label}</span>
+      {badge ? (
+        <span
+          className={cn(
+            "min-w-5 rounded-full px-1.5 py-0.5 text-center text-[11px] font-semibold tabular-nums leading-none",
+            isActive ? "bg-white/25 text-white" : "bg-amber-500 text-slate-900"
+          )}
+          aria-label={`${badge} pendente${badge > 1 ? "s" : ""}`}
+        >
+          {badge > 99 ? "99+" : badge}
+        </span>
+      ) : null}
     </Link>
   );
 }

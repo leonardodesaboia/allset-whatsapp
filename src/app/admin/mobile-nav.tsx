@@ -8,9 +8,10 @@ import { SignOutButton } from "./sign-out-button";
 interface MobileNavProps {
   admin: { fullName: string | null; email: string };
   initials: string;
+  badges?: Partial<Record<string, number>>;
 }
 
-export function MobileNav({ admin, initials }: MobileNavProps) {
+export function MobileNav({ admin, initials, badges = {} }: MobileNavProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -110,12 +111,12 @@ export function MobileNav({ admin, initials }: MobileNavProps) {
 
             <nav className="flex-1 py-4 px-2 space-y-0.5 overflow-y-auto">
               <NavLinkClient href="/admin" label="Painel" iconName="LayoutDashboard" exact onClick={close} />
-              <NavLinkClient href="/admin/bookings" label="Agendamentos" iconName="Calendar" onClick={close} />
-              <NavLinkClient href="/admin/recruitment" label="Profissionais" iconName="Users" onClick={close} />
-              <NavLinkClient href="/admin/customer-conversations" label="Conversas" iconName="MessageSquare" onClick={close} />
+              <NavLinkClient href="/admin/bookings" badge={badges["/admin/bookings"]} label="Agendamentos" iconName="Calendar" onClick={close} />
+              <NavLinkClient href="/admin/recruitment" badge={badges["/admin/recruitment"]} label="Profissionais" iconName="Users" onClick={close} />
+              <NavLinkClient href="/admin/customer-conversations" badge={badges["/admin/customer-conversations"]} label="Conversas" iconName="MessageSquare" onClick={close} />
               <p className="px-2 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Operação</p>
-              <NavLinkClient href="/admin/documents" label="Documentos" iconName="FileCheck" onClick={close} />
-              <NavLinkClient href="/admin/outbox" label="Mensagens" iconName="Send" onClick={close} />
+              <NavLinkClient href="/admin/documents" badge={badges["/admin/documents"]} label="Documentos" iconName="FileCheck" onClick={close} />
+              <NavLinkClient href="/admin/outbox" badge={badges["/admin/outbox"]} label="Mensagens" iconName="Send" onClick={close} />
               <p className="px-2 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Configurações</p>
               <NavLinkClient href="/admin/settings/pricing" label="Preços" iconName="Settings" onClick={close} />
               <NavLinkClient href="/admin/settings/evolution" label="WhatsApp" iconName="Wifi" onClick={close} />
