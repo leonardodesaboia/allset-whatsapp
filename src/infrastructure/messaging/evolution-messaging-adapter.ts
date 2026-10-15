@@ -1,5 +1,6 @@
 import type { StorageProvider } from "../../domain/ports/storage-provider";
 import type { MessagingGateway, SendMessageInput, SendMessageResult } from "../../domain/ports/messaging-gateway";
+import { ProviderAuthenticationError } from "../../domain/messaging/provider-authentication-error";
 
 export interface EvolutionConfig { baseUrl: string; apiKey: string; instance: string; }
 export class EvolutionMessagingAdapter implements MessagingGateway {
@@ -22,6 +23,7 @@ export class EvolutionMessagingAdapter implements MessagingGateway {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(60_000),
     });
+    if (response.status === 401 || response.status === 403) throw new ProviderAuthenticationError(`Evolution HTTP ${response.status}`, response.status);
     if (!response.ok) throw new Error(`Evolution retornou ${response.status}`);
     const data = await response.json() as { key?: { id?: string } };
     return { externalId: data.key?.id ?? input.idempotencyKey };

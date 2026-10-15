@@ -18,7 +18,7 @@ describe("pending inbound audio", () => {
     const logger = { error: vi.fn() };
     const results = await processPendingReceivedAudio(prisma, new InMemoryStorageProvider(), { download: vi.fn() }, { transcribe: vi.fn() }, { limit: 10, logger });
     expect(results).toEqual([{ inboundMessageId: "new", ok: true }, { inboundMessageId: "old", ok: true }]);
-    expect(prisma.inboundMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { type: "AUDIO", processedAt: null } }));
+    expect(prisma.inboundMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { type: "AUDIO", processedAt: null, mediaProcessingFailedAt: null } }));
     expect(routeInboundText).toHaveBeenCalledWith(prisma, expect.objectContaining({ provider: "whatsmiau", inboundMessageId: "new", text: "Oi" }), logger);
     expect(routeInboundText).toHaveBeenCalledWith(prisma, expect.objectContaining({ provider: "evolution", inboundMessageId: "old" }), logger);
   });

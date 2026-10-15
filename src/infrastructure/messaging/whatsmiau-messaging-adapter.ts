@@ -1,5 +1,6 @@
 import type { StorageProvider } from "../../domain/ports/storage-provider";
 import type { MessagingGateway, SendMessageInput, SendMessageResult } from "../../domain/ports/messaging-gateway";
+import { ProviderAuthenticationError } from "../../domain/messaging/provider-authentication-error";
 
 export interface WhatsMiauConfig { baseUrl: string; apiKey: string; instance: string; }
 export class WhatsMiauMessagingAdapter implements MessagingGateway {
@@ -39,10 +40,13 @@ export class WhatsMiauMessagingAdapter implements MessagingGateway {
           const chunk = value.subarray(0, 2048 - bytes);
           body += decoder.decode(chunk, { stream: true }); bytes += chunk.length;
         }
-      } finally { await reader?.cancel(); reader?.releaseLock(); }
+      } catch { body = body || "Provider error body unavailable"; }
+      finally { await reader?.cancel().catch(() => {}); reader?.releaseLock(); }
       const safeBody = body.replaceAll(this.config.apiKey, "[REDACTED]")
         .replace(/\d{8,}/g, (phone) => `***${phone.slice(-4)}`).replace(/[\r\n\t]/g, " ").slice(0, 400);
-      throw new Error(`WhatsMiau HTTP ${response.status}: ${safeBody}`);
+      const message = `WhatsMiau HTTP ${response.status}: ${safeBody}`;
+      if (response.status === 401 || response.status === 403) throw new ProviderAuthenticationError(message, response.status);
+      throw new Error(message);
     }
     // The response schema and provider idempotency support are undocumented.
     const data = await response.json().catch(() => null) as { key?: { id?: string } } | null;

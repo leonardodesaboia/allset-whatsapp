@@ -29,7 +29,9 @@ export async function dispatchMessageProcessor(
     if (result.status === "FAILED") {
       await publishJobSafe({
         name: JOB_NAME.MESSAGE_DISPATCH,
-        jobId: `outbox-retry:${result.id}:${result.attempts}`,
+        // Authentication probes preserve attempts; include the persisted schedule
+        // so a completed BullMQ retry does not swallow the next cooldown probe.
+        jobId: `outbox-retry:${result.id}:${result.attempts}:${result.availableAt.getTime()}`,
         payload: {},
         delay: Math.max(0, result.availableAt.getTime() - Date.now()),
       });
