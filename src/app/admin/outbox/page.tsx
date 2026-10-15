@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { RefreshCw, Trash2, AlertCircle, Clock, Send, RotateCcw } from "lucide-react";
+import {
+  RefreshCw,
+  Trash2,
+  AlertCircle,
+  Clock,
+  Send,
+  RotateCcw,
+} from "lucide-react";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -42,11 +49,16 @@ export default async function OutboxPage({
   searchParams: Promise<{ filter?: string; page?: string }>;
 }) {
   const params = await searchParams;
-  const filter = FILTERS.find((item) => item.value === params.filter)?.value ?? "all";
+  const filter =
+    FILTERS.find((item) => item.value === params.filter)?.value ?? "all";
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
   const statusWhere =
     filter === "all"
-      ? { status: { in: ["FAILED", "DEAD_LETTER"] as Array<"FAILED" | "DEAD_LETTER"> } }
+      ? {
+          status: {
+            in: ["FAILED", "DEAD_LETTER"] as Array<"FAILED" | "DEAD_LETTER">,
+          },
+        }
       : { status: filter };
 
   const [messages, total, pending, failedCount, deadCount] = await Promise.all([
@@ -63,7 +75,11 @@ export default async function OutboxPage({
   ]);
 
   const phones = [
-    ...new Set(messages.map((message) => recipientPhone(message.recipient)).filter((phone): phone is string => !!phone)),
+    ...new Set(
+      messages
+        .map((message) => recipientPhone(message.recipient))
+        .filter((phone): phone is string => !!phone)
+    ),
   ];
   const [users, leads] = phones.length
     ? await Promise.all([
@@ -72,7 +88,11 @@ export default async function OutboxPage({
           select: {
             fullName: true,
             phoneE164: true,
-            customerBookingConversations: { select: { id: true }, take: 1, orderBy: { updatedAt: "desc" } },
+            customerBookingConversations: {
+              select: { id: true },
+              take: 1,
+              orderBy: { updatedAt: "desc" },
+            },
           },
         }),
         prisma.recruitmentLead.findMany({
@@ -92,8 +112,12 @@ export default async function OutboxPage({
   return (
     <div className="max-w-5xl space-y-6 p-4 sm:p-6">
       <div>
-        <h1 className="text-xl font-bold text-slate-900">Mensagens enviadas pelo WhatsApp</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Acompanhe o que não foi entregue, recoloque na fila ou descarte</p>
+        <h1 className="text-xl font-bold text-slate-900">
+          Mensagens enviadas pelo WhatsApp
+        </h1>
+        <p className="text-sm text-slate-500 mt-0.5">
+          Acompanhe o que não foi entregue, recoloque na fila ou descarte
+        </p>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
@@ -103,34 +127,64 @@ export default async function OutboxPage({
               <CardTitle as="p">Na fila</CardTitle>
               <Clock className="w-4 h-4 text-slate-400" aria-hidden />
             </div>
-            <p className="text-3xl font-bold text-slate-900 tabular-nums">{pending}</p>
+            <p className="text-3xl font-bold text-slate-900 tabular-nums">
+              {pending}
+            </p>
           </CardHeader>
         </Card>
         <Card className={failedCount > 0 ? "border-amber-200" : ""}>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle as="p" className={failedCount > 0 ? "text-amber-500" : ""}>Com nova tentativa</CardTitle>
-              <AlertCircle className={`w-4 h-4 ${failedCount > 0 ? "text-amber-400" : "text-slate-400"}`} aria-hidden />
+              <CardTitle
+                as="p"
+                className={failedCount > 0 ? "text-amber-500" : ""}
+              >
+                Com nova tentativa
+              </CardTitle>
+              <AlertCircle
+                className={`w-4 h-4 ${failedCount > 0 ? "text-amber-400" : "text-slate-400"}`}
+                aria-hidden
+              />
             </div>
-            <p className={`text-3xl font-bold tabular-nums ${failedCount > 0 ? "text-amber-600" : "text-slate-900"}`}>{failedCount}</p>
+            <p
+              className={`text-3xl font-bold tabular-nums ${failedCount > 0 ? "text-amber-600" : "text-slate-900"}`}
+            >
+              {failedCount}
+            </p>
           </CardHeader>
         </Card>
         <Card className={deadCount > 0 ? "border-red-200" : ""}>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle as="p" className={deadCount > 0 ? "text-red-500" : ""}>Falhas permanentes</CardTitle>
-              <Send className={`w-4 h-4 ${deadCount > 0 ? "text-red-400" : "text-slate-400"}`} aria-hidden />
+              <CardTitle as="p" className={deadCount > 0 ? "text-red-500" : ""}>
+                Falhas permanentes
+              </CardTitle>
+              <Send
+                className={`w-4 h-4 ${deadCount > 0 ? "text-red-400" : "text-slate-400"}`}
+                aria-hidden
+              />
             </div>
-            <p className={`text-3xl font-bold tabular-nums ${deadCount > 0 ? "text-red-600" : "text-slate-900"}`}>{deadCount}</p>
+            <p
+              className={`text-3xl font-bold tabular-nums ${deadCount > 0 ? "text-red-600" : "text-slate-900"}`}
+            >
+              {deadCount}
+            </p>
           </CardHeader>
         </Card>
       </div>
 
-      <nav aria-label="Filtrar mensagens" className="flex flex-wrap gap-2 text-sm">
+      <nav
+        aria-label="Filtrar mensagens"
+        className="flex flex-wrap gap-2 text-sm"
+      >
         {FILTERS.map((item) => (
           <Link
             key={item.value}
-            href={item.value === "all" ? "/admin/outbox" : `/admin/outbox?filter=${item.value}`}
+            href={
+              item.value === "all"
+                ? "/admin/outbox"
+                : `/admin/outbox?filter=${item.value}`
+            }
             aria-current={filter === item.value ? "page" : undefined}
             className="rounded border border-slate-200 bg-white px-3 py-2 min-h-11 inline-flex items-center aria-[current=page]:ring-2 aria-[current=page]:ring-blue-500"
           >
@@ -142,9 +196,14 @@ export default async function OutboxPage({
       {messages.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center">
-            <RefreshCw className="w-8 h-8 text-slate-300 mx-auto mb-2" aria-hidden />
+            <RefreshCw
+              className="w-8 h-8 text-slate-300 mx-auto mb-2"
+              aria-hidden
+            />
             <p className="text-sm font-medium text-slate-600">Fila saudável</p>
-            <p className="text-xs text-slate-400 mt-1">Nenhuma mensagem com falha neste filtro.</p>
+            <p className="text-xs text-slate-400 mt-1">
+              Nenhuma mensagem com falha neste filtro.
+            </p>
           </CardContent>
         </Card>
       ) : (
@@ -210,10 +269,18 @@ export default async function OutboxPage({
                   <th className="px-4 py-2.5 w-10">
                     <SelectAllCheckbox formId={BATCH_FORM_ID} />
                   </th>
-                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Destinatário</th>
-                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Situação</th>
-                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">Último erro</th>
-                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Atualizado</th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Destinatário
+                  </th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Situação
+                  </th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">
+                    Último erro
+                  </th>
+                  <th className="text-left px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">
+                    Atualizado
+                  </th>
                   <th className="px-3 py-2.5" />
                 </tr>
               </thead>
@@ -223,10 +290,16 @@ export default async function OutboxPage({
                   const phone = recipientPhone(message.recipient);
                   const user = phone ? userByPhone.get(phone) : undefined;
                   const lead = phone ? leadByPhone.get(phone) : undefined;
-                  const conversationId = user?.customerBookingConversations[0]?.id;
+                  const conversationId =
+                    user?.customerBookingConversations[0]?.id;
                   const dead = message.status === "DEAD_LETTER";
                   return (
-                    <tr key={message.id} className={dead ? "hover:bg-red-50/50" : "hover:bg-amber-50/50"}>
+                    <tr
+                      key={message.id}
+                      className={
+                        dead ? "hover:bg-red-50/50" : "hover:bg-amber-50/50"
+                      }
+                    >
                       <td className="px-4 py-3 align-top">
                         <input
                           type="checkbox"
@@ -239,44 +312,71 @@ export default async function OutboxPage({
                       </td>
                       <td className="px-3 py-3 align-top">
                         <p className="text-sm font-medium text-slate-900">
-                          {user?.fullName ?? lead?.fullName ?? "Contato desconhecido"}
+                          {user?.fullName ??
+                            lead?.fullName ??
+                            "Contato desconhecido"}
                         </p>
-                        <p className="text-xs text-slate-500">{formatPhone(phone ?? message.recipient)}</p>
+                        <p className="text-xs text-slate-500">
+                          {formatPhone(phone ?? message.recipient)}
+                        </p>
                         <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs">
                           {conversationId && (
-                            <Link href={`/admin/customer-conversations/${conversationId}`} className="text-blue-700 hover:underline">
+                            <Link
+                              href={`/admin/customer-conversations/${conversationId}`}
+                              className="text-blue-700 hover:underline"
+                            >
                               Ver conversa
                             </Link>
                           )}
                           {lead && (
-                            <Link href={`/admin/recruitment/${lead.id}`} className="text-blue-700 hover:underline">
+                            <Link
+                              href={`/admin/recruitment/${lead.id}`}
+                              className="text-blue-700 hover:underline"
+                            >
                               Ver profissional
                             </Link>
                           )}
                         </p>
-                        {payload.text && <p className="text-xs text-slate-500 line-clamp-2 mt-1 max-w-xs">{payload.text}</p>}
+                        {payload.text && (
+                          <p className="text-xs text-slate-500 line-clamp-2 mt-1 max-w-xs">
+                            {payload.text}
+                          </p>
+                        )}
                       </td>
                       <td className="px-3 py-3 align-top">
-                        <Badge variant={dead ? "destructive" : "warning"}>{dead ? "Falha permanente" : "Nova tentativa"}</Badge>
+                        <Badge variant={dead ? "destructive" : "warning"}>
+                          {dead ? "Falha permanente" : "Nova tentativa"}
+                        </Badge>
                         <p className="text-xs text-slate-500 mt-1">
-                          {message.attempts} tentativa{message.attempts === 1 ? "" : "s"} · {TYPE_LABEL[message.type] ?? message.type}
+                          {message.attempts} tentativa
+                          {message.attempts === 1 ? "" : "s"} ·{" "}
+                          {TYPE_LABEL[message.type] ?? message.type}
                         </p>
                         {!dead && (
                           <p className="text-xs text-slate-500">
-                            {message.availableAt > now ? `Próxima ${formatRelative(message.availableAt, now)}` : "Pronta para envio"}
+                            {message.availableAt > now
+                              ? `Próxima ${formatRelative(message.availableAt, now)}`
+                              : "Pronta para envio"}
                           </p>
                         )}
                       </td>
                       <td className="px-3 py-3 align-top hidden lg:table-cell">
                         {message.lastError ? (
-                          <p className="text-xs text-red-600 font-mono line-clamp-3 max-w-[16rem]">{message.lastError}</p>
+                          <p className="text-xs text-red-600 font-mono line-clamp-3 max-w-[16rem]">
+                            {message.lastError}
+                          </p>
                         ) : (
                           <span className="text-slate-300">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-3 align-top text-xs text-slate-500 hidden md:table-cell" title={formatDateTime(message.updatedAt)}>
+                      <td
+                        className="px-3 py-3 align-top text-xs text-slate-500 hidden md:table-cell"
+                        title={formatDateTime(message.updatedAt)}
+                      >
                         {formatRelative(message.updatedAt, now)}
-                        <span className="block text-slate-400">{formatDateTime(message.updatedAt)}</span>
+                        <span className="block text-slate-400">
+                          {formatDateTime(message.updatedAt)}
+                        </span>
                       </td>
                       <td className="px-3 py-3 align-top">
                         <div className="flex flex-col items-end gap-2">
@@ -321,15 +421,30 @@ export default async function OutboxPage({
       )}
 
       {totalPages > 1 && (
-        <nav aria-label="Paginação" className="flex items-center justify-between text-sm">
+        <nav
+          aria-label="Paginação"
+          className="flex items-center justify-between text-sm"
+        >
           {page > 1 ? (
-            <Link href={pageHref(page - 1)} className="text-blue-700 hover:underline">← Anterior</Link>
+            <Link
+              href={pageHref(page - 1)}
+              className="text-blue-700 hover:underline"
+            >
+              ← Anterior
+            </Link>
           ) : (
             <span />
           )}
-          <span className="text-slate-500">Página {page} de {totalPages}</span>
+          <span className="text-slate-500">
+            Página {page} de {totalPages}
+          </span>
           {page < totalPages ? (
-            <Link href={pageHref(page + 1)} className="text-blue-700 hover:underline">Próxima →</Link>
+            <Link
+              href={pageHref(page + 1)}
+              className="text-blue-700 hover:underline"
+            >
+              Próxima →
+            </Link>
           ) : (
             <span />
           )}
