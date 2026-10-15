@@ -4,7 +4,8 @@ import type { InboundMessagePayload } from "../../domain/messaging/message";
 const schema = z.object({
   event: z.literal("messages.upsert"),
   data: z.object({
-    key: z.object({ id: z.string().min(1).max(200), remoteJid: z.string().regex(/^\d{8,15}@s\.whatsapp\.net$/), fromMe: z.boolean().optional() }),
+    key: z.object({ id: z.string().min(1).max(200), remoteJid: z.string(), remoteJidAlt: z.string().optional(), senderPn: z.string().optional(), fromMe: z.boolean().optional() }),
+    senderPn: z.string().optional(),
     mediaUrl: z.string().optional(),
     message: z.object({
       conversation: z.string().optional(),
@@ -18,8 +19,14 @@ const schema = z.object({
 export function normalizeWhatsMiauWebhook(body: unknown, recipient = "allset"): { externalId: string; sender: string; recipient: string; payload: InboundMessagePayload; providerMetadata?: Record<string, unknown> } | null {
   const parsed = schema.safeParse(body);
   if (!parsed.success || parsed.data.data.key.fromMe) return null;
-  const { key, message, mediaUrl: dataMediaUrl } = parsed.data.data;
-  const common = { externalId: key.id, sender: `+${key.remoteJid.split("@")[0]}`, recipient };
+  const { key, message, mediaUrl: dataMediaUrl, senderPn } = parsed.data.data;
+  const phoneJid = /^\d{8,15}@s\.whatsapp\.net$/.test(key.remoteJid) ? key.remoteJid : null;
+  // A LID is never a phone. Only explicit PN fields may resolve it; groups stay ignored.
+  const realPhone = phoneJid ?? (key.remoteJid.endsWith("@lid")
+    ? [key.remoteJidAlt, key.senderPn, senderPn].find((value) => value && /^\+?\d{8,15}(?:@s\.whatsapp\.net)?$/.test(value))
+    : undefined);
+  if (!realPhone) return null;
+  const common = { externalId: key.id, sender: `+${realPhone.split("@")[0]!.replace(/^\+/, "")}`, recipient };
   const text = message.conversation ?? message.extendedTextMessage?.text;
   if (text && Buffer.byteLength(text, "utf8") > 4096) return null;
   if (text) return { ...common, payload: { version: 1, type: "TEXT", text } };

@@ -236,7 +236,7 @@ Na tentativa de corrigir, foi adicionado um `dispatchNextOutboxMessage` fire-and
 | Fire-and-forget não funciona | Fire-and-forget funciona |
 | Evolution acessada via internet (latência) | Evolution acessada via rede Docker interna |
 | `DATABASE_URL` exposta publicamente | Banco na rede interna |
-| Crons gerenciados pela Vercel | Crontab do sistema operacional |
+| Agendamento externo | Scheduler interno no processo Node.js |
 
 ---
 
@@ -288,26 +288,54 @@ Três valores precisam ser preenchidos após criar o serviço:
 
 ---
 
-### Crons na VPS
+### Scheduler interno na VPS (sem crontab)
 
-Os endpoints de cron são HTTP simples protegidos por `CRON_SECRET`. Na Vercel eram chamados pelo scheduler da plataforma; na VPS usar crontab do sistema.
+A produção precisa apenas do app Next.js standalone em processo Node contínuo,
+Postgres e MinIO. Não é necessário configurar crontab, Redis ou worker separado.
+`src/instrumentation.ts` registra o scheduler automaticamente no runtime Node.js
+em produção. Cada tarefa começa no startup e segue sua periodicidade:
 
-Adicionar ao crontab do servidor (via Easypanel terminal ou SSH):
-```cron
-# Drena outbox de mensagens a cada minuto
-* * * * * curl -s -H "Authorization: Bearer <CRON_SECRET>" http://localhost:3000/api/cron/messaging/dispatch
+| Tarefa | Frequência | Limite por execução |
+|---|---|---|
+| Despacho da outbox | 15 segundos | 20 tentativas, até não haver linha elegível |
+| Download/transcrição de áudio | 30 segundos | 10 mensagens; exige OPENAI_API_KEY |
+| Reengajamento de recrutamento | 24 horas | Limites do caso de uso existente |
+| Expiração de oportunidades | 1 hora | Caso de uso existente |
+| Expiração de pedidos sem pagamento | 1 hora | Lembrete em 12h, cancelamento em 24h |
+| Reengajamento de clientes | 1 hora | Limites do caso de uso existente |
 
-# Baixa e transcreve áudios pendentes a cada minuto
-* * * * * curl -s -H "Authorization: Bearer <CRON_SECRET>" http://localhost:3000/api/cron/messaging/download-audio
+As tarefas de manutenção são verificadas a cada minuto e executadas em série.
+As regras de elegibilidade continuam usando as env de negócio já documentadas.
+Não há sobreposição da mesma tarefa no processo; despacho e áudio são
+independentes para que um envio lento não bloqueie o download. Em réplicas,
+a outbox usa seu lease atômico, transcrição/roteamento usam os claims existentes,
+e a manutenção usa `pg_try_advisory_xact_lock`, liberado ao encerrar a transação.
+O lock de manutenção reserva uma conexão adicional do pool; configure o pool
+com pelo menos duas conexões. Os casos de uso mantêm suas transações atômicas.
 
-# Reengaja leads silenciosos uma vez por dia à meia-noite
-0 0 * * * curl -s -H "Authorization: Bearer <CRON_SECRET>" http://localhost:3000/api/cron/recruitment/reengage
+`INTERNAL_SCHEDULER_ENABLED=false` desliga o scheduler. `true` permite opt-in
+fora de produção. Deixar a env ausente habilita apenas em produção.
+Com `REDIS_URL`, o scheduler interno fica desligado e a operação volta ao
+modo BullMQ; não configure Redis no cenário de três serviços.
 
-# Expira oportunidades não respondidas a cada hora
-0 * * * * curl -s -H "Authorization: Bearer <CRON_SECRET>" http://localhost:3000/api/cron/marketplace/expire
-```
+Confirme o log `Internal scheduler started; external crontab is not required`
+no startup do app. Falhas de envio aparecem como `Outbox delivery failed` ou
+`Outbox delivery exhausted retries`, com ID da outbox, provider, final mascarado
+do destinatário, status HTTP e erro do provider truncado e sanitizado.
+Falhas agendadas aparecem como `Internal scheduler tick failed` ou
+`Scheduled maintenance failed`; o próximo tick tenta novamente.
 
-Substitua `<CRON_SECRET>` pelo valor em `.env.vps`.
+O webhook drena até 20 mensagens elegíveis inline, incluindo backlog legado.
+Falhas ficam `FAILED` com backoff e depois `DEAD_LETTER` ao esgotar tentativas;
+o scheduler recupera as pendências sem depender de novas mensagens recebidas.
+A fila pode demorar para drenar se houver chamadas lentas; cada tick tem
+limite e não cria execuções concorrentes da mesma tarefa.
+
+Os endpoints `/api/cron/*` continuam protegidos por `CRON_SECRET` e disponíveis
+para diagnóstico manual, mas não precisam ser chamados periodicamente na VPS.
+Remova agendamentos externos antigos para evitar trabalho redundante.
+O app deve ficar continuamente em execução; durante downtime não há timers.
+Ao reiniciar, as tarefas consultam o banco e recuperam o trabalho pendente.
 
 ---
 

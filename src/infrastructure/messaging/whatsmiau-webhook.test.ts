@@ -8,6 +8,16 @@ const text = {
 const audio = { ...text, data: { ...text.data, message: { audioMessage: { mimetype: "audio/ogg; codecs=opus", seconds: 12, ptt: true, fileLength: "18432" }, mediaUrl: "https://storage.whatsmiau.io/media/3EB04C4D3F97.ogg", base64: "never persist" } } };
 
 describe("WhatsMiau webhook", () => {
+  it.each([
+    { key: { ...text.data.key, remoteJid: "123456789012345@lid", remoteJidAlt: "5511999999999@s.whatsapp.net" } },
+    { key: { ...text.data.key, remoteJid: "123456789012345@lid" }, senderPn: "5511999999999@s.whatsapp.net" },
+    { key: { ...text.data.key, remoteJid: "123456789012345@lid", senderPn: "5511999999999" } },
+  ])("resolves LID only from explicit phone-number fields: %j", (fields) => {
+    expect(normalizeWhatsMiauWebhook({ ...text, data: { ...text.data, ...fields } })?.sender).toBe("+5511999999999");
+  });
+  it("does not accept a group even if an alternate phone is supplied", () => {
+    expect(normalizeWhatsMiauWebhook({ ...text, data: { ...text.data, key: { ...text.data.key, remoteJid: "123@g.us", remoteJidAlt: "5511999999999@s.whatsapp.net" } } })).toBeNull();
+  });
   it("normalizes the documented text and extended text", () => {
     expect(normalizeWhatsMiauWebhook(text)).toMatchObject({ sender: "+5511999999999", payload: { type: "TEXT", text: "Ola!" } });
     expect(normalizeWhatsMiauWebhook({ ...text, data: { ...text.data, message: { extendedTextMessage: { text: "Oi" } } } })?.payload).toMatchObject({ text: "Oi" });

@@ -13,8 +13,8 @@ export class WhatsMiauMessagingAdapter implements MessagingGateway {
     return { ok: !data.suspended && (data.state ?? data.instance?.state) === "open" };
   }
   async send(input: SendMessageInput): Promise<SendMessageResult> {
-    const number = input.recipient.replace(/\D/g, "");
-    if (!/^\d{8,15}$/.test(number)) throw new Error("Destinatário inválido para WhatsMiau");
+    if (!/^\+?\d{8,15}(?:@s\.whatsapp\.net)?$/.test(input.recipient)) throw new Error("Destinatário inválido para WhatsMiau; use um telefone real, nunca LID");
+    const number = input.recipient.split("@")[0]!.replace(/^\+/, "");
     let body: { number: string; text: string } | { number: string; audio: string };
     if (input.payload.type === "TEXT") body = { number, text: input.payload.text };
     else {
@@ -27,7 +27,23 @@ export class WhatsMiauMessagingAdapter implements MessagingGateway {
       method: "POST", headers: { apikey: this.config.apiKey, "content-type": "application/json" },
       body: JSON.stringify(body), signal: AbortSignal.timeout(60_000),
     });
-    if (!response.ok) throw new Error(`WhatsMiau retornou ${response.status}`);
+    if (!response.ok) {
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let body = "";
+      let bytes = 0;
+      try {
+        while (reader && bytes < 2048) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const chunk = value.subarray(0, 2048 - bytes);
+          body += decoder.decode(chunk, { stream: true }); bytes += chunk.length;
+        }
+      } finally { await reader?.cancel(); reader?.releaseLock(); }
+      const safeBody = body.replaceAll(this.config.apiKey, "[REDACTED]")
+        .replace(/\d{8,}/g, (phone) => `***${phone.slice(-4)}`).replace(/[\r\n\t]/g, " ").slice(0, 400);
+      throw new Error(`WhatsMiau HTTP ${response.status}: ${safeBody}`);
+    }
     // The response schema and provider idempotency support are undocumented.
     const data = await response.json().catch(() => null) as { key?: { id?: string } } | null;
     return { externalId: data?.key?.id ?? input.idempotencyKey };

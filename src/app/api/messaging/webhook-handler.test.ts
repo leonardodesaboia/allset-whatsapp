@@ -11,7 +11,7 @@ vi.mock("@/infrastructure/observability/logger", () => ({ logger: { error: vi.fn
 vi.mock("@/application/messaging/process-inbound-event.usecase", () => ({ processInboundEvent: mocks.persist }));
 vi.mock("@/application/messaging/route-inbound-text.usecase", () => ({ routeInboundText: mocks.route }));
 vi.mock("@/infrastructure/jobs/publish-job", () => ({ publishJobSafe: mocks.publish }));
-vi.mock("@/application/messaging/dispatch-outbox.usecase", () => ({ dispatchNextOutboxMessage: mocks.dispatch }));
+vi.mock("@/infrastructure/messaging/drain-outbox", () => ({ drainOutbox: mocks.dispatch }));
 vi.mock("@/infrastructure/messaging/messaging-runtime", () => ({ createMessagingGatewayRegistry: () => ({}) }));
 vi.mock("@/infrastructure/messaging/received-audio-runtime", () => ({ processRuntimeReceivedAudio: mocks.audio }));
 
@@ -35,7 +35,7 @@ describe("WhatsMiau webhook route", () => {
     expect((await POST(request(event))).status).toBe(200);
     expect(mocks.persist).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ provider: "whatsmiau" }));
     expect(mocks.route).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ provider: "whatsmiau", inboundMessageId: "inbound" }));
-    expect(mocks.dispatch).toHaveBeenCalled();
+    expect(mocks.dispatch).toHaveBeenCalledWith(expect.anything(), expect.anything(), { actor: "system:webhook-dispatch", limit: 20 });
   });
   it("starts audio processing immediately after persistence without awaiting completion", async () => {
     mocks.audio.mockReturnValue(new Promise(() => {}));

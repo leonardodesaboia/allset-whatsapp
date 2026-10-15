@@ -122,8 +122,9 @@ solicita ligação (2ª vez).
 Texto e áudio usam WhatsMiau Cloud por padrão. O webhook recebe mensagens em
 `POST /api/messaging/whatsmiau/webhook` e publica o processamento de
 áudio no worker BullMQ quando há Redis. Sem Redis, inicia o download e a
-transcrição imediatamente após persistir. Mantenha os cron jobs de download e despacho
-ativos como rede de segurança.
+transcrição imediatamente após persistir. Em produção sem Redis, o scheduler interno
+recupera download e despacho automaticamente; crontab não é necessário.
+`INTERNAL_SCHEDULER_ENABLED=false` desliga essa automação.
 
 A Evolution continua opcional. Sem ela configurada, o gateway WhatsMiau também
 atende mensagens/conversas com o provider legado `evolution`, sem migrar dados.
