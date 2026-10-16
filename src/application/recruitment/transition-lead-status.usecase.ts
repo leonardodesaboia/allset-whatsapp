@@ -34,10 +34,12 @@ async function assertTransitionPrerequisites(
 
   if (target === "ONBOARDING") {
     const requirements = await tx.documentRequirement.findMany({ where: { isActive: true, required: true }, select: { id: true } });
-    const approved = requirements.length === 0 ? 0 : await tx.professionalDocument.count({
+    const approved = requirements.length === 0 ? [] : await tx.professionalDocument.findMany({
       where: { leadId: lead.id, requirementId: { in: requirements.map((requirement) => requirement.id) }, status: "APPROVED" },
+      select: { requirementId: true },
+      distinct: ["requirementId"],
     });
-    if (approved !== requirements.length) return err(new DomainError("Todos os documentos obrigatórios precisam estar aprovados", "REQUIRED_DOCUMENTS_NOT_APPROVED"));
+    if (approved.length !== requirements.length) return err(new DomainError("Todos os documentos obrigatórios precisam estar aprovados", "REQUIRED_DOCUMENTS_NOT_APPROVED"));
 
     const activeTerms = await tx.termsVersion.count({ where: { isActive: true } });
     if (activeTerms) {

@@ -240,4 +240,33 @@ describe("recruitment progression gates", () => {
     expect(outbound).not.toBeNull();
     expect(outbound?.payload).toMatchObject({ text: expect.stringContaining("Pré-cadastro concluído") });
   });
+
+  it("exige cada requisito documental mesmo com várias versões aprovadas do mesmo tipo", async () => {
+    const lead = await leadAt("DOCUMENTACAO");
+    await prisma.documentRequirement.createMany({ data: ["identity", "proof"].map((key) => ({
+      key: `extra-${key}-${lead.id}`, name: key, required: true,
+    })) });
+    const requirements = await prisma.documentRequirement.findMany({ where: { isActive: true, required: true }, orderBy: { id: "asc" } });
+    expect(requirements.length).toBeGreaterThan(1);
+    const first = requirements[0]!;
+    // The raw number of files equals the number of requirements, but all files
+    // prove the same requirement. Missing requirements must still block entry.
+    await prisma.professionalDocument.createMany({ data: requirements.map((_, index) => ({
+      leadId: lead.id, requirementId: first.id, status: "APPROVED" as const,
+      storageKey: `test/${lead.id}/duplicate-${index}`, contentType: "application/pdf", sizeBytes: 10,
+    })) });
+    const terms = await prisma.termsVersion.findMany({ where: { isActive: true } });
+    await prisma.termsAcceptance.createMany({ data: terms.map((term) => ({
+      leadId: lead.id, termsVersionId: term.id, channel: "admin", consentId: `test:${lead.id}:${term.id}`,
+    })) });
+    expect(await transitionLeadStatusUseCase(prisma, { leadId: lead.id, targetStatus: "ONBOARDING", actor: adminEmail }))
+      .toMatchObject({ ok: false, error: { code: "REQUIRED_DOCUMENTS_NOT_APPROVED" } });
+
+    await prisma.professionalDocument.createMany({ data: requirements.slice(1).map((requirement) => ({
+      leadId: lead.id, requirementId: requirement.id, status: "APPROVED" as const,
+      storageKey: `test/${lead.id}/${requirement.id}`, contentType: "application/pdf", sizeBytes: 10,
+    })) });
+    // Extra historical versions must not block a fully documented professional.
+    expect((await transitionLeadStatusUseCase(prisma, { leadId: lead.id, targetStatus: "ONBOARDING", actor: adminEmail })).ok).toBe(true);
+  });
 });
