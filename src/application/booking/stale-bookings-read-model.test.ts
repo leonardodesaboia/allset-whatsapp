@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { countStaleBookings } from "./stale-bookings-read-model";
 
 describe("countStaleBookings", () => {
-  it("counts bookings stuck in AWAITING_PAYMENT, REVIEW_REQUIRED or MATCHING past the cutoff", async () => {
+  it("counts bookings stuck waiting for a human or a professional past the cutoff", async () => {
     const count = vi.fn(async () => 3);
     const result = await countStaleBookings({ booking: { count } } as never, {
       staleAfterHours: 24,
@@ -12,7 +12,15 @@ describe("countStaleBookings", () => {
     expect(result).toBe(3);
     expect(count).toHaveBeenCalledWith({
       where: {
-        status: { in: ["AWAITING_PAYMENT", "REVIEW_REQUIRED", "MATCHING"] },
+        status: {
+          in: [
+            "AWAITING_PAYMENT",
+            "QUOTE_ACCEPTED",
+            "AWAITING_CUSTOMER_CONFIRMATION",
+            "REVIEW_REQUIRED",
+            "MATCHING",
+          ],
+        },
         updatedAt: { lt: new Date("2026-12-09T12:00:00Z") },
       },
     });

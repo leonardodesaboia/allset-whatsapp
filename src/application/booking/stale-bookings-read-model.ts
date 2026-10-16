@@ -1,9 +1,11 @@
 import type { PrismaClient } from "@prisma/client";
 
-/** Statuses that depend on a human action (payment confirmation, finding a
- * professional, re-reviewing coverage) with no automatic follow-up otherwise. */
+/** Statuses that depend on a human action (finding a professional when no
+ * one was eligible, legacy payment/coverage reviews) with no automatic follow-up. */
 const STALE_STATUSES = [
   "AWAITING_PAYMENT",
+  "QUOTE_ACCEPTED",
+  "AWAITING_CUSTOMER_CONFIRMATION",
   "REVIEW_REQUIRED",
   "MATCHING",
 ] as const;

@@ -19,11 +19,7 @@ export type OperationsOverview = {
   providerLastError: string | null;
 };
 
-const STALE_STATUSES = [
-  "AWAITING_PAYMENT",
-  "REVIEW_REQUIRED",
-  "MATCHING",
-] as const;
+const STALE_STATUSES = ["AWAITING_PAYMENT", "QUOTE_ACCEPTED", "AWAITING_CUSTOMER_CONFIRMATION", "REVIEW_REQUIRED", "MATCHING"] as const;
 const OUTBOX_OVERDUE_AFTER_MS = 5 * 60 * 1000;
 
 export async function getOperationsOverview(

@@ -3,8 +3,6 @@ import { Plus, Clock, CheckCircle2, ArrowRight, Search } from "lucide-react";
 import { BookingStatus, type Prisma } from "@prisma/client";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import {
-  advanceBookingStatusAction,
-  confirmManualPaymentAction,
   resumeCustomerAutomationAction,
   validateBookingCoverageAction,
 } from "./actions";
@@ -15,7 +13,6 @@ import { formatBRL, formatPhone, formatRelative } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ActionFeedbackForm } from "@/components/ui/action-feedback-form";
-import { ConfirmButton } from "@/components/ui/confirm-button";
 
 const formatDateTime = (date: Date) =>
   new Intl.DateTimeFormat("pt-BR", {
@@ -23,15 +20,6 @@ const formatDateTime = (date: Date) =>
     timeStyle: "short",
     timeZone: "America/Fortaleza",
   }).format(date);
-
-const NEXT_STEP_LABEL: Record<string, string> = {
-  PROFESSIONAL_ASSIGNED: "Marcar como agendado",
-  SCHEDULED: "Profissional confirmou",
-  PROFESSIONAL_CONFIRMED: "Profissional a caminho",
-  PROFESSIONAL_EN_ROUTE: "Atendimento iniciado",
-  IN_PROGRESS: "Atendimento concluído",
-  AWAITING_COMPLETION_CONFIRMATION: "Confirmar conclusão",
-};
 
 const PAGE_SIZE = 25;
 
@@ -240,6 +228,8 @@ export default async function BookingsPage({
                         <div className="flex flex-col gap-1.5">
                           {(booking.status === "DRAFT" ||
                             booking.status === "PAID" ||
+                            booking.status === "QUOTE_ACCEPTED" ||
+                            booking.status === "AWAITING_CUSTOMER_CONFIRMATION" ||
                             (booking.status === "REVIEW_REQUIRED" &&
                               opportunity?.status === "EXPIRED")) && (
                             <BookingMatchingActions
@@ -253,22 +243,6 @@ export default async function BookingsPage({
                             />
                           )}
 
-                          {booking.status === "AWAITING_PAYMENT" && (
-                            <ActionFeedbackForm
-                              action={async () => {
-                                "use server";
-                                return confirmManualPaymentAction(booking.id);
-                              }}
-                            >
-                              <ConfirmButton
-                                message="Confirmar o pagamento manual? Esta ação registra o pedido como pago. Depois, informe bairro e repasse para enviar a oportunidade."
-                                className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900"
-                              >
-                                <CheckCircle2 className="w-3 h-3" /> Confirmar
-                                pagamento manual
-                              </ConfirmButton>
-                            </ActionFeedbackForm>
-                          )}
 
                           {booking.status === "REVIEW_REQUIRED" &&
                             booking.customerConversation?.lastQuestionKey ===
@@ -334,22 +308,6 @@ export default async function BookingsPage({
                             </ActionFeedbackForm>
                           )}
 
-                          {NEXT_STEP_LABEL[booking.status] && (
-                            <ActionFeedbackForm
-                              action={async () => {
-                                "use server";
-                                return advanceBookingStatusAction(booking.id);
-                              }}
-                            >
-                              <button
-                                type="submit"
-                                className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900"
-                              >
-                                <ArrowRight className="w-3 h-3" />{" "}
-                                {NEXT_STEP_LABEL[booking.status]}
-                              </button>
-                            </ActionFeedbackForm>
-                          )}
 
                           {opportunity && (
                             <Link
@@ -432,6 +390,8 @@ export default async function BookingsPage({
                   <div className="flex flex-col gap-2 pt-1 border-t border-slate-100">
                     {(booking.status === "DRAFT" ||
                       booking.status === "PAID" ||
+                      booking.status === "QUOTE_ACCEPTED" ||
+                      booking.status === "AWAITING_CUSTOMER_CONFIRMATION" ||
                       (booking.status === "REVIEW_REQUIRED" &&
                         opportunity?.status === "EXPIRED")) && (
                       <BookingMatchingActions
@@ -445,22 +405,6 @@ export default async function BookingsPage({
                       />
                     )}
 
-                    {booking.status === "AWAITING_PAYMENT" && (
-                      <ActionFeedbackForm
-                        action={async () => {
-                          "use server";
-                          return confirmManualPaymentAction(booking.id);
-                        }}
-                      >
-                        <ConfirmButton
-                          message="Confirmar o pagamento manual? Esta ação registra o pedido como pago. Depois, informe bairro e repasse para enviar a oportunidade."
-                          className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900"
-                        >
-                          <CheckCircle2 className="w-3 h-3" /> Confirmar
-                          pagamento manual
-                        </ConfirmButton>
-                      </ActionFeedbackForm>
-                    )}
 
                     {booking.status === "REVIEW_REQUIRED" &&
                       booking.customerConversation?.lastQuestionKey ===
@@ -523,22 +467,6 @@ export default async function BookingsPage({
                       </ActionFeedbackForm>
                     )}
 
-                    {NEXT_STEP_LABEL[booking.status] && (
-                      <ActionFeedbackForm
-                        action={async () => {
-                          "use server";
-                          return advanceBookingStatusAction(booking.id);
-                        }}
-                      >
-                        <button
-                          type="submit"
-                          className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900"
-                        >
-                          <ArrowRight className="w-3 h-3" />{" "}
-                          {NEXT_STEP_LABEL[booking.status]}
-                        </button>
-                      </ActionFeedbackForm>
-                    )}
 
                     {opportunity && (
                       <Link

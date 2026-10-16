@@ -155,7 +155,7 @@ export function BookingForm({ services }: { services: { id: string; name: string
         </div>
 
         <div className="space-y-1">
-          <label htmlFor="booking-professional-payment" className="text-xs font-medium text-slate-600">Pagamento à profissional (centavos)</label>
+          <label htmlFor="booking-professional-payment" className="text-xs font-medium text-slate-600">Valor estimado (centavos)</label>
           <Input
             id="booking-professional-payment"
             required

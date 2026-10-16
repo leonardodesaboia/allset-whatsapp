@@ -179,7 +179,7 @@ describe("customer administrative controls", () => {
       ).ok
     ).toBe(true);
   });
-  it("accepts a new address after resuming coverage review", async () => {
+  it("accepts a new address after resuming a legacy coverage review without validating coverage", async () => {
     const c = await make("MANUAL_REVIEW", "REVIEW_REQUIRED");
     await resumeCustomerBookingConversation(prisma, {
       conversationId: c.id,
@@ -204,13 +204,13 @@ describe("customer administrative controls", () => {
         inboundMessageId: inbound.id,
         text: "Rua nova, 123, Fortaleza",
       })
-    ).toMatchObject({ advanced: true, state: "MANUAL_REVIEW" });
+    ).toMatchObject({ advanced: true, state: "NEIGHBORHOOD" });
     expect(
       await prisma.booking.findUniqueOrThrow({ where: { id: c.bookingId! } })
     ).toMatchObject({
       status: "REVIEW_REQUIRED",
       addressLine1: "Rua nova, 123, Fortaleza",
-      coverageValidatedAt: null,
+      outsideCoverageArea: false,
     });
   });
   it("supersedes old queued prompts but preserves manually authored messages", async () => {
@@ -320,14 +320,12 @@ describe("customer administrative controls", () => {
     "ADDRESS",
     "FINAL_CONFIRMATION",
     "EDIT_SELECTION",
-    "AWAITING_PAYMENT",
+    "NEIGHBORHOOD",
   ])("resends dynamic and static questions for %s", async (step) => {
     const status =
-      step === "AWAITING_PAYMENT"
-        ? "AWAITING_PAYMENT"
-        : step === "ADDRESS"
-          ? "QUOTE_ACCEPTED"
-          : "COLLECTING_DATA";
+      step === "ADDRESS" || step === "NEIGHBORHOOD"
+        ? "QUOTE_ACCEPTED"
+        : "COLLECTING_DATA";
     const c = await make("PAUSED", status);
     expect((await control(c.id, "step", 0, step)).ok).toBe(true);
     const message = await prisma.outboxMessage.findFirstOrThrow({

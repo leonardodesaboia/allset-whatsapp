@@ -22,7 +22,7 @@ function tidy(value: string): string {
  * Returns undefined when it cannot tell, so the caller can simply ask.
  */
 export function extractNeighborhood(address: string): string | undefined {
-  const explicit = address.match(/\bbairro\s*[:\-]?\s*([^,;\n]+?)(?:\s+-\s+|[,;\n]|$)/i);
+  const explicit = address.match(/\bbairro\s*[:-]?\s*([^,;\n]+?)(?:\s+-\s+|[,;\n]|$)/i);
   const explicitName = explicit?.[1]?.trim();
   if (explicitName && explicitName.length >= 3 && explicitName.length <= 60) return tidy(explicitName);
 

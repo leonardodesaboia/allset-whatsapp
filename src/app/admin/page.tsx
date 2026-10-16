@@ -149,7 +149,7 @@ export default async function AdminHomePage() {
       key: "stale",
       count: overview.staleBookings,
       label: `pedidos parados há mais de ${env.BOOKING_STALE_AFTER_HOURS} h`,
-      hint: "Pagamento, busca de profissional ou revisão sem andamento.",
+      hint: "Busca de profissional ou revisão sem andamento.",
       href: "/admin/bookings",
       icon: Clock,
       tone: "amber" as const,
@@ -538,6 +538,7 @@ const OPEN_BOOKING_STATUSES = [
   "COLLECTING_DATA",
   "QUOTED",
   "QUOTE_ACCEPTED",
+  "AWAITING_CUSTOMER_CONFIRMATION",
   "AWAITING_PAYMENT",
   "PAID",
   "MATCHING",
@@ -547,8 +548,7 @@ const OPEN_BOOKING_STATUSES = [
 const BOOKING_STAGES = [
   "COLLECTING_DATA",
   "QUOTED",
-  "AWAITING_PAYMENT",
-  "PAID",
+  "QUOTE_ACCEPTED",
   "MATCHING",
   "REVIEW_REQUIRED",
 ] as const;
