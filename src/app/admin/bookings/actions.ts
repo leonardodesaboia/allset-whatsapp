@@ -5,17 +5,9 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { notifyOpportunity } from "@/application/marketplace/notify-opportunity.usecase";
 import { prepareBookingMatching } from "@/application/booking/prepare-booking-matching.usecase";
-import { validateCustomerBookingCoverage } from "@/application/customer/validate-booking-coverage.usecase";
 import { sendManualCustomerMessage } from "@/application/customer/send-manual-customer-message.usecase";
 import { resumeCustomerBookingConversation } from "@/application/customer/customer-booking-conversation.usecase";
 import { recordAuditLog } from "@/application/audit/record-audit-log.usecase";
-import {
-  transitionBookingStatusInTransaction,
-  transitionBookingStatusUseCase,
-} from "@/application/booking/transition-booking-status.usecase";
-import type { BookingStatus } from "@/domain/booking/booking-status";
-import { enqueueOutboundMessage } from "@/application/messaging/enqueue-outbound-message.usecase";
-import { textPayload } from "@/domain/messaging/message";
 import { DomainError } from "@/domain/shared/domain-error";
 import { auth } from "@/infrastructure/auth/auth";
 import { prisma } from "@/infrastructure/db/prisma-client";
@@ -219,44 +211,6 @@ export async function dispatchOpportunityAction(
   }
 }
 
-export async function validateBookingCoverageAction(
-  bookingId: string,
-  isCovered: boolean
-): Promise<BookingActionResult> {
-  const actor = await currentActor();
-  if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
-  if (
-    !z.string().uuid().safeParse(bookingId).success ||
-    typeof isCovered !== "boolean"
-  ) {
-    return { ok: false, error: "Dados de cobertura inválidos." };
-  }
-  try {
-    const result = await validateCustomerBookingCoverage(prisma, {
-      bookingId,
-      isCovered,
-      actor,
-    });
-    if (!result.ok)
-      return {
-        ok: false,
-        error: "Este pedido não está aguardando validação de cobertura.",
-      };
-    await publishJobSafe({
-      name: JOB_NAME.MESSAGE_DISPATCH,
-      jobId: `coverage-dispatch:${bookingId}:${Date.now()}`,
-      payload: {},
-    });
-    revalidatePath("/admin/bookings");
-    return { ok: true, bookingId };
-  } catch (error) {
-    return {
-      ok: false,
-      error: errorMessage(error, "Não foi possível validar a cobertura."),
-    };
-  }
-}
-
 export async function sendManualCustomerMessageAction(
   bookingId: string,
   text: string
@@ -363,119 +317,6 @@ export async function resumeCustomerAutomationAction(
     return {
       ok: false,
       error: errorMessage(error, "Não foi possível retomar a automação."),
-    };
-  }
-}
-
-/**
- * Advances a booking to the next step of the post-assignment lifecycle the
- * state machine already defines. Deliberately a single next-step button
- * (not a free-form status picker): each current status maps to exactly one
- * forward transition, matching the happy path the WhatsApp/matching flow
- * already follows up to PROFESSIONAL_ASSIGNED.
- */
-const NEXT_BOOKING_STATUS: Partial<Record<BookingStatus, BookingStatus>> = {
-  PROFESSIONAL_ASSIGNED: "SCHEDULED",
-  SCHEDULED: "PROFESSIONAL_CONFIRMED",
-  PROFESSIONAL_CONFIRMED: "PROFESSIONAL_EN_ROUTE",
-  PROFESSIONAL_EN_ROUTE: "IN_PROGRESS",
-  IN_PROGRESS: "AWAITING_COMPLETION_CONFIRMATION",
-  AWAITING_COMPLETION_CONFIRMATION: "COMPLETED",
-};
-
-export async function advanceBookingStatusAction(
-  bookingId: string
-): Promise<BookingActionResult> {
-  const actor = await currentActor();
-  if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
-  if (!bookingIdSchema.safeParse(bookingId).success) {
-    return { ok: false, error: "Identificador de agendamento inválido." };
-  }
-  try {
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      select: { status: true },
-    });
-    const targetStatus = booking
-      ? NEXT_BOOKING_STATUS[booking.status as BookingStatus]
-      : undefined;
-    if (!targetStatus)
-      return {
-        ok: false,
-        error: "Este pedido não pode avançar de etapa agora.",
-      };
-    const result = await transitionBookingStatusUseCase(prisma, {
-      bookingId,
-      targetStatus,
-      actor,
-    });
-    if (!result.ok) return { ok: false, error: result.error.message };
-    revalidatePath("/admin/bookings");
-    return { ok: true, bookingId };
-  } catch (error) {
-    return {
-      ok: false,
-      error: errorMessage(
-        error,
-        "Não foi possível avançar a etapa do atendimento."
-      ),
-    };
-  }
-}
-
-/** Records an off-platform payment until a real PaymentProvider is configured. */
-export async function confirmManualPaymentAction(
-  bookingId: string
-): Promise<BookingActionResult> {
-  const actor = await currentActor();
-  if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
-  if (!z.string().uuid().safeParse(bookingId).success)
-    return { ok: false, error: "Identificador de agendamento inválido." };
-  try {
-    await prisma.$transaction(async (tx) => {
-      const booking = await tx.booking.findUnique({
-        where: { id: bookingId },
-        include: {
-          customer: { select: { phoneE164: true } },
-          customerConversation: true,
-        },
-      });
-      if (!booking) throw new Error("Agendamento não encontrado.");
-      const transition = await transitionBookingStatusInTransaction(tx, {
-        bookingId,
-        targetStatus: "PAID",
-        actor,
-        reason: "Pagamento confirmado manualmente",
-      });
-      if (!transition.ok) throw transition.error;
-      if (booking.customerConversation) {
-        const conversation = await tx.customerBookingConversation.update({
-          where: { id: booking.customerConversation.id },
-          data: { state: "COMPLETED", lastInboundAt: new Date() },
-        });
-        await enqueueOutboundMessage(tx, {
-          provider: conversation.provider,
-          recipient: booking.customer.phoneE164,
-          payload: textPayload(
-            "Pagamento confirmado! Agora vamos buscar a profissional ideal para seu atendimento."
-          ),
-          idempotencyKey: `customer-booking:${conversation.id}:payment-confirmed`,
-          correlationId: conversation.id,
-          actor,
-        });
-      }
-    });
-    publishJobSafe({
-      name: JOB_NAME.MESSAGE_DISPATCH,
-      jobId: `message-dispatch:drain:${Math.floor(Date.now() / 5000)}`,
-      payload: {},
-    }).catch(() => undefined);
-    revalidatePath("/admin/bookings");
-    return { ok: true, bookingId };
-  } catch (error) {
-    return {
-      ok: false,
-      error: errorMessage(error, "Não foi possível confirmar o pagamento."),
     };
   }
 }

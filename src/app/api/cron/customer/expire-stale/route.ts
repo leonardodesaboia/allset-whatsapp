@@ -6,7 +6,7 @@ import { logger } from "@/infrastructure/observability/logger";
 
 export const runtime = "nodejs";
 
-/** Cron adapter: lembrete em 12h, cancelamento em 24h para bookings sem pagamento. */
+/** Cron adapter mantido por compatibilidade: não há mais lembrete nem cancelamento por pagamento. */
 export async function GET(request: Request) {
   const supplied = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? null;
   if (!compareSecret(env.CRON_SECRET, supplied)) return Response.json({ ok: false, error: "UNAUTHORIZED" }, { status: 401 });

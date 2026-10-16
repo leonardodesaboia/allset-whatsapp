@@ -9,6 +9,7 @@ export type CustomerConversationState =
   | "QUOTE"
   | "QUOTE_ACCEPTANCE"
   | "ADDRESS"
+  | "NEIGHBORHOOD"
   | "FINAL_CONFIRMATION"
   | "EDIT_SELECTION"
   | "AWAITING_PAYMENT"
@@ -24,8 +25,10 @@ export const CUSTOMER_QUESTIONS: Partial<Record<CustomerConversationState, Custo
   NAME: { key: "NAME", text: "Qual é o seu nome?" },
   SCHEDULE_DATE: { key: "SCHEDULE_DATE", text: "Qual dia você prefere?" },
   SCHEDULE_TIME: { key: "SCHEDULE_TIME", text: "Qual horário você prefere?", choices: CUSTOMER_SCHEDULE_TIME_CHOICES },
-  QUOTE_ACCEPTANCE: { key: "QUOTE_ACCEPTANCE", text: "Quer seguir com este valor?", choices: [{ value: "ACCEPT", label: "Confirmar e continuar" }, { value: "CHANGE", label: "Alterar informações" }] },
-  FINAL_CONFIRMATION: { key: "FINAL_CONFIRMATION", text: "Confira os dados. Podemos seguir para o pagamento?", choices: [{ value: "PAY", label: "Confirmar e pagar" }, { value: "CHANGE", label: "Alterar informações" }] },
+  // Confirma o dia/horário entendido junto com o valor estimado (sem cobrança).
+  QUOTE_ACCEPTANCE: { key: "QUOTE_ACCEPTANCE", text: "Está correto?", choices: [{ value: "ACCEPT", label: "Confirmar" }, { value: "CHANGE", label: "Alterar dia ou horário" }] },
+  NEIGHBORHOOD: { key: "NEIGHBORHOOD", text: "Qual é o bairro do atendimento?" },
+  FINAL_CONFIRMATION: { key: "FINAL_CONFIRMATION", text: "Confira os dados. Podemos enviar seu pedido para as profissionais?", choices: [{ value: "CONFIRM", label: "Confirmar e enviar" }, { value: "CHANGE", label: "Alterar informações" }] },
   EDIT_SELECTION: { key: "EDIT_SELECTION", text: "O que você quer alterar?", choices: [{ value: "PROPERTY", label: "Imóvel" }, { value: "SCHEDULE", label: "Dia ou horário" }, { value: "ADDRESS", label: "Endereço" }] },
 };
 

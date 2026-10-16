@@ -32,6 +32,16 @@ describe("transitionBookingStatus", () => {
     expect(transitionBookingStatus("QUOTED", "REVIEW_REQUIRED").ok).toBe(true);
   });
 
+  it("pula o pagamento: o pedido aceito segue direto para o matching", () => {
+    expect(transitionBookingStatus("QUOTE_ACCEPTED", "MATCHING").ok).toBe(true);
+    expect(transitionBookingStatus("AWAITING_CUSTOMER_CONFIRMATION", "MATCHING").ok).toBe(true);
+    expect(transitionBookingStatus("REVIEW_REQUIRED", "MATCHING").ok).toBe(true);
+  });
+
+  it("libera pedidos legados que aguardavam pagamento", () => {
+    expect(transitionBookingStatus("AWAITING_PAYMENT", "MATCHING").ok).toBe(true);
+  });
+
   it("todo status listado em BOOKING_STATUSES aparece no mapa de transições (nem que seja como terminal, com lista vazia)", () => {
     for (const status of BOOKING_STATUSES) {
       expect(Object.hasOwn(ALLOWED_TRANSITIONS, status)).toBe(true);

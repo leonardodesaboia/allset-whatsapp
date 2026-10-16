@@ -1,6 +1,10 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { transitionBookingStatus } from "../../domain/booking/booking-state-machine";
 import type { BookingStatus } from "../../domain/booking/booking-status";
+import {
+  formatCustomerContactMessage,
+  formatProfessionalContactMessage,
+} from "../../domain/marketplace/contact-exchange-message";
 import { parseOpportunityReply } from "../../domain/marketplace/opportunity-reply";
 import { recordAuditLog } from "../audit/record-audit-log.usecase";
 import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
@@ -15,17 +19,6 @@ export type OpportunityResponseOutcome =
   | "NOT_FOUND"
   | "DUPLICATE_INBOUND"
   | "AMBIGUOUS_RESPONSE";
-
-function formatSchedule(scheduledAt: Date): string {
-  return new Intl.DateTimeFormat("pt-BR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "America/Fortaleza",
-  }).format(scheduledAt);
-}
 
 async function enqueueText(
   database: Database,
@@ -176,8 +169,9 @@ export async function processOpportunityResponse(
     const booking = await tx.booking.findUniqueOrThrow({
       where: { id: opportunity.bookingId },
       include: {
-        customer: { select: { phoneE164: true } },
+        customer: { select: { phoneE164: true, fullName: true } },
         customerConversation: { select: { provider: true } },
+        propertyPricingTier: { select: { label: true } },
       },
     });
     const transition = transitionBookingStatus(
@@ -211,26 +205,41 @@ export async function processOpportunityResponse(
       },
     });
 
-    const serviceDetails = [
-      `Confirmado${lead.fullName ? `, ${lead.fullName}` : ""}: ${formatSchedule(opportunity.scheduledAt)} em ${opportunity.neighborhood}.`,
-      booking.addressLine1 ? `📍 Endereço: ${booking.addressLine1}` : null,
-      booking.addressLine2 ? booking.addressLine2 : null,
-      booking.addressReference ? `Referência: ${booking.addressReference}` : null,
-      "Se precisar de ajuda antes do atendimento, responda AJUDA.",
-    ].filter((line): line is string => Boolean(line)).join("\n");
-    await enqueueText(tx, {
-      provider: inbound.provider,
-      recipient: lead.phoneE164,
-      text: serviceDetails,
-      idempotencyKey: `opportunity:${opportunity.id}:${response.id}:confirmed`,
-      correlationId: opportunity.id,
-    });
+    // A AllSet só conecta as partes: cada lado recebe o contato do outro e
+    // combina dia, endereço e valor diretamente.
+    const customerPhone = booking.customer.phoneE164;
+    const customerName =
+      booking.customer.fullName && booking.customer.fullName !== customerPhone
+        ? booking.customer.fullName
+        : null;
+    if (customerPhone) {
+      await enqueueText(tx, {
+        provider: inbound.provider,
+        recipient: lead.phoneE164,
+        text: formatProfessionalContactMessage({
+          customerName,
+          customerPhoneE164: customerPhone,
+          scheduledAt: opportunity.scheduledAt,
+          address: booking.addressLine1,
+          addressLine2: booking.addressLine2,
+          addressReference: booking.addressReference,
+          propertyLabel: booking.propertyPricingTier?.label ?? null,
+          estimatedValueCents: opportunity.paymentCents,
+        }),
+        idempotencyKey: `opportunity:${opportunity.id}:${response.id}:confirmed`,
+        correlationId: opportunity.id,
+      });
+    }
 
-    if (booking.customer.phoneE164) {
+    if (customerPhone && lead.phoneE164) {
       await enqueueText(tx, {
         provider: booking.customerConversation?.provider ?? inbound.provider,
-        recipient: booking.customer.phoneE164,
-        text: `Boa notícia! Uma profissional confirmou presença para ${formatSchedule(opportunity.scheduledAt)} em ${opportunity.neighborhood}. Nossa equipe confirmará os detalhes por aqui antes do atendimento.`,
+        recipient: customerPhone,
+        text: formatCustomerContactMessage({
+          professionalName: lead.fullName,
+          professionalPhoneE164: lead.phoneE164,
+          scheduledAt: opportunity.scheduledAt,
+        }),
         idempotencyKey: `opportunity:${opportunity.id}:customer-assigned`,
         correlationId: opportunity.id,
       });

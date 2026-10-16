@@ -70,12 +70,14 @@ describe("customer configuration handoff", () => {
     expectConfigurationLog("SERVICE_NOT_CONFIGURED");
   });
 
-  it("keeps the address validation notice only after receiving an address", async () => {
+  it("goes straight on after receiving an address, with no coverage-validation notice", async () => {
     const sender = phone();
     for (const text of ["Olá", "1", "Maria Souza", "1", "amanhã às 14h"]) await receive(sender, text);
     expect((await notices(sender)).join(" ")).not.toContain("Vamos validar o endereço");
     await receive(sender, "Rua Teste, 123, Meireles");
-    expect(await notices(sender)).toContain("Recebemos seus dados. Vamos validar o endereço e continuaremos por aqui.");
+    expect((await notices(sender)).join(" ")).not.toContain("Vamos validar o endereço");
+    const conv = await prisma.customerBookingConversation.findFirstOrThrow({ where: { customer: { phoneE164: sender } } });
+    expect(conv.state).not.toBe("MANUAL_REVIEW");
     expect(logger.error).not.toHaveBeenCalled();
   });
 });

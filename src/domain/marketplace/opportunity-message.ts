@@ -41,7 +41,7 @@ export function formatOpportunityMessage(
     `Data: ${dateStr}`,
     `Horario: ${timeStr}`,
     `Duracao estimada: ${hours}h`,
-    `Pagamento: R$ ${payment}`,
+    `Valor estimado: R$ ${payment} (o valor final você combina direto com o cliente)`,
     "",
     `Responda *SIM ${input.responseToken}* para aceitar ou *NAO ${input.responseToken}* para recusar.`,
     `Voce tem ate ${expiresStr} para responder.`,

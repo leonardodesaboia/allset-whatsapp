@@ -9,6 +9,7 @@ export const activeStates = [
   "SCHEDULE_TIME",
   "QUOTE_ACCEPTANCE",
   "ADDRESS",
+  "NEIGHBORHOOD",
   "FINAL_CONFIRMATION",
   "EDIT_SELECTION",
 ] as const;

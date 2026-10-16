@@ -16,6 +16,7 @@ import { processPendingReceivedAudio } from "./process-pending-received-audio.us
 import { dispatchNextOutboxMessage } from "./dispatch-outbox.usecase";
 import { enqueueOutboundMessage } from "./enqueue-outbound-message.usecase";
 import { startCustomerBookingConversation } from "../customer/customer-booking-conversation.usecase";
+import { customerScheduleDateChoices } from "../../domain/customer/customer-schedule";
 import { validateCustomerBookingCoverage } from "../customer/validate-booking-coverage.usecase";
 import { reengageSilentCustomerConversations } from "../customer/reengage-silent-customer-conversations.usecase";
 import { textPayload } from "../../domain/messaging/message";
@@ -89,7 +90,7 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
       orderBy: { createdAt: "desc" },
       include: { booking: true },
     });
-  async function customerAtConfirmation() {
+  async function customerWithRequestSent() {
     const sender = phone();
     for (const text of [
       "Oi",
@@ -97,17 +98,37 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
       "Maria Souza",
       "1",
       "amanhã às 14h",
+      "1",
       "Rua Teste, 123, Meireles",
     ])
       await receive(sender, text);
-    const conv = await conversation(sender);
-    expect(conv.state).toBe("MANUAL_REVIEW");
-    await validateCustomerBookingCoverage(prisma, {
-      bookingId: conv.bookingId!,
-      isCovered: true,
-      actor: "test:admin",
-    });
     return sender;
+  }
+  async function registerProfessional() {
+    // Offers to professionals from earlier tests would use the default provider.
+    await prisma.recruitmentLead.updateMany({ data: { status: "DESISTIU" } });
+    const professional = phone();
+    await prisma.recruitmentLead.create({
+      data: {
+        origin: "WHATSAPP",
+        status: "ATIVA",
+        phoneE164: professional,
+        fullName: "Joana Profissional",
+        neighborhood: "Meireles",
+        canServeInitialArea: "SIM",
+        availabilityDays: [
+          "segunda",
+          "terça",
+          "quarta",
+          "quinta",
+          "sexta",
+          "sábado",
+          "domingo",
+        ],
+        conversation: { create: { provider: "mock", state: "COMPLETED" } },
+      },
+    });
+    return { phone: professional };
   }
   async function sentTexts(sender: string) {
     const gateway = new MockMessagingAdapter();
@@ -119,6 +140,19 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
         (item) => item.recipient === sender && item.payload.type === "TEXT"
       )
       .map((item) => (item.payload.type === "TEXT" ? item.payload.text : ""));
+  }
+
+  /** Drains the outbox once and returns everything sent, for several recipients. */
+  async function drainOutbox() {
+    const gateway = new MockMessagingAdapter();
+    const registry = new StaticMessagingGatewayRegistry([["mock", gateway]]);
+    for (let i = 0; i < 100; i++)
+      if (!(await dispatchNextOutboxMessage(prisma, registry))) break;
+    return gateway.sent.flatMap((item) =>
+      item.payload.type === "TEXT"
+        ? [{ recipient: item.recipient, text: item.payload.text }]
+        : []
+    );
   }
 
   it("asks a new customer for their name before anything else", async () => {
@@ -136,7 +170,7 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
   });
 
   it("never asks for the name again once the customer already has one", async () => {
-    const sender = await customerAtConfirmation();
+    const sender = await customerWithRequestSent();
     await prisma.customerBookingConversation.updateMany({
       where: { customer: { phoneE164: sender } },
       data: { state: "COMPLETED" },
@@ -189,141 +223,82 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
     expect((await conversation(sender)).state).toBe("NAME");
   });
 
-  it("takes a client from the menu to payment and keeps the agreed price in the final summary", async () => {
-    const sender = await customerAtConfirmation();
+  it("takes a client from the first message to matching without any payment step", async () => {
+    await registerProfessional();
+    const sender = await customerWithRequestSent();
     await prisma.propertyPricingTier.update({
       where: { id: tierId },
       data: { priceCents: 19000 },
     });
-    await receive(sender, "MENU");
-    const texts = await sentTexts(sender);
-    const summary = texts.at(-1)!;
-    expect(summary).toContain("Rua Teste, 123, Meireles");
-    expect(summary).toContain("14:00");
-    expect(summary).toContain("150,00");
-    expect(summary).not.toContain("190,00");
-    await receive(sender, "1");
     const conv = await conversation(sender);
-    expect(conv.state).toBe("AWAITING_PAYMENT");
-    expect(conv.booking?.status).toBe("AWAITING_PAYMENT");
-  });
-
-  it("changes the schedule by menu without collecting an already validated address again", async () => {
-    const sender = await customerAtConfirmation();
-    for (const text of ["2", "2", "1", "1"]) await receive(sender, text);
-    const conv = await conversation(sender);
-    expect(conv.state).toBe("FINAL_CONFIRMATION");
-    expect(conv.booking?.status).toBe("AWAITING_CUSTOMER_CONFIRMATION");
+    expect(conv.state).toBe("COMPLETED");
+    expect(conv.booking?.status).toBe("MATCHING");
+    expect(conv.booking?.neighborhood).toBe("Meireles");
     expect(conv.booking?.addressLine1).toBe("Rua Teste, 123, Meireles");
+    const texts = await sentTexts(sender);
+    const confirmation = texts.find((text) => text.startsWith("Entendi:"))!;
+    expect(confirmation).toContain("14:00");
+    expect(confirmation).toContain("150,00");
+    expect(confirmation).toMatch(/sem cobrança/i);
+    const dispatched = texts.at(-1)!;
+    expect(dispatched).toContain("Rua Teste, 123, Meireles");
+    expect(dispatched).toContain("150,00");
+    expect(dispatched).not.toContain("190,00");
+    for (const text of texts) {
+      expect(text).not.toMatch(/PIX|pagar|pagamento|validar o endereço/i);
+    }
+    expect(
+      await prisma.serviceOpportunity.count({
+        where: { bookingId: conv.bookingId!, status: "OPEN" },
+      })
+    ).toBe(1);
   });
 
-  it("prepares a paid WhatsApp request and assigns a professional through her reply", async () => {
-    const sender = await customerAtConfirmation();
-    await receive(sender, "1");
+  it("never sends the customer to coverage review or waits for an admin", async () => {
+    const sender = await customerWithRequestSent();
     const conv = await conversation(sender);
-    const bookingId = conv.bookingId!;
-    expect(conv.booking?.neighborhood).toBeNull();
-    expect(conv.booking?.professionalPaymentCents).toBeNull();
-    await expect(
-      prepareBookingMatching(prisma, {
-        bookingId,
-        neighborhood: "Meireles",
-        professionalPaymentCents: 10000,
-        actor: "test:admin",
+    expect(conv.state).not.toBe("MANUAL_REVIEW");
+    expect(conv.booking?.status).not.toBe("REVIEW_REQUIRED");
+    expect(conv.booking?.outsideCoverageArea).toBe(false);
+    const texts = await sentTexts(sender);
+    expect(texts.join("\n")).not.toMatch(/validar o endere/i);
+  });
+
+  it("keeps the request waiting for a professional when none is eligible yet", async () => {
+    // Other tests in this file registered professionals; take them out of matching.
+    await prisma.recruitmentLead.updateMany({ data: { status: "DESISTIU" } });
+    const sender = await customerWithRequestSent();
+    const conv = await conversation(sender);
+    expect(conv.state).toBe("COMPLETED");
+    expect(conv.booking?.status).toBe("QUOTE_ACCEPTED");
+    expect(
+      await prisma.serviceOpportunity.count({
+        where: { bookingId: conv.bookingId! },
       })
-    ).rejects.toMatchObject({ code: "BOOKING_NOT_EDITABLE" });
-    await prisma.$transaction(async (tx) => {
-      const result = await transitionBookingStatusInTransaction(tx, {
-        bookingId,
-        targetStatus: "PAID",
-        actor: "test:admin",
-      });
-      if (!result.ok) throw result.error;
-      await tx.customerBookingConversation.update({
-        where: { id: conv.id },
-        data: { state: "COMPLETED" },
-      });
-    });
-    await expect(
-      prepareBookingMatching(prisma, {
-        bookingId,
-        neighborhood: "Meireles",
-        professionalPaymentCents: 0,
-        actor: "test:admin",
-      })
-    ).rejects.toThrow();
+    ).toBe(0);
+    expect((await sentTexts(sender)).at(-1)).toMatch(
+      /buscando uma profissional/i
+    );
+    // The admin can still prepare and send it once someone becomes eligible.
+    await registerProfessional();
     await prepareBookingMatching(prisma, {
-      bookingId,
-      neighborhood: " Meireles ",
-      professionalPaymentCents: 10000,
+      bookingId: conv.bookingId!,
+      neighborhood: "Meireles",
+      professionalPaymentCents: 15000,
       actor: "test:admin",
     });
-    const professional = phone();
-    await prisma.recruitmentLead.create({
-      data: {
-        origin: "WHATSAPP",
-        status: "ATIVA",
-        phoneE164: professional,
-        fullName: "Maria",
-        neighborhood: "Meireles",
-        canServeInitialArea: "SIM",
-        availabilityDays: [
-          "segunda",
-          "terça",
-          "quarta",
-          "quinta",
-          "sexta",
-          "sábado",
-          "domingo",
-        ],
-      },
-    });
     expect(
-      (await notifyOpportunity(prisma, { bookingId, actor: "test:admin" }))
-        .dispatched
+      (
+        await notifyOpportunity(prisma, {
+          bookingId: conv.bookingId!,
+          actor: "test:admin",
+        })
+      ).dispatched
     ).toBe(true);
-    const offer = await prisma.opportunityResponse.findFirstOrThrow({
-      where: { opportunity: { bookingId } },
-    });
-    await expect(
-      prepareBookingMatching(prisma, {
-        bookingId,
-        neighborhood: "Aldeota",
-        professionalPaymentCents: 12000,
-        actor: "test:admin",
-      })
-    ).rejects.toMatchObject({ code: "BOOKING_NOT_EDITABLE" });
-    await receive(professional, `SIM ${offer.responseToken}`);
-    expect(
-      (await prisma.booking.findUniqueOrThrow({ where: { id: bookingId } }))
-        .status
-    ).toBe("PROFESSIONAL_ASSIGNED");
-    expect(
-      await prisma.outboxMessage.count({
-        where: { recipient: sender, correlationId: offer.opportunityId },
-      })
-    ).toBe(1);
-    expect(
-      await prisma.auditLog.count({
-        where: { entityId: bookingId, action: "BOOKING_MATCHING_PREPARED" },
-      })
-    ).toBe(1);
   });
 
-  it("honors PARAR during payment and MENU resumes the same request", async () => {
-    const sender = await customerAtConfirmation();
-    await receive(sender, "1");
-    const original = await conversation(sender);
-    await receive(sender, "PARAR");
-    expect((await conversation(sender)).state).toBe("PAUSED");
-    await receive(sender, "MENU");
-    const resumed = await conversation(sender);
-    expect(resumed.id).toBe(original.id);
-    expect(resumed.state).toBe("AWAITING_PAYMENT");
-    expect(resumed.bookingId).toBe(original.bookingId);
-  });
-
-  it("keeps a paused conversation paused when the team validates coverage", async () => {
+  it("asks for the bairro only when it cannot be read from the address", async () => {
+    await registerProfessional();
     const sender = phone();
     for (const text of [
       "Oi",
@@ -331,11 +306,183 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
       "Maria Souza",
       "1",
       "amanhã às 14h",
-      "Rua Teste, 123, Meireles",
-      "PARAR",
+      "1",
+      "Rua das Flores 123",
     ])
       await receive(sender, text);
+    expect((await conversation(sender)).state).toBe("NEIGHBORHOOD");
+    await receive(sender, "Meireles");
+    const conv = await conversation(sender);
+    expect(conv.state).toBe("COMPLETED");
+    expect(conv.booking?.status).toBe("MATCHING");
+    expect(conv.booking?.neighborhood).toBe("Meireles");
+  });
+
+  it("confirms the understood day and time and lets the customer change it", async () => {
+    const sender = phone();
+    for (const text of ["Oi", "1", "Maria Souza", "1", "amanhã 14h"])
+      await receive(sender, text);
+    let conv = await conversation(sender);
+    expect(conv.state).toBe("QUOTE_ACCEPTANCE");
+    expect(conv.booking?.scheduledAt?.toISOString().slice(11, 16)).toBe(
+      "17:00"
+    );
+    await receive(sender, "2");
+    expect((await conversation(sender)).state).toBe("SCHEDULE_DATE");
+    await receive(sender, "depois de amanhã 9h");
+    conv = await conversation(sender);
+    expect(conv.state).toBe("QUOTE_ACCEPTANCE");
+    expect(conv.booking?.scheduledAt?.toISOString().slice(11, 16)).toBe(
+      "12:00"
+    );
+    await receive(sender, "1");
+    expect((await conversation(sender)).state).toBe("ADDRESS");
+  });
+
+  it.each([
+    ["{d3} as 14 h", "17:00"],
+    ["{d3} às 14h", "17:00"],
+    ["{d3} 14:00", "17:00"],
+    ["{d3} 14hrs", "17:00"],
+    ["{d3} 2 da tarde", "17:00"],
+    ["{d3} 14 horas", "17:00"],
+    ["3 14h", "17:00"],
+    ["{d3} às 8h", "11:00"],
+  ])(
+    "understands the PT-BR reply %s without defaulting to the first slot",
+    async (template, utcTime) => {
+      const sender = phone();
+      for (const text of ["Oi", "1", "Maria Souza", "1"])
+        await receive(sender, text);
+      const day = customerScheduleDateChoices()[2]!.label;
+      await receive(sender, template.replace("{d3}", day));
+      const conv = await conversation(sender);
+      expect(conv.state).toBe("QUOTE_ACCEPTANCE");
+      expect(conv.booking?.scheduledAt?.toISOString().slice(11, 16)).toBe(
+        utcTime
+      );
+    }
+  );
+
+  it("asks again, listing the hours, when the time is unavailable instead of picking one", async () => {
+    const sender = phone();
+    for (const text of ["Oi", "1", "Maria Souza", "1"])
+      await receive(sender, text);
+    await receive(sender, `${customerScheduleDateChoices()[2]!.label} às 15h`);
+    const conv = await conversation(sender);
+    expect(conv.state).toBe("SCHEDULE_DATE");
+    expect(conv.booking?.scheduledAt).toBeNull();
+    const last = (await sentTexts(sender)).at(-1)!;
+    expect(last).toMatch(/15h/);
+    expect(last).toContain("8h, 9h, 13h ou 14h");
+  });
+
+  it("exchanges contacts: customer gets the professional, professional gets the customer", async () => {
+    const professional = await registerProfessional();
+    const sender = await customerWithRequestSent();
+    const conv = await conversation(sender);
+    const offer = await prisma.opportunityResponse.findFirstOrThrow({
+      where: {
+        opportunity: { bookingId: conv.bookingId! },
+        lead: { phoneE164: professional.phone },
+      },
+    });
+    const offerText = (await drainOutbox())
+      .filter((item) => item.recipient === professional.phone)
+      .at(-1)!.text;
+    expect(offerText).toContain("Valor estimado");
+    expect(offerText).not.toMatch(/Pagamento:/);
+    expect(offerText).not.toContain("Rua Teste, 123");
+
+    await receive(professional.phone, `SIM ${offer.responseToken}`);
+    const booking = await prisma.booking.findUniqueOrThrow({
+      where: { id: conv.bookingId! },
+    });
+    expect(booking.status).toBe("PROFESSIONAL_ASSIGNED");
+
+    const afterAccept = await drainOutbox();
+    const toCustomer = afterAccept
+      .filter((item) => item.recipient === sender)
+      .at(-1)!.text;
+    expect(toCustomer).toContain("Joana Profissional");
+    expect(toCustomer).toContain(professional.phone);
+    expect(toCustomer).toContain("wa.me/");
+    const toProfessional = afterAccept
+      .filter((item) => item.recipient === professional.phone)
+      .at(-1)!.text;
+    expect(toProfessional).toContain("Maria Souza");
+    expect(toProfessional).toContain(sender);
+    expect(toProfessional).toContain("Rua Teste, 123, Meireles");
+    expect(toProfessional).toContain("14:00");
+    expect(toProfessional).toContain("Apartamento de 2 quartos");
+    expect(toProfessional).toMatch(/combine o valor/i);
+  });
+
+  it("honors PARAR at the address step and MENU resumes the same request", async () => {
+    const sender = phone();
+    for (const text of ["Oi", "1", "Maria Souza", "1", "amanhã às 14h", "1"])
+      await receive(sender, text);
     const original = await conversation(sender);
+    expect(original.state).toBe("ADDRESS");
+    await receive(sender, "PARAR");
+    expect((await conversation(sender)).state).toBe("PAUSED");
+    await receive(sender, "MENU");
+    const resumed = await conversation(sender);
+    expect(resumed.id).toBe(original.id);
+    expect(resumed.state).toBe("ADDRESS");
+    expect(resumed.bookingId).toBe(original.bookingId);
+  });
+
+  it("moves a conversation stuck in MANUAL_REVIEW by coverage straight to matching on the next message", async () => {
+    await registerProfessional();
+    const sender = phone();
+    for (const text of ["Oi", "1", "Maria Souza", "1", "amanhã às 14h", "1"])
+      await receive(sender, text);
+    const stuck = await conversation(sender);
+    // Reproduces what the former coverage step left behind.
+    await prisma.$transaction(async (tx) => {
+      const review = await transitionBookingStatusInTransaction(tx, {
+        bookingId: stuck.bookingId!,
+        targetStatus: "REVIEW_REQUIRED",
+        actor: "test:legacy",
+      });
+      if (!review.ok) throw review.error;
+      await tx.booking.update({
+        where: { id: stuck.bookingId! },
+        data: { addressLine1: "Rua Teste, 123, Meireles", neighborhood: null },
+      });
+      await tx.customerBookingConversation.update({
+        where: { id: stuck.id },
+        data: { state: "MANUAL_REVIEW", lastQuestionKey: "MANUAL_REVIEW" },
+      });
+    });
+    await receive(sender, "Oi, alguma novidade?");
+    const conv = await conversation(sender);
+    expect(conv.state).toBe("COMPLETED");
+    expect(conv.booking?.status).toBe("MATCHING");
+  });
+
+  it("keeps a paused legacy review paused when the team validates coverage", async () => {
+    const sender = phone();
+    for (const text of ["Oi", "1", "Maria Souza", "1", "amanhã às 14h", "1"])
+      await receive(sender, text);
+    const original = await conversation(sender);
+    await prisma.$transaction(async (tx) => {
+      const review = await transitionBookingStatusInTransaction(tx, {
+        bookingId: original.bookingId!,
+        targetStatus: "REVIEW_REQUIRED",
+        actor: "test:legacy",
+      });
+      if (!review.ok) throw review.error;
+      await tx.booking.update({
+        where: { id: original.bookingId! },
+        data: { addressLine1: "Rua Teste, 123, Meireles" },
+      });
+      await tx.customerBookingConversation.update({
+        where: { id: original.id },
+        data: { state: "PAUSED", lastQuestionKey: "MANUAL_REVIEW" },
+      });
+    });
     const before = await prisma.outboxMessage.count({
       where: { recipient: sender },
     });
@@ -350,22 +497,6 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
     ).toBe(before);
     await receive(sender, "MENU");
     expect((await conversation(sender)).state).toBe("FINAL_CONFIRMATION");
-  });
-
-  it("requires fresh coverage validation after an address edit", async () => {
-    const sender = await customerAtConfirmation();
-    const original = await conversation(sender);
-    await prisma.booking.update({
-      where: { id: original.bookingId! },
-      data: { neighborhood: "Meireles", professionalPaymentCents: 10000 },
-    });
-    for (const text of ["2", "3", "Rua Nova, 456, Aldeota"])
-      await receive(sender, text);
-    const edited = await conversation(sender);
-    expect(edited.state).toBe("MANUAL_REVIEW");
-    expect(edited.booking?.coverageValidatedAt).toBeNull();
-    expect(edited.booking?.neighborhood).toBeNull();
-    expect(edited.booking?.professionalPaymentCents).toBeNull();
   });
 
   it("deduplicates the first inbound and concurrent starts create one customer conversation", async () => {

@@ -21,7 +21,9 @@ export async function prepareBookingMatching(
       include: { opportunities: { orderBy: { createdAt: "desc" }, take: 1 } },
     });
     if (!booking) throw new DomainError("Agendamento não encontrado.", "BOOKING_NOT_FOUND");
-    const editable = booking.status === "DRAFT" || booking.status === "PAID"
+    // Pedidos sem profissional elegível ficam em QUOTE_ACCEPTED/AWAITING_CUSTOMER_CONFIRMATION
+    // (PAID só existe em dados legados) e podem ser reenviados ao matching.
+    const editable = ["DRAFT", "PAID", "QUOTE_ACCEPTED", "AWAITING_CUSTOMER_CONFIRMATION", "AWAITING_PAYMENT"].includes(booking.status)
       || (booking.status === "REVIEW_REQUIRED" && booking.opportunities[0]?.status === "EXPIRED");
     if (!editable) throw new DomainError("Este pedido não pode ter os dados da oportunidade alterados nesta etapa.", "BOOKING_NOT_EDITABLE");
     const updated = await tx.booking.updateMany({

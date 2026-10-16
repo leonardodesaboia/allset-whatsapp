@@ -1,6 +1,7 @@
 import type { CustomerConversationState } from "./customer-conversation-definition";
 
-// QUOTE is transient; PAUSED, MANUAL_REVIEW and COMPLETED have no customer question.
+// QUOTE is transient; PAUSED, MANUAL_REVIEW, COMPLETED and the legacy
+// AWAITING_PAYMENT have no customer question (there is no platform payment).
 export const CUSTOMER_ADMIN_STEPS = [
   "INTRODUCTION",
   "NAME",
@@ -9,9 +10,9 @@ export const CUSTOMER_ADMIN_STEPS = [
   "SCHEDULE_TIME",
   "QUOTE_ACCEPTANCE",
   "ADDRESS",
+  "NEIGHBORHOOD",
   "FINAL_CONFIRMATION",
   "EDIT_SELECTION",
-  "AWAITING_PAYMENT",
 ] as const satisfies readonly CustomerConversationState[];
 
 export type CustomerAdminStep = (typeof CUSTOMER_ADMIN_STEPS)[number];
