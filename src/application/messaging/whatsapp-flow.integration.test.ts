@@ -658,16 +658,16 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
       "2",
       "Maria",
       "Meireles",
-      "sim",
-      "sim",
+      "2",
       "segunda e terça",
+      "1",
     ])
       await receive(sender, text);
     const lead = await prisma.recruitmentLead.findUniqueOrThrow({
       where: { phoneE164: sender },
       include: { conversation: true },
     });
-    expect(lead.status).toBe("CONVERSA_PENDENTE");
+    expect(lead.status).toBe("TRIAGEM");
     expect(lead.conversation?.state).toBe("COMPLETED");
     expect((await sentTexts(sender)).at(-1)).toMatch(
       /cadastro.*(recebido|concluído)/i

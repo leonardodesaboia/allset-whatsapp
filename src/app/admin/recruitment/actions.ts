@@ -1,5 +1,6 @@
 "use server";
 
+import { recruitmentAdminDecision } from "@/application/recruitment/recruitment-admin-decision.usecase";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import type { LeadOrigin } from "@prisma/client";
@@ -104,6 +105,7 @@ const uuidField = z.string().uuid("Identificador inválido.");
 const moveLeadSchema = z.object({
   leadId: uuidField,
   targetStatus: z.enum(RECRUITMENT_STATUSES),
+  reason: optionalTrimmed(500),
 });
 const quickNoteSchema = z.object({
   leadId: uuidField,
@@ -115,7 +117,7 @@ const quickNoteSchema = z.object({
 });
 const completeInterviewSchema = z.object({
   interviewId: uuidField,
-  result: z.enum(["APPROVED", "REJECTED", "RESCHEDULED", "NO_SHOW"] as [
+  result: z.enum(["REFERENCIA", "AGUARDANDO_COMPLEMENTACAO", "BASE_FUTURA", "REPROVADA"] as [
     string,
     ...string[],
   ]),
@@ -163,6 +165,7 @@ const workflowManagedStatuses = new Set<RecruitmentStatus>([
 export async function moveLeadAction(input: {
   leadId: string;
   targetStatus: RecruitmentStatus;
+  reason?: string;
 }) {
   const actor = await currentActor();
   if (!actor) return result(false, "Sessão expirada.");
@@ -174,7 +177,8 @@ export async function moveLeadAction(input: {
       "Use a ação específica da etapa para preservar o histórico operacional."
     );
   const moved = await transitionLeadStatusUseCase(prisma, {
-    ...parsed.data,
+    leadId: parsed.data.leadId, targetStatus: parsed.data.targetStatus,
+    ...(parsed.data.reason !== undefined ? { reason: parsed.data.reason } : {}),
     actor,
   });
   revalidatePath("/admin/recruitment");
@@ -596,4 +600,15 @@ export async function decideValidationAction(input: {
       actionError(error, "Não foi possível registrar decisão.")
     );
   }
+}
+
+export async function recruitmentDecisionAction(input: { leadId: string; expectedVersion: number; action: "ANALYZE" | "REQUEST_DOCUMENT" | "APPROVE" | "REJECT" | "FUTURE" | "CONTACT"; reason?: string }) {
+  const actor = await currentActor();
+  if (!actor) return result(false, "Sessão expirada.");
+  const parsed = z.object({ leadId: uuidField, expectedVersion: z.number().int().min(0), action: z.enum(["ANALYZE", "REQUEST_DOCUMENT", "APPROVE", "REJECT", "FUTURE", "CONTACT"]), reason: optionalTrimmed(500) }).safeParse(input);
+  if (!parsed.success) return result(false, "Dados da decisão inválidos.");
+  const decision = await recruitmentAdminDecision(prisma, { leadId: parsed.data.leadId, expectedVersion: parsed.data.expectedVersion, action: parsed.data.action, actor, ...(parsed.data.reason !== undefined ? { reason: parsed.data.reason } : {}) });
+  revalidatePath("/admin/recruitment");
+  revalidatePath(`/admin/recruitment/${input.leadId}`);
+  return decision.ok ? result(true) : result(false, decision.error.message);
 }

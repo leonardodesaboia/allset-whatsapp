@@ -1,3 +1,5 @@
+import { RecruitmentDecisionPanel } from "../recruitment-decision-panel";
+import { registrationSummary } from "@/domain/recruitment/registration-summary";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import {
@@ -201,20 +203,20 @@ export default async function LeadProfilePage({
 
   // Sections visible based on current stage
   const showInterviews =
-    reachedStage(status, "ENTREVISTA") || lead.interviews.length > 0;
+    status === "ENTREVISTA" || lead.interviews.length > 0;
   const showReferences =
-    reachedStage(status, "REFERENCIA") || lead.references.length > 0;
+    status === "REFERENCIA" || lead.references.length > 0;
   const showAssessments =
-    reachedStage(status, "PRE_APROVADA") || lead.assessments.length > 0;
+    lead.assessments.length > 0;
   const showDocuments =
     reachedStage(status, "DOCUMENTACAO") || lead.documents.length > 0;
   const showOnboarding =
-    reachedStage(status, "ONBOARDING") || lead.onboardingProgress.length > 0;
+    status === "ONBOARDING" || lead.onboardingProgress.length > 0;
   const showTest =
-    reachedStage(status, "TESTE_OPERACIONAL") ||
+    status === "TESTE_OPERACIONAL" ||
     lead.operationalTests.length > 0;
   const showValidation =
-    reachedStage(status, "EM_VALIDACAO") ||
+    status === "EM_VALIDACAO" ||
     lead.validationServices.length > 0 ||
     lead.validationDecisions.length > 0;
 
@@ -325,13 +327,18 @@ export default async function LeadProfilePage({
           </div>
         )}
 
-      {/* Ações de recrutamento */}
+      <div id="proxima-acao"><RecruitmentDecisionPanel leadId={lead.id} status={lead.status} version={lead.version} phone={lead.phoneE164} /></div>
+      <Card><CardHeader><CardTitle>Respostas do cadastro</CardTitle></CardHeader><CardContent><p className="whitespace-pre-line text-sm">{registrationSummary(lead)}</p>{lead.neighborhood && <p className="mt-2 text-xs text-slate-500">Bairro de moradia (cadastro antigo): {lead.neighborhood}</p>}</CardContent></Card>
+
+      <details><summary className="cursor-pointer text-sm text-slate-500">Avaliações e etapas anteriores (opcionais)</summary>
       <LeadWorkflowActions
         leadId={lead.id}
         status={lead.status}
         {...(openInterview ? { openInterviewId: openInterview.id } : {})}
         {...(latestReference ? { latestReferenceId: latestReference.id } : {})}
       />
+
+      </details>
 
       {/* Conversa WhatsApp — posição de destaque logo após as ações */}
       {timeline.length > 0 && (

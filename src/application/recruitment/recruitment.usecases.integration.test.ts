@@ -21,7 +21,7 @@ describe("recruitment use cases", () => {
     await prisma.recruitmentLead.update({ where: { id: paused.id }, data: { status: "PAUSADA" } });
 
     const board = await getKanbanBoard(prisma);
-    expect(board.find((column) => column.status === "PAUSADA")?.leads.some((item) => item.id === paused.id)).toBe(true);
-    expect(board.map((column) => column.status)).toEqual(expect.arrayContaining(["PREFERENCIAL", "PRECISA_DE_AJUDA", "AGUARDANDO_COMPLEMENTACAO", "REPROVADA", "DESISTIU", "SUSPENSA"]));
+    expect(board.find((column) => column.status === "CONVERSA_PENDENTE")?.leads.some((item) => item.id === paused.id)).toBe(true);
+    expect(board.map((column) => column.status)).toEqual(expect.arrayContaining(["ATIVA", "CONVERSA_PENDENTE", "DOCUMENTACAO", "REPROVADA", "DESISTIU", "SUSPENSA"]));
   });
 });

@@ -1,3 +1,4 @@
+import { registrationSummary } from "../../domain/recruitment/registration-summary";
 import type { Prisma, RecruitmentConversation } from "@prisma/client";
 import { audioPayload, textPayload } from "../../domain/messaging/message";
 import { QUESTIONS, type ConversationState } from "../../domain/recruitment/conversation-definition";
@@ -17,16 +18,19 @@ export async function enqueueRecruitmentQuestion(
 ) {
   const question = QUESTIONS[input.state];
   if (!question) return;
+  const lead = input.state === "CONFIRMATION" ? await tx.recruitmentLead.findUniqueOrThrow({ where: { id: input.conversation.leadId } }) : null;
+  const questionText = lead ? `${registrationSummary(lead)}\n\n${question.text}` : question.text;
   if (input.includeText !== false) {
     await enqueueOutboundMessage(tx, {
       provider: input.conversation.provider,
       recipient: input.recipient,
-      payload: textPayload(input.text ?? question.text),
+      payload: textPayload(input.text ?? questionText),
       idempotencyKey: `${input.idempotencyPrefix}:text`,
       correlationId: input.conversation.id,
       actor: input.actor,
     });
   }
+  if (input.state === "CONFIRMATION") return;
   const audio = await tx.questionAudioAsset.findFirst({
     where: { questionKey: input.state, isActive: true },
     orderBy: { version: "desc" },

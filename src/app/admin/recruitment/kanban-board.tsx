@@ -155,11 +155,17 @@ export function KanbanBoard({ columns }: { columns: KanbanColumnData[] }) {
     const targetLabel = columns.find((column) => column.status === targetStatus)?.label ?? "a nova etapa";
     const requiresConfirmation = ["ATIVA", "PREFERENCIAL", "REPROVADA", "DESISTIU", "SUSPENSA"].includes(targetStatus);
     if (requiresConfirmation && !window.confirm(`Mover a profissional para “${targetLabel}”? Esta mudança pode exigir uma nova avaliação para ser revertida.`)) return;
+    let reason: string | undefined;
+    if (["REPROVADA", "BASE_FUTURA"].includes(targetStatus)) {
+      reason = window.prompt("Qual é o motivo? Ele será enviado à profissional.")?.trim();
+      if (!reason) return;
+    }
     setIsMoving(true);
     try {
       const moved = await moveLeadAction({
         leadId: String(event.active.id),
         targetStatus,
+        ...(reason ? { reason } : {}),
       });
       if (!moved.ok) {
         setError(moved.error ?? "Movimento não permitido.");

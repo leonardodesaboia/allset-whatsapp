@@ -95,7 +95,7 @@ export function LeadCard({ lead }: { lead: LeadCardData }) {
           aria-label={`Abrir perfil de ${accessibleName}`}
           className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium"
         >
-          Abrir
+          Ver próxima ação
           <ExternalLink className="w-3 h-3" aria-hidden />
         </Link>
       </div>

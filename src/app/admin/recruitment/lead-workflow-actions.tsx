@@ -82,12 +82,7 @@ export function LeadWorkflowActions({
             <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => void execute(() => completeInterviewAction({ interviewId: openInterviewId, result: "AGUARDANDO_COMPLEMENTACAO" as InterviewResult }), "Complementação solicitada.")}>
               Pedir complementação
             </Button>
-            <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => void execute(() => completeInterviewAction({ interviewId: openInterviewId, result: "BASE_FUTURA" as InterviewResult }), "Movida para base futura.")}>
-              Mover para base futura
-            </Button>
-            <Button type="button" variant="destructive" size="sm" disabled={pending} onClick={() => void execute(() => completeInterviewAction({ interviewId: openInterviewId, result: "REPROVADA" as InterviewResult }), "Reprovada.")}>
-              Reprovar
-            </Button>
+
           </>
         )}
 
