@@ -99,10 +99,8 @@ export function isEligibleForOpportunity(
   if (!ELIGIBLE_STATUSES.has(lead.status)) return false;
   if (!lead.phoneE164) return false;
 
-  const area = lead.canServeInitialArea;
-  if (!area || area === "NAO") return false;
-  // O bairro do pedido vem de texto livre do cliente: compara sem caixa/acentos.
-  if (area === "TALVEZ" && (!lead.neighborhood || normalizeText(lead.neighborhood) !== normalizeText(opportunity.neighborhood))) return false;
+  // Approved professionals decide whether the location works for them when
+  // accepting the offer. Legacy coverage answers must not suppress invitations.
 
   const days = parseDays(lead.availabilityDays);
   const oppDay = fortalezaDate(opportunity.scheduledAt);

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { startTestDatabase } from "../../../tests/integration/test-db";
 import { expireOpportunities } from "./expire-opportunities.usecase";
@@ -15,6 +15,12 @@ describe("expireOpportunities", () => {
   }, 60_000);
 
   afterAll(async () => stop());
+
+  beforeEach(async () => {
+    // Old fixtures used distinct neighborhoods for isolation. Invitations now
+    // cross neighborhoods, so only this test's professionals should be active.
+    await prisma.recruitmentLead.updateMany({ data: { status: "PAUSADA" } });
+  });
 
   async function seedOpportunity(expiresAt: Date) {
     const ts = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
