@@ -5,6 +5,10 @@ import {
   formatCustomerContactMessage,
   formatProfessionalContactMessage,
 } from "../../domain/marketplace/contact-exchange-message";
+import {
+  hasScheduleConflict,
+  isLeadStatusEligible,
+} from "../../domain/marketplace/opportunity-matching-policy";
 import { parseOpportunityReply } from "../../domain/marketplace/opportunity-reply";
 import { recordAuditLog } from "../audit/record-audit-log.usecase";
 import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
@@ -18,7 +22,8 @@ export type OpportunityResponseOutcome =
   | "INVALID_RESPONSE"
   | "NOT_FOUND"
   | "DUPLICATE_INBOUND"
-  | "AMBIGUOUS_RESPONSE";
+  | "AMBIGUOUS_RESPONSE"
+  | "NOT_ELIGIBLE";
 
 async function enqueueText(
   database: Database,
@@ -144,6 +149,58 @@ export async function processOpportunityResponse(
         metadata: { opportunityId: opportunity.id, leadId: lead.id },
       });
       return { outcome: "DECLINED" as const };
+    }
+
+    // Serialize this professional's acceptances so two offers answered at the
+    // same moment cannot both pass the schedule check below.
+    await tx.$queryRaw`SELECT id FROM "RecruitmentLead" WHERE id = ${lead.id} FOR UPDATE`;
+    const current = await tx.recruitmentLead.findUniqueOrThrow({
+      where: { id: lead.id },
+      select: { status: true },
+    });
+    const acceptedSlots = await tx.opportunityResponse.findMany({
+      where: {
+        leadId: lead.id,
+        response: "ACCEPTED",
+        opportunity: {
+          status: "FILLED",
+          id: { not: opportunity.id },
+          booking: { assignedProfessionalLeadId: lead.id, status: { not: "CANCELLED" } },
+        },
+      },
+      select: { opportunity: { select: { scheduledAt: true } } },
+    });
+    if (
+      !isLeadStatusEligible(current.status) ||
+      hasScheduleConflict(
+        acceptedSlots.map((item) => item.opportunity.scheduledAt),
+        opportunity.scheduledAt,
+      )
+    ) {
+      // The offer may still go to others; only this professional is excluded.
+      await tx.opportunityResponse.updateMany({
+        where: { id: response.id, response: null },
+        data: { response: "DECLINED", respondedAt: now },
+      });
+      await enqueueText(tx, {
+        provider: lead.conversation?.provider ?? inbound.provider,
+        recipient: lead.phoneE164,
+        text: "Essa oportunidade não está mais disponível para você. Avisaremos quando surgir uma nova.",
+        idempotencyKey: `opportunity:${opportunity.id}:${response.id}:not-eligible`,
+        correlationId: opportunity.id,
+      });
+      await recordAuditLog(tx, {
+        actor: "system:marketplace",
+        action: "OPPORTUNITY_ACCEPT_REJECTED",
+        entityType: "OpportunityResponse",
+        entityId: response.id,
+        metadata: {
+          opportunityId: opportunity.id,
+          leadId: lead.id,
+          reason: isLeadStatusEligible(current.status) ? "SCHEDULE_CONFLICT" : "LEAD_NOT_ACTIVE",
+        },
+      });
+      return { outcome: "NOT_ELIGIBLE" as const };
     }
 
     // OPEN -> FILLED is the atomic first-acceptance-wins lock.
