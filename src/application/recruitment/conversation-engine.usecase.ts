@@ -281,6 +281,14 @@ export async function processRecruitmentAnswer(
           where: { id: conversation.id },
           data: { state: "PAUSED", automationPausedAt: new Date(), lastInboundAt: new Date(), misunderstandingCount: count },
         });
+        await enqueueOutboundMessage(tx, {
+          provider: conversation.provider,
+          recipient: phoneE164,
+          payload: textPayload("Recebemos seu pedido de ajuda. Pausamos as perguntas e nossa equipe entrará em contato para ajudar com o cadastro."),
+          idempotencyKey: `recruitment:${conversation.id}:misunderstood-help:${input.inboundMessageId}`,
+          correlationId: conversation.id,
+          actor: "system:conversation",
+        });
         return { advanced: false, reason: "PHONE_REQUESTED" as const };
       }
       // Primeira ocorrência: repete a pergunta atual com áudio.
@@ -340,6 +348,14 @@ export async function processRecruitmentAnswer(
       await tx.recruitmentConversation.update({
         where: { id: conversation.id },
         data: { state: "PAUSED", automationPausedAt: new Date(), lastInboundAt: new Date(), misunderstandingCount: 0 },
+      });
+      await enqueueOutboundMessage(tx, {
+        provider: conversation.provider,
+        recipient: phoneE164,
+        payload: textPayload("Recebemos sua preferência por ligação. Pausamos as perguntas e nossa equipe entrará em contato para continuar o cadastro."),
+        idempotencyKey: `recruitment:${conversation.id}:channel-phone:${input.inboundMessageId}`,
+        correlationId: conversation.id,
+        actor: "system:conversation",
       });
       return { advanced: true, completed: false, state: "PAUSED" as const };
     }
