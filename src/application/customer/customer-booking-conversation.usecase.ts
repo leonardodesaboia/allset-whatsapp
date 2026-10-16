@@ -32,7 +32,10 @@ import { supersedeCustomerPrompts } from "./supersede-customer-prompts";
 import { z } from "zod";
 import { ok, err } from "../../domain/shared/result";
 import { DomainError } from "../../domain/shared/domain-error";
-import { customerResumeStep, isCustomerAdminStep } from "../../domain/customer/customer-admin-controls";
+import {
+  customerResumeStep,
+  isCustomerAdminStep,
+} from "../../domain/customer/customer-admin-controls";
 import type { BookingStatus } from "../../domain/booking/booking-status";
 import { ALLOWED_TRANSITIONS } from "../../domain/booking/booking-state-machine";
 
@@ -81,10 +84,14 @@ function scheduleDateText(prefix?: string): string {
 }
 
 function scheduleTimeText(isoDate?: string | null, prefix?: string): string {
-  const day = isoDate ? isoDate.split("-").reverse().slice(0, 2).join("/") : null;
+  const day = isoDate
+    ? isoDate.split("-").reverse().slice(0, 2).join("/")
+    : null;
   return [
     ...(prefix ? [prefix, ""] : []),
-    day ? `Para ${day}, qual horário você prefere?` : "Qual horário você prefere?",
+    day
+      ? `Para ${day}, qual horário você prefere?`
+      : "Qual horário você prefere?",
     "",
     "1 — 08:00",
     "2 — 09:00",
@@ -94,7 +101,8 @@ function scheduleTimeText(isoDate?: string | null, prefix?: string): string {
 }
 
 function unavailableTimeText(hour: number, minute: number): string {
-  const label = minute === 0 ? `${hour}h` : `${hour}h${String(minute).padStart(2, "0")}`;
+  const label =
+    minute === 0 ? `${hour}h` : `${hour}h${String(minute).padStart(2, "0")}`;
   return `Não atendemos às ${label}. Os horários disponíveis são 8h, 9h, 13h ou 14h.`;
 }
 
@@ -113,7 +121,7 @@ async function enqueueQuestion(
   recipient: string,
   state: CustomerConversationState,
   text?: string,
-  actor = "system:customer-conversation",
+  actor = "system:customer-conversation"
 ): Promise<void> {
   await enqueueCustomerQuestion(tx, {
     conversationId: conversation.id,
@@ -219,7 +227,7 @@ async function resendCurrentQuestion(
   conversation: CustomerBookingConversation,
   recipient: string,
   state: CustomerConversationState,
-  actor = "system:customer-conversation",
+  actor = "system:customer-conversation"
 ): Promise<void> {
   if (state === "PROPERTY_CHARACTERISTICS") {
     await enqueueQuestion(
@@ -228,7 +236,7 @@ async function resendCurrentQuestion(
       recipient,
       state,
       pricingTierText(await activePricingTiers(tx)),
-      actor,
+      actor
     );
     return;
   }
@@ -239,7 +247,7 @@ async function resendCurrentQuestion(
       recipient,
       state,
       scheduleDateText(),
-      actor,
+      actor
     );
     return;
   }
@@ -250,7 +258,7 @@ async function resendCurrentQuestion(
       recipient,
       state,
       scheduleTimeText(conversation.pendingScheduleDate),
-      actor,
+      actor
     );
     return;
   }
@@ -265,13 +273,20 @@ async function resendCurrentQuestion(
         recipient,
         state,
         scheduleConfirmationText(booking),
-        actor,
+        actor
       );
       return;
     }
   }
   if (state === "ADDRESS") {
-    await enqueueQuestion(tx, conversation, recipient, state, ADDRESS_PROMPT, actor);
+    await enqueueQuestion(
+      tx,
+      conversation,
+      recipient,
+      state,
+      ADDRESS_PROMPT,
+      actor
+    );
     return;
   }
   if (state === "FINAL_CONFIRMATION" && conversation.bookingId) {
@@ -285,7 +300,7 @@ async function resendCurrentQuestion(
         recipient,
         state,
         customerBookingSummary(booking),
-        actor,
+        actor
       );
       return;
     }
@@ -317,7 +332,7 @@ async function sendBookingToMatching(
   recipient: string,
   booking: Booking,
   neighborhood: string,
-  options: { prefix?: string } = {},
+  options: { prefix?: string } = {}
 ) {
   const actor = "system:customer-conversation";
   // Bring bookings that are still collecting data to the state matching expects.
@@ -404,12 +419,16 @@ async function continueAfterAddress(
   conversation: CustomerBookingConversation,
   recipient: string,
   bookingId: string,
-  options: { prefix?: string } = {},
+  options: { prefix?: string } = {}
 ) {
-  const booking = await tx.booking.findUniqueOrThrow({ where: { id: bookingId } });
+  const booking = await tx.booking.findUniqueOrThrow({
+    where: { id: bookingId },
+  });
   const neighborhood =
     booking.neighborhood ??
-    (booking.addressLine1 ? extractNeighborhood(booking.addressLine1) : undefined);
+    (booking.addressLine1
+      ? extractNeighborhood(booking.addressLine1)
+      : undefined);
   if (!neighborhood) {
     const updated = await tx.customerBookingConversation.update({
       where: { id: conversation.id },
@@ -421,9 +440,20 @@ async function continueAfterAddress(
       },
     });
     await enqueueQuestion(tx, updated, recipient, "NEIGHBORHOOD");
-    return { advanced: true, state: "NEIGHBORHOOD" as const, reason: undefined };
+    return {
+      advanced: true,
+      state: "NEIGHBORHOOD" as const,
+      reason: undefined,
+    };
   }
-  return sendBookingToMatching(tx, conversation, recipient, booking, neighborhood, options);
+  return sendBookingToMatching(
+    tx,
+    conversation,
+    recipient,
+    booking,
+    neighborhood,
+    options
+  );
 }
 
 /**
@@ -435,7 +465,7 @@ async function proposeSchedule(
   conversation: CustomerBookingConversation,
   recipient: string,
   date: string,
-  time: string,
+  time: string
 ) {
   const retry = (prefix: string) =>
     recordInvalidAnswer(
@@ -444,7 +474,13 @@ async function proposeSchedule(
       recipient,
       "SCHEDULE_DATE",
       (updated) =>
-        enqueueQuestion(tx, updated, recipient, "SCHEDULE_DATE", scheduleDateText(prefix)),
+        enqueueQuestion(
+          tx,
+          updated,
+          recipient,
+          "SCHEDULE_DATE",
+          scheduleDateText(prefix)
+        ),
       {
         pendingScheduleDate: null,
         state: "SCHEDULE_DATE",
@@ -453,7 +489,9 @@ async function proposeSchedule(
     );
   const scheduledAt = scheduledAtFromFortalezaLocal(date, time);
   if (!scheduledAt || scheduledAt <= new Date() || !conversation.bookingId) {
-    return retry("Esse dia e horário não estão disponíveis (já passaram ou são inválidos).");
+    return retry(
+      "Esse dia e horário não estão disponíveis (já passaram ou são inválidos)."
+    );
   }
   const booking = await tx.booking.findUnique({
     where: { id: conversation.bookingId },
@@ -542,206 +580,215 @@ export async function controlCustomerConversation(
   const parsed = adminControlSchema.safeParse(rawInput);
   if (!parsed.success) return err("Dados da ação inválidos.");
   const input = parsed.data;
-  return prisma.$transaction(async (tx) => {
-    const owner = await tx.customerBookingConversation.findUnique({
-      where: { id: input.conversationId },
-      select: { customerId: true },
-    });
-    if (!owner) return err("Conversa não encontrada.");
-    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${owner.customerId} FOR UPDATE`;
-    const current = await tx.customerBookingConversation.findUniqueOrThrow({
-      where: { id: input.conversationId },
-      include: { customer: true, booking: true },
-    });
-    if (current.version !== input.expectedVersion)
-      return err("A conversa mudou. Atualize a página e tente novamente.");
-    if (current.state === "COMPLETED" && input.action !== "restart")
-      return err("Esta conversa está encerrada. Reinicie para continuar.");
-    const booking = current.booking;
-    let target: CustomerConversationState;
-    if (input.action === "resume") {
-      const step = customerResumeStep({ ...current, hasBooking: !!booking });
-      if (!step) return err("Esta conversa não está pausada ou em revisão.");
-      target = step;
-    } else if (input.action === "step") {
-      if (!isCustomerAdminStep(input.step ?? null))
-        return err("Etapa inválida.");
-      target = input.step as CustomerConversationState;
-    } else
-      target =
-        input.action === "pause"
-          ? "PAUSED"
-          : input.action === "close"
-            ? "COMPLETED"
-            : "INTRODUCTION";
-
-    // Validate prerequisites before writing anything. Never fabricate customer consent.
-    if (target === "PROPERTY_CHARACTERISTICS" && !(await activePricingTiers(tx)).length)
-      return err("Configure as opções de preço antes de retomar esta etapa.");
-    const needsBooking = [
-      "SCHEDULE_DATE",
-      "SCHEDULE_TIME",
-      "QUOTE_ACCEPTANCE",
-      "ADDRESS",
-      "NEIGHBORHOOD",
-      "FINAL_CONFIRMATION",
-      "EDIT_SELECTION",
-    ].includes(target);
-    if (needsBooking && !booking)
-      return err(
-        "Esta etapa exige um pedido. Colete primeiro as características do imóvel."
-      );
-    if (target === "SCHEDULE_TIME" && !current.pendingScheduleDate)
-      return err("Escolha primeiro uma data na etapa SCHEDULE_DATE.");
-    if (
-      ["QUOTE_ACCEPTANCE", "FINAL_CONFIRMATION", "EDIT_SELECTION"].includes(
-        target
-      ) &&
-      (!booking?.propertyPricingTierId || !booking.scheduledAt)
-    )
-      return err("Esta etapa exige imóvel e horário definidos.");
-    if (
-      ["FINAL_CONFIRMATION", "EDIT_SELECTION"].includes(target) &&
-      !booking?.addressLine1
-    )
-      return err("Esta etapa exige o endereço do cliente.");
-
-    let bookingTarget: BookingStatus | null = null;
-    if (
-      booking &&
-      ["restart", "close"].includes(input.action) &&
-      booking.status !== "CANCELLED"
-    )
-      bookingTarget = "CANCELLED";
-    else if (booking && !["pause", "close", "restart"].includes(input.action)) {
-      if (
-        [
-          "INTRODUCTION",
-          "NAME",
-          "PROPERTY_CHARACTERISTICS",
-          "SCHEDULE_DATE",
-          "SCHEDULE_TIME",
-        ].includes(target)
-      )
-        bookingTarget = "COLLECTING_DATA";
-      if (target === "QUOTE_ACCEPTANCE") bookingTarget = "QUOTED";
-      if (
-        target === "ADDRESS" &&
-        !["COLLECTING_DATA", "QUOTE_ACCEPTED", "REVIEW_REQUIRED"].includes(
-          booking.status
-        )
-      )
-        bookingTarget = "COLLECTING_DATA";
-      if (["FINAL_CONFIRMATION", "EDIT_SELECTION"].includes(target))
-        bookingTarget = "AWAITING_CUSTOMER_CONFIRMATION";
-      if (
-        ["ADDRESS", "NEIGHBORHOOD"].includes(target) &&
-        [
-          "PAID",
-          "CANCELLED",
-          "COMPLETED",
-          "MATCHING",
-          "AWAITING_PAYMENT",
-        ].includes(booking.status)
-      )
-        return err("O status deste pedido não permite retornar ao endereço.");
-    }
-    if (
-      booking &&
-      bookingTarget &&
-      booking.status !== bookingTarget &&
-      !ALLOWED_TRANSITIONS[booking.status].includes(bookingTarget)
-    )
-      return err(
-        "O status do pedido não permite esta alteração. Resolva o pedido em Agendamentos."
-      );
-    if (!["PAUSED", "COMPLETED"].includes(target)) {
-      const other = await tx.customerBookingConversation.findFirst({
-        where: {
-          customerId: current.customerId,
-          id: { not: current.id },
-          state: { not: "COMPLETED" },
-        },
-        select: { id: true },
+  return prisma
+    .$transaction(async (tx) => {
+      const owner = await tx.customerBookingConversation.findUnique({
+        where: { id: input.conversationId },
+        select: { customerId: true },
       });
-      if (other)
-        return err(
-          "Este cliente possui outra conversa aberta. Encerre a outra conversa antes de ativar esta."
-        );
-    }
-    const claimed = await tx.customerBookingConversation.updateMany({
-      where: { id: current.id, version: input.expectedVersion },
-      data: {
-        state: target,
-        lastQuestionKey:
-          target === "PAUSED"
-            ? isCustomerAdminStep(current.state)
-              ? current.state
-              : current.lastQuestionKey
-            : target,
-        automationPausedAt: ["PAUSED", "COMPLETED"].includes(target)
-          ? new Date()
-          : null,
-        misunderstandingCount: 0,
-        misunderstandingState: null,
-        lastInboundAt: new Date(),
-        lastReengagementAt: null,
-        ...(input.action === "restart"
-          ? { bookingId: null, pendingScheduleDate: null }
-          : {}),
-        ...(target === "SCHEDULE_DATE" ? { pendingScheduleDate: null } : {}),
-        version: { increment: 1 },
-      },
-    });
-    if (!claimed.count)
-      return err("A conversa mudou. Atualize a página e tente novamente.");
-    if (booking && bookingTarget && booking.status !== bookingTarget) {
-      const transition = await transitionBookingStatusInTransaction(tx, {
-        bookingId: booking.id,
-        expectedVersion: booking.version,
-        targetStatus: bookingTarget,
-        actor: input.actor,
-        reason: `Controle administrativo: ${input.action}`,
+      if (!owner) return err("Conversa não encontrada.");
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${owner.customerId} FOR UPDATE`;
+      const current = await tx.customerBookingConversation.findUniqueOrThrow({
+        where: { id: input.conversationId },
+        include: { customer: true, booking: true },
       });
-      // Roll back the conversation claim if the booking changed concurrently.
-      if (!transition.ok) throw transition.error;
-    }
-    const conversation = await tx.customerBookingConversation.findUniqueOrThrow(
-      { where: { id: current.id } }
-    );
-    const superseded = await supersedeCustomerPrompts(tx, current.id);
-    await recordAuditLog(tx, {
-      actor: input.actor,
-      action: `CUSTOMER_CONVERSATION_${input.action.toUpperCase()}`,
-      entityType: "CustomerBookingConversation",
-      entityId: current.id,
-      metadata: {
-        fromState: current.state,
-        toState: target,
-        bookingId: current.bookingId,
-        fromVersion: current.version,
-        version: conversation.version,
-        supersededPrompts: superseded.count,
-        reason:
+      if (current.version !== input.expectedVersion)
+        return err("A conversa mudou. Atualize a página e tente novamente.");
+      if (current.state === "COMPLETED" && input.action !== "restart")
+        return err("Esta conversa está encerrada. Reinicie para continuar.");
+      const booking = current.booking;
+      let target: CustomerConversationState;
+      if (input.action === "resume") {
+        const step = customerResumeStep({ ...current, hasBooking: !!booking });
+        if (!step) return err("Esta conversa não está pausada ou em revisão.");
+        target = step;
+      } else if (input.action === "step") {
+        if (!isCustomerAdminStep(input.step ?? null))
+          return err("Etapa inválida.");
+        target = input.step as CustomerConversationState;
+      } else
+        target =
           input.action === "pause"
-            ? "Admin assumiu o atendimento"
-            : input.action,
-      },
+            ? "PAUSED"
+            : input.action === "close"
+              ? "COMPLETED"
+              : "INTRODUCTION";
+
+      // Validate prerequisites before writing anything. Never fabricate customer consent.
+      if (
+        target === "PROPERTY_CHARACTERISTICS" &&
+        !(await activePricingTiers(tx)).length
+      )
+        return err("Configure as opções de preço antes de retomar esta etapa.");
+      const needsBooking = [
+        "SCHEDULE_DATE",
+        "SCHEDULE_TIME",
+        "QUOTE_ACCEPTANCE",
+        "ADDRESS",
+        "NEIGHBORHOOD",
+        "FINAL_CONFIRMATION",
+        "EDIT_SELECTION",
+      ].includes(target);
+      if (needsBooking && !booking)
+        return err(
+          "Esta etapa exige um pedido. Colete primeiro as características do imóvel."
+        );
+      if (target === "SCHEDULE_TIME" && !current.pendingScheduleDate)
+        return err("Escolha primeiro uma data na etapa SCHEDULE_DATE.");
+      if (
+        ["QUOTE_ACCEPTANCE", "FINAL_CONFIRMATION", "EDIT_SELECTION"].includes(
+          target
+        ) &&
+        (!booking?.propertyPricingTierId || !booking.scheduledAt)
+      )
+        return err("Esta etapa exige imóvel e horário definidos.");
+      if (
+        ["FINAL_CONFIRMATION", "EDIT_SELECTION"].includes(target) &&
+        !booking?.addressLine1
+      )
+        return err("Esta etapa exige o endereço do cliente.");
+
+      let bookingTarget: BookingStatus | null = null;
+      if (
+        booking &&
+        ["restart", "close"].includes(input.action) &&
+        booking.status !== "CANCELLED"
+      )
+        bookingTarget = "CANCELLED";
+      else if (
+        booking &&
+        !["pause", "close", "restart"].includes(input.action)
+      ) {
+        if (
+          [
+            "INTRODUCTION",
+            "NAME",
+            "PROPERTY_CHARACTERISTICS",
+            "SCHEDULE_DATE",
+            "SCHEDULE_TIME",
+          ].includes(target)
+        )
+          bookingTarget = "COLLECTING_DATA";
+        if (target === "QUOTE_ACCEPTANCE") bookingTarget = "QUOTED";
+        if (
+          target === "ADDRESS" &&
+          !["COLLECTING_DATA", "QUOTE_ACCEPTED", "REVIEW_REQUIRED"].includes(
+            booking.status
+          )
+        )
+          bookingTarget = "COLLECTING_DATA";
+        if (["FINAL_CONFIRMATION", "EDIT_SELECTION"].includes(target))
+          bookingTarget = "AWAITING_CUSTOMER_CONFIRMATION";
+        if (
+          ["ADDRESS", "NEIGHBORHOOD"].includes(target) &&
+          [
+            "PAID",
+            "CANCELLED",
+            "COMPLETED",
+            "MATCHING",
+            "AWAITING_PAYMENT",
+          ].includes(booking.status)
+        )
+          return err("O status deste pedido não permite retornar ao endereço.");
+      }
+      if (
+        booking &&
+        bookingTarget &&
+        booking.status !== bookingTarget &&
+        !ALLOWED_TRANSITIONS[booking.status].includes(bookingTarget)
+      )
+        return err(
+          "O status do pedido não permite esta alteração. Resolva o pedido em Agendamentos."
+        );
+      if (!["PAUSED", "COMPLETED"].includes(target)) {
+        const other = await tx.customerBookingConversation.findFirst({
+          where: {
+            customerId: current.customerId,
+            id: { not: current.id },
+            state: { not: "COMPLETED" },
+          },
+          select: { id: true },
+        });
+        if (other)
+          return err(
+            "Este cliente possui outra conversa aberta. Encerre a outra conversa antes de ativar esta."
+          );
+      }
+      const claimed = await tx.customerBookingConversation.updateMany({
+        where: { id: current.id, version: input.expectedVersion },
+        data: {
+          state: target,
+          lastQuestionKey:
+            target === "PAUSED"
+              ? isCustomerAdminStep(current.state)
+                ? current.state
+                : current.lastQuestionKey
+              : target,
+          automationPausedAt: ["PAUSED", "COMPLETED"].includes(target)
+            ? new Date()
+            : null,
+          misunderstandingCount: 0,
+          misunderstandingState: null,
+          lastInboundAt: new Date(),
+          lastReengagementAt: null,
+          ...(input.action === "restart"
+            ? { bookingId: null, pendingScheduleDate: null }
+            : {}),
+          ...(target === "SCHEDULE_DATE" ? { pendingScheduleDate: null } : {}),
+          version: { increment: 1 },
+        },
+      });
+      if (!claimed.count)
+        return err("A conversa mudou. Atualize a página e tente novamente.");
+      if (booking && bookingTarget && booking.status !== bookingTarget) {
+        const transition = await transitionBookingStatusInTransaction(tx, {
+          bookingId: booking.id,
+          expectedVersion: booking.version,
+          targetStatus: bookingTarget,
+          actor: input.actor,
+          reason: `Controle administrativo: ${input.action}`,
+        });
+        // Roll back the conversation claim if the booking changed concurrently.
+        if (!transition.ok) throw transition.error;
+      }
+      const conversation =
+        await tx.customerBookingConversation.findUniqueOrThrow({
+          where: { id: current.id },
+        });
+      const superseded = await supersedeCustomerPrompts(tx, current.id);
+      await recordAuditLog(tx, {
+        actor: input.actor,
+        action: `CUSTOMER_CONVERSATION_${input.action.toUpperCase()}`,
+        entityType: "CustomerBookingConversation",
+        entityId: current.id,
+        metadata: {
+          fromState: current.state,
+          toState: target,
+          bookingId: current.bookingId,
+          fromVersion: current.version,
+          version: conversation.version,
+          supersededPrompts: superseded.count,
+          reason:
+            input.action === "pause"
+              ? "Admin assumiu o atendimento"
+              : input.action,
+        },
+      });
+      if (!["PAUSED", "COMPLETED"].includes(target))
+        await resendCurrentQuestion(
+          tx,
+          conversation,
+          current.customer.phoneE164,
+          target,
+          input.actor
+        );
+      return ok({ conversationId: conversation.id });
+    })
+    .catch((error: unknown) => {
+      // Domain failures must abort all writes, then become recoverable UI errors.
+      if (error instanceof DomainError) return err(error.message);
+      throw error;
     });
-    if (!["PAUSED", "COMPLETED"].includes(target))
-      await resendCurrentQuestion(
-        tx,
-        conversation,
-        current.customer.phoneE164,
-        target,
-        input.actor
-      );
-    return ok({ conversationId: conversation.id });
-  }).catch((error: unknown) => {
-    // Domain failures must abort all writes, then become recoverable UI errors.
-    if (error instanceof DomainError) return err(error.message);
-    throw error;
-  });
 }
 
 export async function resumeCustomerBookingConversation(
@@ -852,7 +899,11 @@ export async function startCustomerBookingConversation(
       );
     if (!active && !needsName && !tiers.length) {
       await enqueueManualReviewNotice(tx, conversation, customer.phoneE164);
-      return { started: true as const, conversation, reason: "PRICING_NOT_CONFIGURED" as const };
+      return {
+        started: true as const,
+        conversation,
+        reason: "PRICING_NOT_CONFIGURED" as const,
+      };
     }
     return { started: true as const, conversation };
   });
@@ -1025,9 +1076,18 @@ export async function processCustomerBookingAnswer(
       if (
         stuck?.addressLine1 &&
         stuck.scheduledAt &&
-        ["REVIEW_REQUIRED", "AWAITING_CUSTOMER_CONFIRMATION", "QUOTE_ACCEPTED"].includes(stuck.status)
+        [
+          "REVIEW_REQUIRED",
+          "AWAITING_CUSTOMER_CONFIRMATION",
+          "QUOTE_ACCEPTED",
+        ].includes(stuck.status)
       ) {
-        return continueAfterAddress(tx, conversation, customer.phoneE164, stuck.id);
+        return continueAfterAddress(
+          tx,
+          conversation,
+          customer.phoneE164,
+          stuck.id
+        );
       }
       const updated = await tx.customerBookingConversation.update({
         where: { id: conversation.id },
@@ -1049,9 +1109,16 @@ export async function processCustomerBookingAnswer(
     // seguem direto para as profissionais.
     if (current === "AWAITING_PAYMENT") {
       if (conversation.bookingId) {
-        return continueAfterAddress(tx, conversation, customer.phoneE164, conversation.bookingId, {
-          prefix: "Não é mais necessário pagamento pela AllSet. Seu pedido segue direto para as profissionais.",
-        });
+        return continueAfterAddress(
+          tx,
+          conversation,
+          customer.phoneE164,
+          conversation.bookingId,
+          {
+            prefix:
+              "Não é mais necessário pagamento pela AllSet. Seu pedido segue direto para as profissionais.",
+          }
+        );
       }
       return { advanced: false, reason: "CONVERSATION_NOT_ACTIVE" as const };
     }
@@ -1436,7 +1503,9 @@ export async function processCustomerBookingAnswer(
               updated,
               customer.phoneE164,
               "QUOTE_ACCEPTANCE",
-              booking?.scheduledAt ? scheduleConfirmationText(booking) : undefined
+              booking?.scheduledAt
+                ? scheduleConfirmationText(booking)
+                : undefined
             )
         );
       }
