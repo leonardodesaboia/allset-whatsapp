@@ -366,11 +366,14 @@ export async function reviewDocumentAction(input: {
       parsed.error.issues[0]?.message ?? "Dados do documento inválidos."
     );
   try {
-    await reviewProfessionalDocument(prisma, {
+    const reviewed = await reviewProfessionalDocument(prisma, {
       ...(parsed.data as typeof input),
       reviewer: actor,
     });
-    revalidatePath(`/admin/recruitment/${parsed.data.leadId}`);
+    if (!reviewed.ok) return result(false, reviewed.error.message);
+    revalidatePath(`/admin/recruitment/${reviewed.value.leadId}`);
+    revalidatePath("/admin/documents");
+    revalidatePath("/admin", "layout");
     return result(true);
   } catch (error) {
     return result(
