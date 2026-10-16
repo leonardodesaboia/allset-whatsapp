@@ -5,7 +5,8 @@ import { processRecruitmentAnswer, resumeRecruitmentConversation, startRecruitme
 import { enqueueOutboundMessage } from "./enqueue-outbound-message.usecase";
 import { contactIntentPrompt } from "../../domain/customer/contact-intent";
 import { textPayload } from "../../domain/messaging/message";
-import { transitionLeadStatusInTransaction } from "../recruitment/transition-lead-status.usecase";
+import { requestProfessionalSupport } from "../recruitment/request-professional-support.usecase";
+import { globalCommand } from "../../domain/recruitment/conversation-definition";
 import type { RecruitmentStatus } from "../../domain/recruitment/recruitment-status";
 
 const INTENT_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
@@ -33,7 +34,7 @@ function ackMessage(status: RecruitmentStatus): string {
   if (status === "ATIVA" || status === "PREFERENCIAL") {
     return (
       "Olá! 👋 Você já é uma profissional ativa no AllSet. " +
-      "Para dúvidas sobre agendamentos ou pagamentos, nossa equipe entrará em contato. " +
+      "Você combina os detalhes do serviço diretamente com o cliente. " +
       "Se precisar de ajuda urgente, responda *AJUDA*."
     );
   }
@@ -181,46 +182,21 @@ export async function processContactConversationText(
         }),
       };
     }
+    const command = globalCommand(input.text);
+    if (command === "HELP" || command === "PHONE") {
+      const claimed = await requestProfessionalSupport(prisma, {
+        leadId: lead.id,
+        inboundMessageId: input.inboundMessageId,
+        text: input.text,
+      });
+      if (!claimed) return { routed: "recruitment" as const, duplicate: true };
+      return { routed: "recruitment" as const, ack: true, status: lead.status };
+    }
+
     if (lead.status === "LEAD" || lead.status === "PRE_CADASTRO") {
       return { routed: "recruitment" as const, started: await startRecruitmentConversation(prisma, { phoneE164: input.phoneE164, provider: input.provider, inboundMessageId: input.inboundMessageId }) };
     }
 
-    // Lead ativa pede ajuda explicitamente → transiciona para LIGACAO_SOLICITADA
-    if (
-      (normalized === "AJUDA" || normalized === "AJUDA!") &&
-      (lead.status === "ATIVA" || lead.status === "PREFERENCIAL" ||
-       lead.status === "TRIAGEM" || lead.status === "CONVERSA_PENDENTE" ||
-       lead.status === "ENTREVISTA" || lead.status === "DOCUMENTACAO" ||
-       lead.status === "ONBOARDING" || lead.status === "TESTE_OPERACIONAL" ||
-       lead.status === "EM_VALIDACAO" || lead.status === "PAUSADA")
-    ) {
-      const claimed = await prisma.$transaction(async (tx) => {
-        const claimedInbound = await tx.inboundMessage.updateMany({ where: { id: input.inboundMessageId, processedAt: null }, data: { processedAt: new Date() } });
-        if (!claimedInbound.count) return false;
-        const transition = await transitionLeadStatusInTransaction(tx, {
-          leadId: lead.id,
-          targetStatus: "LIGACAO_SOLICITADA",
-          actor: "system:ack",
-          reason: "Solicitou ajuda via WhatsApp",
-        });
-        if (!transition.ok) throw transition.error;
-        await enqueueOutboundMessage(tx, {
-          provider: input.provider,
-          recipient: input.phoneE164,
-          payload: textPayload(
-            "Recebemos seu pedido de ajuda! 📞 Nossa equipe entrará em contato por ligação em breve."
-          ),
-          idempotencyKey: `ajuda:${input.inboundMessageId}`,
-          correlationId: input.inboundMessageId,
-          actor: "system:ack",
-        });
-        return true;
-      });
-      if (!claimed) return { routed: "recruitment" as const, duplicate: true };
-      return { routed: "recruitment" as const, ack: true, status: "LIGACAO_SOLICITADA" };
-    }
-
-    // Lead está no funil mas sem conversa ativa: envia ACK contextual e cria nota
     if (ACTIVE_FUNNEL_STATUSES.has(lead.status as RecruitmentStatus)) {
       const text = ackMessage(lead.status as RecruitmentStatus);
       const claimed = await prisma.$transaction(async (tx) => {

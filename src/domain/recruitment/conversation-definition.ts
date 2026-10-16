@@ -54,4 +54,12 @@ export function parseAnswer(state: ConversationState, value: string): string | u
   if (state === "SERVICE_AREA") return parseServiceArea(normalized);
   return options ? undefined : normalized;
 }
-export function globalCommand(value: string): "HELP" | "PHONE" | "STOP" | "MENU" | "MISUNDERSTOOD" | undefined { const text = normalizeAnswer(value); if (["AJUDA", "HELP"].includes(text)) return "HELP"; if (["LIGACAO", "PHONE", "LIGAR"].includes(text)) return "PHONE"; if (["PARAR", "STOP"].includes(text)) return "STOP"; if (text === "MENU") return "MENU"; if (["NAO ENTENDI", "NÃO ENTENDI"].includes(text)) return "MISUNDERSTOOD"; return undefined; }
+export function globalCommand(value: string): "HELP" | "PHONE" | "STOP" | "MENU" | "MISUNDERSTOOD" | undefined {
+  const text = normalizeAnswer(value);
+  if (["AJUDA", "HELP", "ATENDENTE", "FALAR COM ATENDENTE", "FALAR COM UM ATENDENTE", "FALAR COM UMA ATENDENTE", "FALAR COM HUMANO", "FALAR COM A EQUIPE"].includes(text)) return "HELP";
+  if (["LIGACAO", "PHONE", "LIGAR"].includes(text)) return "PHONE";
+  if (["PARAR", "STOP", "CANCELAR"].includes(text)) return "STOP";
+  if (text === "MENU") return "MENU";
+  if (text === "NAO ENTENDI") return "MISUNDERSTOOD";
+  return undefined;
+}

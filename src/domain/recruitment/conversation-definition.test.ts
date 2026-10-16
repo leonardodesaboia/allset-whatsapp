@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { QUESTIONS, globalCommand, normalizeAnswer, parseAnswer } from "./conversation-definition";
 
 describe("conversation definition", () => {
+  it("reconhece pedidos explícitos de atendimento e pausa sem capturar frases comuns", () => {
+    expect(globalCommand("Falar com um atendente!")).toBe("HELP");
+    expect(globalCommand("atendente")).toBe("HELP");
+    expect(globalCommand("cancelar")).toBe("STOP");
+    expect(globalCommand("preciso de ajuda para limpar a cozinha")).toBeUndefined();
+  });
   it("mantém perguntas e comandos normalizados", () => {
     expect(QUESTIONS.SERVICE_AREA?.options).toContain("NAO");
     expect(normalizeAnswer(" Não! ")).toBe("NAO");
