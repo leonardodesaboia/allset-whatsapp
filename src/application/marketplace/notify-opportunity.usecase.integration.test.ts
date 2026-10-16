@@ -150,4 +150,21 @@ describe("notifyOpportunity", () => {
     });
     expect(message).not.toBeNull();
   });
+
+  it("envia ofertas fora da antiga cobertura somente para profissionais aprovadas e disponíveis", async () => {
+    const booking = await seedBooking({ neighborhood: "Benfica", scheduledAt: new Date("2026-08-09T13:00:00.000Z") });
+    const approved = await seedLead({ status: "ATIVA", neighborhood: "Outro bairro", canServe: "NAO", availability: ["domingo"], suffix: "outside" });
+    const preferred = await seedLead({ status: "PREFERENCIAL", neighborhood: "Outro bairro", canServe: "TALVEZ", availability: ["domingo"], suffix: "maybe" });
+    await prisma.recruitmentLead.update({ where: { id: preferred.id }, data: { canServeInitialArea: null } });
+    await seedLead({ status: "SUSPENSA", neighborhood: "Benfica", canServe: "SIM", availability: ["domingo"], suffix: "suspended" });
+    await seedLead({ status: "ATIVA", neighborhood: "Benfica", canServe: "SIM", availability: ["sábado"], suffix: "unavailable" });
+
+    const result = await notifyOpportunity(prisma, { bookingId: booking.id });
+    const opportunity = await prisma.serviceOpportunity.findFirstOrThrow({ where: { bookingId: booking.id }, include: { responses: true } });
+    expect(result).toEqual({ notified: 2, dispatched: true, opportunityId: opportunity.id });
+    expect(opportunity.responses.map((response) => response.leadId).sort()).toEqual([approved.id, preferred.id].sort());
+    const messages = await prisma.outboxMessage.findMany({ where: { correlationId: opportunity.id } });
+    expect(messages).toHaveLength(2);
+    expect(messages.every((message) => JSON.stringify(message.payload).includes("Benfica"))).toBe(true);
+  });
 });

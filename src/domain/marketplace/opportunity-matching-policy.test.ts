@@ -35,18 +35,28 @@ describe("isEligibleForOpportunity", () => {
     )).toBe(false);
   });
 
-  it("inelegível: canServeInitialArea NAO", () => {
+  it("oferece para aprovada mesmo com resposta legada de área NAO", () => {
     expect(isEligibleForOpportunity(
       { ...baseLead, canServeInitialArea: "NAO" as const },
       opportunity, [],
-    )).toBe(false);
+    )).toBe(true);
   });
 
-  it("inelegível: canServeInitialArea TALVEZ + bairro diferente", () => {
+  it("oferece para aprovada de outro bairro com resposta legada TALVEZ", () => {
     expect(isEligibleForOpportunity(
       { ...baseLead, canServeInitialArea: "TALVEZ" as const, neighborhood: "Benfica" },
       opportunity, [],
-    )).toBe(false);
+    )).toBe(true);
+  });
+
+  it("não exige resposta de cobertura nem bairro no cadastro aprovado", () => {
+    expect(isEligibleForOpportunity(
+      { ...baseLead, canServeInitialArea: null, neighborhood: null }, opportunity, [],
+    )).toBe(true);
+  });
+
+  it.each(["SUSPENSA", "PAUSADA", "REPROVADA", "PRE_APROVADA"])("mantém %s fora das oportunidades", (status) => {
+    expect(isEligibleForOpportunity({ ...baseLead, status }, opportunity, [])).toBe(false);
   });
 
   it("elegível: canServeInitialArea TALVEZ + mesmo bairro", () => {
