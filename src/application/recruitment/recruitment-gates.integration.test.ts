@@ -230,15 +230,15 @@ describe("recruitment progression gates", () => {
       },
     });
 
-    const result = await processRecruitmentAnswer(prisma, { inboundMessageId: inbound.id, text: "Segundas e terças" });
-
-    expect(result).toMatchObject({ advanced: true, completed: true, triageTarget: "CONVERSA_PENDENTE" });
+    expect(await processRecruitmentAnswer(prisma, { inboundMessageId: inbound.id, text: "Segundas e terças" })).toMatchObject({ state: "CONFIRMATION", completed: false });
+    const confirmation = await prisma.inboundMessage.create({ data: { provider: "test", externalId: `confirm-${sequence}`, sender: phone, recipient: "+5585999999999", type: "text", payload: { text: "1" } } });
+    expect(await processRecruitmentAnswer(prisma, { inboundMessageId: confirmation.id, text: "1" })).toMatchObject({ advanced: true, completed: true, triageTarget: "TRIAGEM" });
 
     const outbound = await prisma.outboxMessage.findFirst({
       where: { idempotencyKey: `recruitment:${conversation.id}:completed` },
     });
     expect(outbound).not.toBeNull();
-    expect(outbound?.payload).toMatchObject({ text: expect.stringContaining("Pré-cadastro concluído") });
+    expect(outbound?.payload).toMatchObject({ text: expect.stringContaining("Cadastro recebido") });
   });
 
   async function leadWithDuplicateIdentity() {

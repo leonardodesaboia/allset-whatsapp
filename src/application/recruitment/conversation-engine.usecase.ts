@@ -7,14 +7,17 @@ import { transitionLeadStatusInTransaction } from "./transition-lead-status.usec
 
 function nextState(state: ConversationState, answer: string): ConversationState {
   if (state === "CHANNEL_PREFERENCE") return answer === "PHONE" ? "PAUSED" : "NAME";
-  if (state === "NAME") return "NEIGHBORHOOD";
+  if (state === "NAME") return "REGIONS";
+  if (state === "REGIONS") return "EXPERIENCE_KIND";
+  if (state === "EXPERIENCE_KIND") return "AVAILABILITY";
+  if (state === "AVAILABILITY") return "CONFIRMATION";
+  if (state === "CONFIRMATION") return answer === "CONFIRM" ? "COMPLETED" : "EDIT_SELECTION";
+  if (state === "EDIT_SELECTION") return answer as ConversationState;
+  // Preserve answers from legacy questions, then join the new route.
   if (state === "NEIGHBORHOOD") return "PROFESSIONAL_EXPERIENCE";
-  // Tempo de experiência é útil na entrevista, mas não precisa travar o
-  // pré-cadastro de quem já confirmou experiência profissional.
-  if (state === "PROFESSIONAL_EXPERIENCE") return answer === "SIM" ? "SERVICE_AREA" : "INFORMAL_EXPERIENCE";
-  if (state === "EXPERIENCE_DURATION" || state === "INFORMAL_EXPERIENCE") return "SERVICE_AREA";
-  if (state === "SERVICE_AREA") return "AVAILABILITY";
-  return "COMPLETED";
+  if (state === "PROFESSIONAL_EXPERIENCE") return answer === "SIM" ? "REGIONS" : "INFORMAL_EXPERIENCE";
+  if (state === "EXPERIENCE_DURATION" || state === "INFORMAL_EXPERIENCE" || state === "SERVICE_AREA") return "REGIONS";
+  return "NAME";
 }
 
 async function enqueueQuestion(tx: Prisma.TransactionClient, conversation: RecruitmentConversation, recipient: string, state: ConversationState) {
@@ -132,7 +135,7 @@ export async function resumeRecruitmentConversation(
       throw new Error("A conversa não está pausada nem aguardando revisão");
     }
 
-    const state = conversation.lastQuestionKey as ConversationState | null;
+    const state = conversation.lastQuestionKey === "SERVICE_AREA" ? "REGIONS" : conversation.lastQuestionKey as ConversationState | null;
     if (!state || !QUESTIONS[state]) throw new Error("Não há uma pergunta válida para retomar");
 
     if (input.inboundMessageId) {
@@ -261,9 +264,9 @@ export async function processRecruitmentAnswer(
     if (command === "MENU") {
       const updated = await tx.recruitmentConversation.update({
         where: { id: conversation.id },
-        data: { lastInboundAt: new Date(), misunderstandingCount: 0 },
+        data: { lastInboundAt: new Date(), misunderstandingCount: 0, ...(conversation.state === "SERVICE_AREA" ? { state: "REGIONS", lastQuestionKey: "REGIONS" } : {}) },
       });
-      await enqueueQuestion(tx, updated, phoneE164, conversation.state as ConversationState);
+      await enqueueQuestion(tx, updated, phoneE164, updated.state as ConversationState);
       return { advanced: false, reason: "QUESTION_REPEATED" as const };
     }
 
@@ -296,16 +299,22 @@ export async function processRecruitmentAnswer(
         where: { id: conversation.id },
         data: { misunderstandingCount: count, lastInboundAt: new Date() },
       });
-      await enqueueQuestion(tx, updated, phoneE164, conversation.state as ConversationState);
+      await enqueueQuestion(tx, updated, phoneE164, updated.state as ConversationState);
       return { advanced: false, reason: "MISUNDERSTOOD" as const };
     }
 
+    // An old yes/no coverage question must never reject a region or save its number.
+    if (conversation.state === "SERVICE_AREA") {
+      const updated = await tx.recruitmentConversation.update({ where: { id: conversation.id }, data: { state: "REGIONS", lastQuestionKey: "REGIONS", lastInboundAt: new Date(), misunderstandingCount: 0 } });
+      await enqueueQuestion(tx, updated, phoneE164, "REGIONS");
+      return { advanced: false, reason: "QUESTION_REPEATED" as const };
+    }
     const current = conversation.state as ConversationState;
     const parsedAnswer = parseAnswer(current, input.text);
     const answer = parsedAnswer ?? "";
     const allowed = QUESTIONS[current]?.options;
 
-    if (allowed && (!parsedAnswer || !allowed.includes(answer))) {
+    if (!parsedAnswer || (allowed && !allowed.includes(answer))) {
       const misunderstandings = conversation.misunderstandingCount + 1;
       const needsManual = misunderstandings >= 2;
       const updated = await tx.recruitmentConversation.update({
@@ -360,50 +369,32 @@ export async function processRecruitmentAnswer(
       return { advanced: true, completed: false, state: "PAUSED" as const };
     }
 
-    const next = nextState(current, answer);
+    const next = conversation.editingAnswer && current !== "EDIT_SELECTION" ? "CONFIRMATION" : nextState(current, answer);
     const data: Prisma.RecruitmentLeadUpdateInput = { lastInteractionAt: new Date() };
     if (current === "NAME") data.fullName = input.text.trim();
+    if (current === "REGIONS") data.serviceRegions = input.text.trim();
+    if (current === "EXPERIENCE_KIND") { data.hasProfessionalExperience = answer !== "NONE"; data.hasInformalExperience = answer === "DIARISTA"; }
     if (current === "NEIGHBORHOOD") data.neighborhood = input.text.trim();
     if (current === "PROFESSIONAL_EXPERIENCE") data.hasProfessionalExperience = answer === "SIM";
     if (current === "EXPERIENCE_DURATION") data.experienceDuration = answer as "LT_1Y" | "Y1_3" | "GT_3Y" | "BY_AUDIO";
     if (current === "INFORMAL_EXPERIENCE") data.hasInformalExperience = answer === "SIM";
     if (current === "SERVICE_AREA") data.canServeInitialArea = answer as "SIM" | "TALVEZ" | "NAO";
-    if (current === "AVAILABILITY") data.availabilityDays = [input.text.trim()];
+    if (current === "AVAILABILITY") data.availabilityDays = answer.split("; ");
     await tx.recruitmentLead.update({ where: { id: lead.id }, data });
 
     const updated = await tx.recruitmentConversation.update({
       where: { id: conversation.id },
-      data: { state: next, lastQuestionKey: next, lastInboundAt: new Date(), misunderstandingCount: 0 },
+      data: { state: next, lastQuestionKey: next, editingAnswer: current === "EDIT_SELECTION", lastInboundAt: new Date(), misunderstandingCount: 0 },
     });
 
     if (next === "COMPLETED") {
-      const triageLead = await transitionStatus(tx, lead.id, "TRIAGEM");
-
-      // Bug 4 fix: triagem verifica área E experiência (spec §7).
-      const canServeArea = triageLead.canServeInitialArea !== "NAO";
-      const definitelyNoExperience =
-        triageLead.hasProfessionalExperience === false && triageLead.hasInformalExperience === false;
-
-      const triageTarget = !canServeArea
-        ? ("BASE_FUTURA" as const)
-        : definitelyNoExperience
-          ? ("AGUARDANDO_COMPLEMENTACAO" as const)
-          : ("CONVERSA_PENDENTE" as const);
-
-      await transitionStatus(tx, triageLead.id, triageTarget);
+      await transitionStatus(tx, lead.id, "TRIAGEM");
+      const triageTarget = "TRIAGEM" as const;
       await tx.recruitmentLead.update({
         where: { id: lead.id },
-        data: {
-          nextAction: triageTarget === "CONVERSA_PENDENTE" ? "Iniciar entrevista" : null,
-          nextActionAt: triageTarget === "CONVERSA_PENDENTE" ? new Date() : null,
-        },
+        data: { nextAction: "Analisar cadastro e solicitar documentos", nextActionAt: new Date() },
       });
-      const completionText =
-        triageTarget === "CONVERSA_PENDENTE"
-          ? "✅ Pré-cadastro concluído! Nossa equipe entrará em contato em breve para uma conversa sobre as oportunidades."
-          : triageTarget === "BASE_FUTURA"
-            ? "✅ Pré-cadastro concluído! No momento não temos oportunidades na sua área, mas guardaremos seu contato para futuras vagas."
-            : "✅ Pré-cadastro concluído! Vamos analisar seu perfil e entraremos em contato em breve.";
+      const completionText = "✅ Cadastro recebido! Nossa equipe vai analisar suas informações e falar com você por aqui sobre os próximos passos e documentos. O cadastro ainda não significa aprovação.";
       await enqueueOutboundMessage(tx, {
         provider: conversation.provider,
         recipient: phoneE164,

@@ -151,6 +151,10 @@ enum OpportunityResponseValue {
 }
 
 enum RecruitmentConversationState {
+  REGIONS
+  EXPERIENCE_KIND
+  CONFIRMATION
+  EDIT_SELECTION
   INTRODUCTION
   CHANNEL_PREFERENCE
   NAME
@@ -302,6 +306,7 @@ model RecruitmentLead {
   version                     Int                      @default(0)
   phoneE164                   String?
   fullName                    String?
+  serviceRegions              String?
   neighborhood                String?
   origin                      LeadOrigin
   campaign                    String?
@@ -557,6 +562,7 @@ model ReferenceVerification {
 }
 
 model RecruitmentConversation {
+  editingAnswer         Boolean                      @default(false)
   id                    String                       @id @default(uuid())
   leadId                String                       @unique
   lead                  RecruitmentLead              @relation(fields: [leadId], references: [id])

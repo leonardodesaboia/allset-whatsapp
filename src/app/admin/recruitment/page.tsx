@@ -46,7 +46,7 @@ export default async function RecruitmentPage({
           leads: column.leads.map((lead) => ({
             id: lead.id,
             fullName: lead.fullName,
-            neighborhood: lead.neighborhood,
+            neighborhood: lead.serviceRegions ?? lead.neighborhood,
             origin: lead.origin,
             nextAction: lead.nextAction,
             nextActionAt: lead.nextActionAt?.toISOString() ?? null,

@@ -1,3 +1,6 @@
+import { env } from "../../env";
+import { textPayload } from "../../domain/messaging/message";
+import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
 import type { Prisma, PrismaClient, RecruitmentLead } from "@prisma/client";
 import { transitionRecruitmentStatus } from "../../domain/recruitment/recruitment-state-machine";
 import type { RecruitmentStatus } from "../../domain/recruitment/recruitment-status";
@@ -32,7 +35,7 @@ async function assertTransitionPrerequisites(
     if (!confirmedReference) return err(new DomainError("Confirme ao menos uma referência antes da pré-aprovação", "CONFIRMED_REFERENCE_REQUIRED"));
   }
 
-  if (target === "ONBOARDING") {
+  if (target === "ONBOARDING" || target === "ATIVA" || target === "PREFERENCIAL") {
     const requirements = await tx.documentRequirement.findMany({ where: { isActive: true, required: true }, select: { id: true } });
     const approved = requirements.length === 0 ? [] : await tx.professionalDocument.findMany({
       where: { leadId: lead.id, requirementId: { in: requirements.map((requirement) => requirement.id) }, status: "APPROVED" },
@@ -59,13 +62,6 @@ async function assertTransitionPrerequisites(
     if (!passedTest) return err(new DomainError("Um teste operacional aprovado é necessário", "PASSED_OPERATIONAL_TEST_REQUIRED"));
   }
 
-  if (target === "ATIVA" || target === "PREFERENCIAL") {
-    const policy = await tx.validationPolicy.findFirst({ where: { isActive: true }, orderBy: { createdAt: "desc" } });
-    const records = await tx.validationServiceRecord.findMany({ where: { leadId: lead.id }, select: { hadIssue: true } });
-    if (!policy || records.length < policy.requiredServices || records.some((record) => record.hadIssue !== false)) {
-      return err(new DomainError("A validação exige os serviços mínimos sem ocorrências", "VALIDATION_NOT_ELIGIBLE"));
-    }
-  }
 
   return ok(true);
 }
@@ -83,6 +79,7 @@ async function promote(tx: Prisma.TransactionClient, lead: RecruitmentLead): Pro
 export async function transitionLeadStatusInTransaction(tx: Prisma.TransactionClient, input: TransitionLeadStatusInput): Promise<Result<RecruitmentLead, DomainError>> {
     const current = await tx.recruitmentLead.findUnique({ where: { id: input.leadId } });
     if (!current) return err(new DomainError("Lead não encontrado", "LEAD_NOT_FOUND"));
+    if (["REPROVADA", "BASE_FUTURA"].includes(input.targetStatus) && !(input.reason ?? input.override?.reason)?.trim()) return err(new DomainError("Informe o motivo da decisão", "DECISION_REASON_REQUIRED"));
     const override = input.override;
     if (override && !override.reason.trim()) return err(new DomainError("Override exige motivo", "OVERRIDE_REASON_REQUIRED"));
     if (!override) { const valid = transitionRecruitmentStatus(current.status as RecruitmentStatus, input.targetStatus); if (!valid.ok) return err(valid.error); }
@@ -97,6 +94,20 @@ export async function transitionLeadStatusInTransaction(tx: Prisma.TransactionCl
     await tx.recruitmentStatusHistory.create({ data: { leadId: current.id, fromStatus: current.status, toStatus: input.targetStatus, actor: input.actor, override: Boolean(override), ...(reason !== undefined ? { reason } : {}) } });
     await tx.leadEvent.create({ data: { leadId: current.id, type: `STATUS_${input.targetStatus}`, description: input.targetStatus === "ATIVA" ? "Ativada" : `Etapa: ${input.targetStatus}`, actor: input.actor } });
     await recordAuditLog(tx, { actor: input.actor, action: "LEAD_STATUS_TRANSITION", entityType: "RecruitmentLead", entityId: current.id, metadata: { from: current.status, to: input.targetStatus, override: Boolean(override), reason } });
+    const notices: Partial<Record<RecruitmentStatus, string>> = {
+      CONVERSA_PENDENTE: "Estamos analisando seu cadastro na AllSet. Se precisarmos de mais alguma informação, falaremos por aqui.",
+      DOCUMENTACAO: "Para continuar seu cadastro na AllSet, precisamos conferir seus documentos. Nossa equipe vai combinar por aqui como recebê-los. Aguarde a orientação antes de enviar arquivos." + (input.reason ? ` Pendência: ${input.reason.trim()}.` : ""),
+      ATIVA: "Seu cadastro na AllSet foi aprovado! Você pode receber oportunidades pelo WhatsApp e escolher se quer aceitar. Ao aceitar, vocês recebem os contatos para combinar diretamente. Não há garantia de quantidade de oportunidades.",
+      PREFERENCIAL: "Seu cadastro está aprovado como profissional preferencial da AllSet. Você escolhe quais oportunidades quer aceitar.",
+      REPROVADA: `Após a análise, seu cadastro na AllSet não foi aprovado. Motivo: ${reason ?? ""}. Se quiser esclarecer, responda AJUDA.`,
+      BASE_FUTURA: `Seu cadastro ficou na base futura da AllSet. Motivo: ${reason ?? ""}. Isso ainda não é uma aprovação. Quando houver um próximo passo, falaremos por aqui.`,
+    };
+    const notice = notices[input.targetStatus];
+    if (notice && current.phoneE164) {
+      const conversation = await tx.recruitmentConversation.findUnique({ where: { leadId: current.id }, select: { provider: true } });
+      await enqueueOutboundMessage(tx, { provider: conversation?.provider ?? env.MESSAGING_DEFAULT_PROVIDER, recipient: current.phoneE164,
+        payload: textPayload(notice), idempotencyKey: `recruitment-decision:${current.id}:${current.version + 1}`, correlationId: current.id, actor: input.actor });
+    }
     return ok(await tx.recruitmentLead.findUniqueOrThrow({ where: { id: current.id } }));
 }
 

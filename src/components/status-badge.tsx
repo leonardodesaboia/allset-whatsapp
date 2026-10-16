@@ -6,9 +6,9 @@ const STATUS_MAP: Record<
 > = {
   // Recrutamento — funil principal
   LEAD: { label: "Lead", variant: "outline" },
-  PRE_CADASTRO: { label: "Pré-cadastro", variant: "secondary" },
-  TRIAGEM: { label: "Triagem", variant: "secondary" },
-  CONVERSA_PENDENTE: { label: "Conv. pendente", variant: "warning" },
+  PRE_CADASTRO: { label: "Em cadastro", variant: "secondary" },
+  TRIAGEM: { label: "Cadastro recebido", variant: "secondary" },
+  CONVERSA_PENDENTE: { label: "Em análise", variant: "warning" },
   ENTREVISTA: { label: "Entrevista", variant: "purple" },
   REFERENCIA: { label: "Referência", variant: "purple" },
   PRE_APROVADA: { label: "Pré-aprovada", variant: "default" },
@@ -16,7 +16,7 @@ const STATUS_MAP: Record<
   ONBOARDING: { label: "Onboarding", variant: "orange" },
   TESTE_OPERACIONAL: { label: "Teste op.", variant: "warning" },
   EM_VALIDACAO: { label: "Em validação", variant: "default" },
-  ATIVA: { label: "Ativa", variant: "success" },
+  ATIVA: { label: "Aprovada", variant: "success" },
   PREFERENCIAL: { label: "Preferencial", variant: "success" },
   // Recrutamento — alternativos
   LIGACAO_SOLICITADA: { label: "Ligação solicitada", variant: "destructive" },
