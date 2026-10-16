@@ -77,6 +77,16 @@ function sameFortalezaDay(a: Date, b: Date): boolean {
   return left.year === right.year && left.month === right.month && left.day === right.day;
 }
 
+/** Only approved professionals may receive or accept opportunities. */
+export function isLeadStatusEligible(status: string): boolean {
+  return ELIGIBLE_STATUSES.has(status);
+}
+
+/** A professional takes at most one service per Fortaleza calendar day. */
+export function hasScheduleConflict(acceptedSlotDates: Date[], candidate: Date): boolean {
+  return acceptedSlotDates.some((slot) => sameFortalezaDay(slot, candidate));
+}
+
 export interface OpportunityInfo {
   neighborhood: string;
   scheduledAt: Date;
@@ -96,7 +106,7 @@ export function isEligibleForOpportunity(
   opportunity: OpportunityInfo,
   acceptedSlotDates: Date[],
 ): boolean {
-  if (!ELIGIBLE_STATUSES.has(lead.status)) return false;
+  if (!isLeadStatusEligible(lead.status)) return false;
   if (!lead.phoneE164) return false;
 
   // Approved professionals decide whether the location works for them when
@@ -107,9 +117,7 @@ export function isEligibleForOpportunity(
   if (!oppDay) return false;
   if (days !== null && !days.has(oppDay.weekday)) return false;
 
-  for (const slot of acceptedSlotDates) {
-    if (sameFortalezaDay(slot, opportunity.scheduledAt)) return false;
-  }
+  if (hasScheduleConflict(acceptedSlotDates, opportunity.scheduledAt)) return false;
 
   return true;
 }
