@@ -11,6 +11,7 @@ const fmt = (d: Date) =>
   d.toLocaleDateString("pt-BR", { timeZone: "America/Fortaleza" });
 
 export default async function DocumentsPage() {
+  const now = Date.now();
   const [pending, recentReviewed, stats] = await Promise.all([
     prisma.professionalDocument.findMany({
       where: { status: "RECEIVED" },
@@ -118,6 +119,9 @@ export default async function DocumentsPage() {
                         {doc.requirement.required && <span className="ml-1 text-red-500 text-xs">*</span>}
                       </p>
                       <p className="text-xs text-slate-500 mt-0.5 font-mono">{doc.contentType}</p>
+                      <Badge variant={now - doc.receivedAt.getTime() >= 24 * 3_600_000 ? "warning" : "secondary"} className="mt-1">
+                        {Math.max(0, Math.floor((now - doc.receivedAt.getTime()) / 3_600_000))}h de espera
+                      </Badge>
                     </td>
                     <td className="px-5 py-3 text-xs text-slate-500 hidden md:table-cell tabular-nums">
                       {(doc.sizeBytes / 1024).toFixed(0)} KB
@@ -127,6 +131,9 @@ export default async function DocumentsPage() {
                     </td>
                     <td className="px-5 py-3">
                       <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+                        <a href={`/admin/documents/${doc.id}/file`} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-blue-700 hover:underline">
+                          Abrir documento
+                        </a>
                         <ActionFeedbackForm action={async () => {
                           "use server";
                           return reviewDocumentAction({ documentId: doc.id, leadId: doc.leadId, status: "APPROVED" });

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, ProfessionalDocument } from "@prisma/client";
 import type { StorageProvider } from "../../domain/ports/storage-provider";
 import { DomainError } from "../../domain/shared/domain-error";
 import { err, ok, type Result } from "../../domain/shared/result";
@@ -46,6 +46,32 @@ export async function receiveProfessionalDocument(
     throw error;
   }
 }
-export async function reviewProfessionalDocument(prisma: PrismaClient, input: { documentId: string; reviewer: string; status: "APPROVED" | "REJECTED"; reason?: string }) { await requireAdmin(prisma, input.reviewer); return prisma.$transaction(async (tx) => { const document = await tx.professionalDocument.update({ where: { id: input.documentId }, data: { status: input.status } }); await tx.documentReview.create({ data: { documentId: document.id, reviewer: input.reviewer, status: input.status, ...(input.reason !== undefined ? { reason: input.reason } : {}) } }); await tx.leadEvent.create({ data: { leadId: document.leadId, type: `DOCUMENT_${input.status}`, description: `Documento ${input.status === "APPROVED" ? "aprovado" : "rejeitado"}`, actor: input.reviewer } }); await recordAuditLog(tx, { actor: input.reviewer, action: "PROFESSIONAL_DOCUMENT_REVIEWED", entityType: "ProfessionalDocument", entityId: document.id }); return document; }); }
+export async function reviewProfessionalDocument(
+  prisma: PrismaClient,
+  input: { documentId: string; reviewer: string; status: "APPROVED" | "REJECTED"; reason?: string },
+): Promise<Result<ProfessionalDocument, DomainError>> {
+  await requireAdmin(prisma, input.reviewer);
+  const reason = input.reason?.trim();
+  if (input.status === "REJECTED" && !reason) {
+    return err(new DomainError("Informe o motivo da rejeição.", "DOCUMENT_REJECTION_REASON_REQUIRED"));
+  }
+  if (reason && reason.length > 500) {
+    return err(new DomainError("O motivo deve ter até 500 caracteres.", "DOCUMENT_REVIEW_REASON_TOO_LONG"));
+  }
+  return prisma.$transaction(async (tx) => {
+    const claimed = await tx.professionalDocument.updateMany({
+      where: { id: input.documentId, status: "RECEIVED" },
+      data: { status: input.status },
+    });
+    if (!claimed.count) {
+      return err(new DomainError("Este documento não está mais pendente. Atualize a página para ver a decisão atual.", "DOCUMENT_NOT_PENDING"));
+    }
+    const document = await tx.professionalDocument.findUniqueOrThrow({ where: { id: input.documentId } });
+    await tx.documentReview.create({ data: { documentId: document.id, reviewer: input.reviewer, status: input.status, ...(reason ? { reason } : {}) } });
+    await tx.leadEvent.create({ data: { leadId: document.leadId, type: `DOCUMENT_${input.status}`, description: `Documento ${input.status === "APPROVED" ? "aprovado" : "rejeitado"}`, actor: input.reviewer } });
+    await recordAuditLog(tx, { actor: input.reviewer, action: "PROFESSIONAL_DOCUMENT_REVIEWED", entityType: "ProfessionalDocument", entityId: document.id, metadata: { status: input.status, ...(reason ? { reason } : {}) } });
+    return ok(document);
+  });
+}
 export async function previewProfessionalDocument(prisma: PrismaClient, storage: StorageProvider, input: { documentId: string; actor: string }) { await requireAdmin(prisma, input.actor); const document = await prisma.professionalDocument.findUniqueOrThrow({ where: { id: input.documentId } }); return storage.getSignedUrl({ key: document.storageKey, expiresInSeconds: 300 }); }
 export async function acceptTerms(prisma: PrismaClient, input: { leadId: string; termsVersionId: string; channel: string; consentId: string; phoneE164?: string; ipAddress?: string }) { return prisma.$transaction(async (tx) => { const [lead, terms] = await Promise.all([tx.recruitmentLead.findUnique({ where: { id: input.leadId } }), tx.termsVersion.findUnique({ where: { id: input.termsVersionId } })]); if (!lead) throw new DomainError("Lead não encontrado", "LEAD_NOT_FOUND"); if (!terms?.isActive) throw new DomainError("Versão de termos inativa", "TERMS_VERSION_INACTIVE"); if (input.phoneE164 && lead.phoneE164 && input.phoneE164 !== lead.phoneE164) throw new DomainError("Telefone de aceite não corresponde ao lead", "TERMS_PHONE_MISMATCH"); const acceptance = await tx.termsAcceptance.upsert({ where: { leadId_termsVersionId: { leadId: input.leadId, termsVersionId: input.termsVersionId } }, create: input, update: {} }); await recordAuditLog(tx, { actor: `consent:${input.channel}`, action: "TERMS_ACCEPTED", entityType: "TermsAcceptance", entityId: acceptance.id, metadata: { version: terms.version, consentId: acceptance.consentId } }); return acceptance; }); }
