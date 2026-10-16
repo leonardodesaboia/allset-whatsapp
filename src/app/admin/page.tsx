@@ -15,7 +15,6 @@ import {
   Filter,
   TrendingUp,
   MessageSquare,
-  MapPin,
   PauseCircle,
   Send,
   FileCheck,
@@ -89,15 +88,6 @@ export default async function AdminHomePage() {
       hint: "O destinatário não recebeu. Recoloque na fila ou descarte.",
       href: "/admin/outbox",
       icon: XCircle,
-      tone: "red" as const,
-    },
-    {
-      key: "coverage",
-      count: overview.coverageAwaitingValidation,
-      label: "pedidos aguardando validação de cobertura",
-      hint: "Confirme se o endereço é atendido ou envie para a lista de espera.",
-      href: "/admin/bookings?status=REVIEW_REQUIRED",
-      icon: MapPin,
       tone: "red" as const,
     },
     {

@@ -5,7 +5,6 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { notifyOpportunity } from "@/application/marketplace/notify-opportunity.usecase";
 import { prepareBookingMatching } from "@/application/booking/prepare-booking-matching.usecase";
-import { validateCustomerBookingCoverage } from "@/application/customer/validate-booking-coverage.usecase";
 import { sendManualCustomerMessage } from "@/application/customer/send-manual-customer-message.usecase";
 import { resumeCustomerBookingConversation } from "@/application/customer/customer-booking-conversation.usecase";
 import { recordAuditLog } from "@/application/audit/record-audit-log.usecase";
@@ -208,44 +207,6 @@ export async function dispatchOpportunityAction(
     return {
       ok: false,
       error: errorMessage(error, "Não foi possível enviar a oportunidade."),
-    };
-  }
-}
-
-export async function validateBookingCoverageAction(
-  bookingId: string,
-  isCovered: boolean
-): Promise<BookingActionResult> {
-  const actor = await currentActor();
-  if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };
-  if (
-    !z.string().uuid().safeParse(bookingId).success ||
-    typeof isCovered !== "boolean"
-  ) {
-    return { ok: false, error: "Dados de cobertura inválidos." };
-  }
-  try {
-    const result = await validateCustomerBookingCoverage(prisma, {
-      bookingId,
-      isCovered,
-      actor,
-    });
-    if (!result.ok)
-      return {
-        ok: false,
-        error: "Este pedido não está aguardando validação de cobertura.",
-      };
-    await publishJobSafe({
-      name: JOB_NAME.MESSAGE_DISPATCH,
-      jobId: `coverage-dispatch:${bookingId}:${Date.now()}`,
-      payload: {},
-    });
-    revalidatePath("/admin/bookings");
-    return { ok: true, bookingId };
-  } catch (error) {
-    return {
-      ok: false,
-      error: errorMessage(error, "Não foi possível validar a cobertura."),
     };
   }
 }

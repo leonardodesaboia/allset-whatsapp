@@ -41,8 +41,8 @@ Esses pedidos estão em `Booking.status = REVIEW_REQUIRED` e
    - `Escolher etapa` → `FINAL_CONFIRMATION` reenvia o resumo e o cliente
      responde `1`; o pedido segue para as profissionais (exige endereço e
      horário já salvos; não exige mais cobertura validada).
-3. **Admin → Agendamentos:** o botão "Atendido" (legado) ainda existe só para
-   esses pedidos antigos; leva à mesma confirmação final.
+O botão "Atendido"/"Lista de espera" foi removido do admin; o caso de uso
+legado continua no código apenas para dados antigos.
 
 Pedidos que ficaram em `AWAITING_PAYMENT`: seguem para as profissionais na
 próxima mensagem do cliente (o bot avisa que não há mais pagamento). O botão

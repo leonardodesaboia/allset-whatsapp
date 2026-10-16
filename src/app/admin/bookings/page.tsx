@@ -1,10 +1,9 @@
 import Link from "next/link";
-import { Plus, Clock, CheckCircle2, ArrowRight, Search } from "lucide-react";
+import { Plus, Clock, ArrowRight, Search } from "lucide-react";
 import { BookingStatus, type Prisma } from "@prisma/client";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import {
   resumeCustomerAutomationAction,
-  validateBookingCoverageAction,
 } from "./actions";
 import { BookingMatchingActions } from "./booking-matching-actions";
 import { CustomerMessageForm } from "./customer-message-form";
@@ -244,51 +243,6 @@ export default async function BookingsPage({
                           )}
 
 
-                          {booking.status === "REVIEW_REQUIRED" &&
-                            booking.customerConversation?.lastQuestionKey ===
-                              "MANUAL_REVIEW" &&
-                            booking.addressLine1 && (
-                              <div className="space-y-1">
-                                <p className="text-xs text-slate-600">
-                                  {booking.addressLine1}
-                                </p>
-                                <div className="flex gap-2 flex-wrap">
-                                  <ActionFeedbackForm
-                                    action={async () => {
-                                      "use server";
-                                      return validateBookingCoverageAction(
-                                        booking.id,
-                                        true
-                                      );
-                                    }}
-                                  >
-                                    <button
-                                      type="submit"
-                                      className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900"
-                                    >
-                                      <CheckCircle2 className="w-3 h-3" />{" "}
-                                      Atendido
-                                    </button>
-                                  </ActionFeedbackForm>
-                                  <ActionFeedbackForm
-                                    action={async () => {
-                                      "use server";
-                                      return validateBookingCoverageAction(
-                                        booking.id,
-                                        false
-                                      );
-                                    }}
-                                  >
-                                    <button
-                                      type="submit"
-                                      className="text-xs font-medium text-amber-700 hover:text-amber-900"
-                                    >
-                                      Lista de espera
-                                    </button>
-                                  </ActionFeedbackForm>
-                                </div>
-                              </div>
-                            )}
 
                           {booking.customerConversation?.state === "PAUSED" && (
                             <ActionFeedbackForm
@@ -406,50 +360,6 @@ export default async function BookingsPage({
                     )}
 
 
-                    {booking.status === "REVIEW_REQUIRED" &&
-                      booking.customerConversation?.lastQuestionKey ===
-                        "MANUAL_REVIEW" &&
-                      booking.addressLine1 && (
-                        <div className="space-y-1">
-                          <p className="text-xs text-slate-600">
-                            {booking.addressLine1}
-                          </p>
-                          <div className="flex gap-3 flex-wrap">
-                            <ActionFeedbackForm
-                              action={async () => {
-                                "use server";
-                                return validateBookingCoverageAction(
-                                  booking.id,
-                                  true
-                                );
-                              }}
-                            >
-                              <button
-                                type="submit"
-                                className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900"
-                              >
-                                <CheckCircle2 className="w-3 h-3" /> Atendido
-                              </button>
-                            </ActionFeedbackForm>
-                            <ActionFeedbackForm
-                              action={async () => {
-                                "use server";
-                                return validateBookingCoverageAction(
-                                  booking.id,
-                                  false
-                                );
-                              }}
-                            >
-                              <button
-                                type="submit"
-                                className="text-xs font-medium text-amber-700 hover:text-amber-900"
-                              >
-                                Lista de espera
-                              </button>
-                            </ActionFeedbackForm>
-                          </div>
-                        </div>
-                      )}
 
                     {booking.customerConversation?.state === "PAUSED" && (
                       <ActionFeedbackForm
