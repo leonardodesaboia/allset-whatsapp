@@ -282,6 +282,7 @@ export async function processOpportunityResponse(
           addressReference: booking.addressReference,
           propertyLabel: booking.propertyPricingTier?.label ?? null,
           estimatedValueCents: opportunity.paymentCents,
+          serviceDetails: booking.customerNotes,
         }),
         idempotencyKey: `opportunity:${opportunity.id}:${response.id}:confirmed`,
         correlationId: opportunity.id,

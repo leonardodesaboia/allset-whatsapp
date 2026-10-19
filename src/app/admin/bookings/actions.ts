@@ -139,7 +139,7 @@ export async function createBookingAction(input: {
 export async function prepareBookingMatchingAction(input: {
   bookingId: string;
   neighborhood: string;
-  professionalPaymentCents: number;
+  professionalPaymentCents: number | null;
 }): Promise<BookingActionResult> {
   const actor = await currentActor();
   if (!actor) return { ok: false, error: "Sessão expirada ou sem permissão." };

@@ -38,41 +38,41 @@ describe("customer configuration handoff", () => {
   }
   function expectConfigurationLog(reason: string) {
     expect(logger.error).toHaveBeenCalledTimes(1);
-    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ reason, provider: "mock" }), "Customer flow blocked: no active pricing tiers/service configured");
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ reason, provider: "mock" }), "Customer flow blocked: no active service configured");
   }
 
-  it("uses a neutral handoff when returning customers have no active pricing tier", async () => {
+  it("uses a neutral handoff when returning customers find no active service", async () => {
     const sender = phone();
     await prisma.user.create({ data: { phoneE164: sender, fullName: "Maria", role: "CUSTOMER" } });
-    await prisma.propertyPricingTier.updateMany({ data: { isActive: false } });
+    await prisma.serviceDefinition.updateMany({ data: { isActive: false } });
     await receive(sender, "Olá");
     await receive(sender, "1");
-    expect(await notices(sender)).toContain(neutral);
-    expect((await notices(sender)).join(" ")).not.toContain("Vamos validar o endereço");
-    expectConfigurationLog("PRICING_NOT_CONFIGURED");
-  });
-
-  it("uses a neutral handoff after collecting a new customer's name without active pricing", async () => {
-    const sender = phone();
-    await prisma.propertyPricingTier.updateMany({ data: { isActive: false } });
-    for (const text of ["Olá", "1", "Maria Souza"]) await receive(sender, text);
-    expect(await notices(sender)).toContain(neutral);
-    expect((await notices(sender)).join(" ")).not.toContain("Vamos validar o endereço");
-    expectConfigurationLog("PRICING_NOT_CONFIGURED");
-  });
-
-  it("uses a neutral handoff if a tier is selected but no service is active", async () => {
-    const sender = phone();
-    await prisma.serviceDefinition.updateMany({ data: { isActive: false } });
-    for (const text of ["Olá", "1", "Maria Souza", "1"]) await receive(sender, text);
     expect(await notices(sender)).toContain(neutral);
     expect((await notices(sender)).join(" ")).not.toContain("Vamos validar o endereço");
     expectConfigurationLog("SERVICE_NOT_CONFIGURED");
   });
 
+  it("uses a neutral handoff after collecting a new customer's name without an active service", async () => {
+    const sender = phone();
+    await prisma.serviceDefinition.updateMany({ data: { isActive: false } });
+    for (const text of ["Olá", "1", "Maria Souza"]) await receive(sender, text);
+    expect(await notices(sender)).toContain(neutral);
+    expectConfigurationLog("SERVICE_NOT_CONFIGURED");
+  });
+
+  it("no longer depends on property pricing tiers", async () => {
+    const sender = phone();
+    await prisma.propertyPricingTier.updateMany({ data: { isActive: false } });
+    for (const text of ["Olá", "1", "Maria Souza"]) await receive(sender, text);
+    const conv = await prisma.customerBookingConversation.findFirstOrThrow({ where: { customer: { phoneE164: sender } } });
+    expect(conv.state).toBe("SCHEDULE_DATE");
+    expect(await notices(sender)).not.toContain(neutral);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
   it("goes straight on after receiving an address, with no coverage-validation notice", async () => {
     const sender = phone();
-    for (const text of ["Olá", "1", "Maria Souza", "1", "amanhã às 14h"]) await receive(sender, text);
+    for (const text of ["Olá", "1", "Maria Souza", "amanhã às 14h"]) await receive(sender, text);
     expect((await notices(sender)).join(" ")).not.toContain("Vamos validar o endereço");
     await receive(sender, "Rua Teste, 123, Meireles");
     expect((await notices(sender)).join(" ")).not.toContain("Vamos validar o endereço");

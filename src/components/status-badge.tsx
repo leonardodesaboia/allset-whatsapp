@@ -54,7 +54,7 @@ const STATUS_MAP: Record<
   // Conversas de clientes
   INTRODUCTION: { label: "Início", variant: "secondary" },
   NAME: { label: "Identificação", variant: "secondary" },
-  PROPERTY_CHARACTERISTICS: { label: "Imóvel", variant: "secondary" },
+  PROPERTY_CHARACTERISTICS: { label: "Detalhes do serviço", variant: "secondary" },
   SCHEDULE_DATE: { label: "Data", variant: "secondary" },
   SCHEDULE_TIME: { label: "Horário", variant: "secondary" },
   QUOTE_ACCEPTANCE: { label: "Confirmação do horário", variant: "warning" },

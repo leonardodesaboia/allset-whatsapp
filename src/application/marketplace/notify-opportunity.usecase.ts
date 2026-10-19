@@ -45,14 +45,12 @@ export async function notifyOpportunityInTransaction(
     },
   });
   if (!booking) throw new Error(`Booking ${input.bookingId} não encontrado`);
-  // Sem pagamento pela plataforma, o valor mostrado à profissional é apenas a
-  // estimativa da faixa do imóvel; o valor final é combinado direto.
+  // Sem pagamento pela plataforma: o valor é opcional (pedidos antigos com
+  // faixa de imóvel ainda o mostram); o valor final é combinado direto.
   const estimatedValueCents =
     booking.professionalPaymentCents ?? (booking.totalCents > 0 ? booking.totalCents : null);
-  if (!booking.scheduledAt || !booking.neighborhood || estimatedValueCents == null) {
-    throw new Error(
-      "Booking precisa de scheduledAt, neighborhood e um valor estimado"
-    );
+  if (!booking.scheduledAt || !booking.neighborhood) {
+    throw new Error("Booking precisa de scheduledAt e neighborhood");
   }
 
   const opportunityInfo = {
@@ -142,7 +140,8 @@ export async function notifyOpportunityInTransaction(
       neighborhood: booking.neighborhood,
       scheduledAt: booking.scheduledAt,
       durationMinutes: booking.durationMinutes ?? 180,
-      paymentCents: estimatedValueCents,
+      // 0 = sem valor estimado; o valor é combinado direto com o cliente.
+      paymentCents: estimatedValueCents ?? 0,
       expiresAt,
       status: "OPEN",
     },
@@ -159,8 +158,9 @@ export async function notifyOpportunityInTransaction(
     const messageText = formatOpportunityMessage({
       neighborhood: opportunity.neighborhood,
       scheduledAt: opportunity.scheduledAt,
-      durationMinutes: opportunity.durationMinutes,
+      durationMinutes: booking.durationMinutes,
       paymentCents: opportunity.paymentCents,
+      serviceDetails: booking.customerNotes,
       expiresAt: opportunity.expiresAt,
       responseToken,
     });

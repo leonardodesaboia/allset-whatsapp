@@ -50,8 +50,8 @@ export async function routeInboundText(
   const result = await processContactConversationText(prisma, input);
   if (result.routed === "customer") {
     const reason = "started" in result ? result.started.reason : result.result.reason;
-    if (reason === "PRICING_NOT_CONFIGURED" || reason === "SERVICE_NOT_CONFIGURED") {
-      logger?.error({ reason, provider: input.provider, inboundMessageId: input.inboundMessageId }, "Customer flow blocked: no active pricing tiers/service configured");
+    if (reason === "SERVICE_NOT_CONFIGURED") {
+      logger?.error({ reason, provider: input.provider, inboundMessageId: input.inboundMessageId }, "Customer flow blocked: no active service configured");
     }
   }
   return result;

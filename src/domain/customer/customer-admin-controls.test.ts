@@ -49,7 +49,7 @@ describe("customer administrative steps", () => {
         lastQuestionKey: "MANUAL_REVIEW",
         hasBooking: false,
       })
-    ).toBe("PROPERTY_CHARACTERISTICS");
+    ).toBe("NAME");
   });
   it("does not resume active or completed conversations", () => {
     for (const state of ["COMPLETED", "NAME", "INTRODUCTION"])
