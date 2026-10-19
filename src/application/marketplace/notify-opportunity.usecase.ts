@@ -49,7 +49,13 @@ export async function retryConfirmedBookings(prisma: PrismaClient) {
 
 export async function notifyOpportunity(
   prisma: PrismaClient,
-  input: { bookingId: string; now?: Date; actor?: string }
+  input: {
+    bookingId: string;
+    now?: Date;
+    actor?: string;
+    /** Professionals who must not receive this round (e.g. who withdrew). */
+    excludeLeadIds?: string[];
+  }
 ): Promise<NotifyOpportunityResult> {
   return prisma.$transaction((tx) => notifyOpportunityInTransaction(tx, input));
 }
@@ -61,7 +67,13 @@ export async function notifyOpportunity(
  */
 export async function notifyOpportunityInTransaction(
   tx: Prisma.TransactionClient,
-  input: { bookingId: string; now?: Date; actor?: string }
+  input: {
+    bookingId: string;
+    now?: Date;
+    actor?: string;
+    /** Professionals who must not receive this round (e.g. who withdrew). */
+    excludeLeadIds?: string[];
+  }
 ): Promise<NotifyOpportunityResult> {
   const now = input.now ?? new Date();
   const actor = input.actor ?? "system:marketplace";
@@ -104,7 +116,10 @@ export async function notifyOpportunityInTransaction(
     },
   });
 
-  const eligible = candidates.filter(isEligibleForOpportunity);
+  const excluded = new Set(input.excludeLeadIds ?? []);
+  const eligible = candidates.filter(
+    (lead) => !excluded.has(lead.id) && isEligibleForOpportunity(lead)
+  );
 
   // A booking in MATCHING without a recipient is operationally invisible: no
   // professional can accept it and the admin has no reliable recovery path.

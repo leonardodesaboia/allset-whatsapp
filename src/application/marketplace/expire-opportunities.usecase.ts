@@ -3,6 +3,7 @@ import { env } from "../../env";
 import { textPayload } from "../../domain/messaging/message";
 import { recordAuditLog } from "../audit/record-audit-log.usecase";
 import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
+import { customerBookingSummary } from "../../domain/customer/customer-booking-summary";
 
 /** Expires open opportunities that have not received an acceptance by their deadline. */
 export async function expireOpportunities(
@@ -62,7 +63,8 @@ export async function expireOpportunities(
       });
 
       for (const pending of pendingResponses) {
-        if (pending.lead.phoneE164) {
+        // Offers still queued never reached the professional: nothing to close.
+        if (pending.lead.phoneE164 && pending.expiresAt) {
           await enqueueOutboundMessage(tx, {
             provider:
               pending.lead.conversation?.provider ??
@@ -105,12 +107,57 @@ export async function expireOpportunities(
         });
         const booking = await tx.booking.findUnique({
           where: { id: candidate.bookingId },
-          select: {
+          include: {
             customer: { select: { phoneE164: true } },
-            customerConversation: { select: { provider: true } },
+            customerConversation: true,
           },
         });
-        if (booking?.customer.phoneE164) {
+        const conversation = booking?.customerConversation;
+        const otherActive = conversation
+          ? await tx.customerBookingConversation.count({
+              where: {
+                customerId: conversation.customerId,
+                id: { not: conversation.id },
+                state: { notIn: ["COMPLETED", "PAUSED"] },
+              },
+            })
+          : 1;
+        // Ainda há tempo: o cliente decide se reenvia, muda o horário ou cancela.
+        if (
+          booking?.customer.phoneE164 &&
+          conversation?.state === "COMPLETED" &&
+          !otherActive &&
+          booking.scheduledAt &&
+          booking.scheduledAt.getTime() > now.getTime() + 60 * 60 * 1000
+        ) {
+          const reopened = await tx.customerBookingConversation.update({
+            where: { id: conversation.id },
+            data: {
+              state: "FINAL_CONFIRMATION",
+              lastQuestionKey: "FINAL_CONFIRMATION",
+              automationPausedAt: null,
+              misunderstandingCount: 0,
+              misunderstandingState: null,
+              version: { increment: 1 },
+            },
+          });
+          await enqueueOutboundMessage(tx, {
+            provider: reopened.provider,
+            recipient: booking.customer.phoneE164,
+            payload: textPayload(
+              [
+                "Nenhuma profissional aceitou seu pedido a tempo.",
+                "",
+                customerBookingSummary(booking),
+                "",
+                "Responda 1 para enviar de novo, 2 para mudar o dia, o horário ou outro dado, ou CANCELAR.",
+              ].join("\n")
+            ),
+            idempotencyKey: `opportunity:${candidate.id}:customer-retry`,
+            correlationId: candidate.id,
+            actor: "system:marketplace",
+          });
+        } else if (booking?.customer.phoneE164) {
           await enqueueOutboundMessage(tx, {
             provider:
               booking.customerConversation?.provider ??

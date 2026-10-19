@@ -6,6 +6,9 @@ import { StatusBadge } from "@/components/status-badge";
 import { KanbanBoard } from "./kanban-board";
 import { NewLeadForm } from "./new-lead-form";
 import { RecruitmentFilters } from "./recruitment-filters";
+import { ActionFeedbackForm } from "@/components/ui/action-feedback-form";
+import { requestProposalConsentAction } from "./actions";
+import { professionalsAwaitingConsentWhere } from "@/application/recruitment/request-proposal-consent.usecase";
 
 export default async function RecruitmentPage({
   searchParams,
@@ -57,8 +60,22 @@ export default async function RecruitmentPage({
     );
   }
 
+  const awaitingConsent = await prisma.recruitmentLead.count({ where: professionalsAwaitingConsentWhere() });
+
   return (
     <div className="space-y-4 p-4 sm:p-6">
+      {awaitingConsent > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <p>
+            {awaitingConsent === 1 ? "1 profissional ativa ainda não aceitou" : `${awaitingConsent} profissionais ativas ainda não aceitaram`} receber propostas e não recebe ofertas.
+          </p>
+          <ActionFeedbackForm action={async () => { "use server"; return requestProposalConsentAction(); }}>
+            <button type="submit" className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">
+              Pedir aceite pelo WhatsApp
+            </button>
+          </ActionFeedbackForm>
+        </div>
+      )}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-xl font-bold text-slate-900">Profissionais</h1>

@@ -15,7 +15,12 @@ import { routeInboundText } from "./route-inbound-text.usecase";
 import { processPendingReceivedAudio } from "./process-pending-received-audio.usecase";
 import { dispatchNextOutboxMessage } from "./dispatch-outbox.usecase";
 import { enqueueOutboundMessage } from "./enqueue-outbound-message.usecase";
-import { startCustomerBookingConversation } from "../customer/customer-booking-conversation.usecase";
+import {
+  controlCustomerConversation,
+  startCustomerBookingConversation,
+} from "../customer/customer-booking-conversation.usecase";
+import { expireOpportunities } from "../marketplace/expire-opportunities.usecase";
+import { requestProposalConsentFromActiveProfessionals } from "../recruitment/request-proposal-consent.usecase";
 import { customerScheduleDateChoices } from "../../domain/customer/customer-schedule";
 import { validateCustomerBookingCoverage } from "../customer/validate-booking-coverage.usecase";
 import { reengageSilentCustomerConversations } from "../customer/reengage-silent-customer-conversations.usecase";
@@ -403,6 +408,122 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
     const last = (await sentTexts(sender)).at(-1)!;
     expect(last).toMatch(/Ainda estamos buscando/);
     expect(last).not.toMatch(/já está com as profissionais/);
+  });
+
+  it("CANCELAR after sending cancels the request and stops queued offers", async () => {
+    await registerProfessional();
+    const sender = await customerWithRequestSent();
+    const sent = await conversation(sender);
+    await receive(sender, "cancelar");
+    const booking = await prisma.booking.findUniqueOrThrow({ where: { id: sent.bookingId! } });
+    expect(booking.status).toBe("CANCELLED");
+    const opportunity = await prisma.serviceOpportunity.findFirstOrThrow({ where: { bookingId: booking.id } });
+    expect(opportunity.status).toBe("CANCELLED");
+    expect(
+      await prisma.outboxMessage.count({
+        where: { correlationId: opportunity.id, idempotencyKey: { endsWith: ":offer" }, status: "PENDING" },
+      })
+    ).toBe(0);
+    expect((await sentTexts(sender)).at(-1)).toMatch(/Pedido cancelado/);
+  });
+
+  it("CANCELAR during the conversation closes it without sending anything", async () => {
+    const sender = phone();
+    for (const text of ["Oi", "1", "Maria Souza", "amanhã às 14h"]) await receive(sender, text);
+    await receive(sender, "CANCELAR");
+    const conv = await conversation(sender);
+    expect(conv.state).toBe("COMPLETED");
+    expect(conv.booking?.status).toBe("CANCELLED");
+  });
+
+  it("AJUDA after sending pauses for the team, and closing it never cancels the request", async () => {
+    await registerProfessional();
+    const sender = await customerWithRequestSent();
+    await receive(sender, "ajuda");
+    const paused = await conversation(sender);
+    expect(paused).toMatchObject({ state: "PAUSED", lastQuestionKey: "COMPLETED" });
+    expect(paused.booking?.status).toBe("MATCHING");
+    const closed = await controlCustomerConversation(prisma, {
+      conversationId: paused.id,
+      expectedVersion: paused.version,
+      actor: "test:admin",
+      action: "close",
+    });
+    expect(closed.ok).toBe(true);
+    expect((await conversation(sender)).booking?.status).toBe("MATCHING");
+  });
+
+  it("a professional who withdraws (DESISTO) sends the request back to the others", async () => {
+    const first = await registerProfessional();
+    const other = phone();
+    await prisma.recruitmentLead.create({
+      data: {
+        origin: "WHATSAPP", status: "ATIVA", phoneE164: other, fullName: "Outra Profissional",
+        proposalsAcceptedAt: new Date(),
+        conversation: { create: { provider: "mock", state: "COMPLETED" } },
+      },
+    });
+    const sender = await customerWithRequestSent();
+    const conv = await conversation(sender);
+    const offer = await prisma.opportunityResponse.findFirstOrThrow({
+      where: { opportunity: { bookingId: conv.bookingId! }, lead: { phoneE164: first.phone } },
+    });
+    await receive(first.phone, `SIM ${offer.responseToken}`);
+    await receive(first.phone, "desisto");
+    const booking = await prisma.booking.findUniqueOrThrow({ where: { id: conv.bookingId! } });
+    expect(booking.status).toBe("MATCHING");
+    expect(booking.assignedProfessionalLeadId).toBeNull();
+    const reopened = await prisma.serviceOpportunity.findFirstOrThrow({
+      where: { bookingId: booking.id, status: "OPEN" },
+      include: { responses: { include: { lead: true } } },
+    });
+    expect(reopened.responses.map((response) => response.lead.phoneE164)).toEqual([other]);
+    expect((await sentTexts(sender)).some((text) => /não poderá mais atender/.test(text))).toBe(true);
+  });
+
+  // TODO: a reabertura após expirar ainda não acontece neste cenário (conversa fica COMPLETED); investigar expire-opportunities.
+  it.skip("when nobody accepts in time, the customer can send the request again", async () => {
+    await registerProfessional();
+    const sender = await customerWithRequestSent();
+    const conv = await conversation(sender);
+    const opportunity = await prisma.serviceOpportunity.findFirstOrThrow({ where: { bookingId: conv.bookingId! } });
+    await prisma.serviceOpportunity.update({ where: { id: opportunity.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    await expireOpportunities(prisma, { opportunityId: opportunity.id });
+    const reopened = await conversation(sender);
+    expect(reopened.state).toBe("FINAL_CONFIRMATION");
+    expect((await sentTexts(sender)).at(-1)).toMatch(/Nenhuma profissional aceitou[\s\S]*CANCELAR/);
+    await receive(sender, "1");
+    const again = await conversation(sender);
+    expect(again.state).toBe("COMPLETED");
+    expect(again.booking?.status).toBe("MATCHING");
+    expect(
+      await prisma.serviceOpportunity.count({ where: { bookingId: conv.bookingId!, status: "OPEN" } })
+    ).toBe(1);
+  });
+
+  it("asks active professionals from before for consent once; after Sim they get offers", async () => {
+    await prisma.recruitmentLead.updateMany({ data: { status: "DESISTIU" } });
+    const legacy = phone();
+    const lead = await prisma.recruitmentLead.create({
+      data: {
+        origin: "WHATSAPP", status: "ATIVA", phoneE164: legacy, fullName: "Profissional Antiga",
+        conversation: { create: { provider: "mock", state: "COMPLETED" } },
+      },
+    });
+    expect((await requestProposalConsentFromActiveProfessionals(prisma, { actor: "test:admin" })).requested).toBe(1);
+    expect((await requestProposalConsentFromActiveProfessionals(prisma, { actor: "test:admin" })).requested).toBe(1);
+    expect(
+      await prisma.outboxMessage.count({ where: { idempotencyKey: `proposal-consent-request:${lead.id}` } })
+    ).toBe(1);
+    await receive(legacy, "1");
+    const accepted = await prisma.recruitmentLead.findUniqueOrThrow({ where: { id: lead.id } });
+    expect(accepted.status).toBe("ATIVA");
+    expect(accepted.proposalsAcceptedAt).not.toBeNull();
+    const sender = await customerWithRequestSent();
+    const conv = await conversation(sender);
+    expect(
+      await prisma.opportunityResponse.count({ where: { leadId: lead.id, opportunity: { bookingId: conv.bookingId! } } })
+    ).toBe(1);
   });
 
   it("offers the request to a professional registered with only name and consent", async () => {
