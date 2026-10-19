@@ -113,6 +113,7 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
       data: {
         origin: "WHATSAPP",
         status: "ATIVA",
+        proposalsAcceptedAt: new Date(),
         phoneE164: professional,
         fullName: "Joana Profissional",
         neighborhood: "Meireles",
@@ -405,6 +406,7 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
   });
 
   it("offers the request to a professional registered with only name and consent", async () => {
+    // (proposalsAcceptedAt is the consent given on WhatsApp)
     await prisma.recruitmentLead.updateMany({ data: { status: "DESISTIU" } });
     const professional = phone();
     // Cadastro simplificado: sem bairro, área ou dias de disponibilidade.
@@ -412,6 +414,7 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
       data: {
         origin: "WHATSAPP",
         status: "ATIVA",
+        proposalsAcceptedAt: new Date(),
         phoneE164: professional,
         fullName: "Ana Nova",
         conversation: { create: { provider: "mock", state: "COMPLETED" } },
@@ -752,21 +755,14 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
 
   it("finishes professional registration with a confirmation message", async () => {
     const sender = phone();
-    for (const text of [
-      "Oi",
-      "2",
-      "Maria",
-      "Meireles",
-      "2",
-      "segunda e terça",
-      "1",
-    ])
-      await receive(sender, text);
+    // Cadastro simples: menu -> nome -> aceite de propostas.
+    for (const text of ["Oi", "2", "Maria", "1"]) await receive(sender, text);
     const lead = await prisma.recruitmentLead.findUniqueOrThrow({
       where: { phoneE164: sender },
       include: { conversation: true },
     });
-    expect(lead.status).toBe("TRIAGEM");
+    expect(lead.status).toBe("ATIVA");
+    expect(lead.proposalsAcceptedAt).not.toBeNull();
     expect(lead.conversation?.state).toBe("COMPLETED");
     expect((await sentTexts(sender)).at(-1)).toMatch(
       /cadastro.*(recebido|concluído)/i

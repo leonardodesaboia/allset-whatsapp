@@ -57,82 +57,82 @@ describe("cadastro e análise simplificados", () => {
     });
     return { result, message };
   }
-  async function ready() {
+  /** Lead que concluiu o cadastro antigo e aguarda análise da equipe. */
+  async function legacyTriage() {
     const { lead } = await start();
-    for (const text of ["Maria Silva", "Caucaia e Centro", "3", "1 e 3"])
-      await answer(lead.phoneE164!, text);
-    return prisma.recruitmentLead.findUniqueOrThrow({
+    await prisma.recruitmentConversation.update({
+      where: { leadId: lead.id },
+      data: { state: "COMPLETED", lastQuestionKey: "CONFIRMATION" },
+    });
+    return prisma.recruitmentLead.update({
+      where: { id: lead.id },
+      data: { status: "TRIAGEM", fullName: "Maria Silva", serviceRegions: "Caucaia e Centro" },
+    });
+  }
+  it("pede só o nome e o aceite de propostas e já ativa a profissional", async () => {
+    const { lead } = await start();
+    expect((await answer(lead.phoneE164!, "Maria Silva")).result).toMatchObject({
+      state: "PROPOSAL_CONSENT",
+    });
+    const { result, message } = await answer(lead.phoneE164!, "1");
+    expect(result).toMatchObject({ completed: true, accepted: true });
+    const active = await prisma.recruitmentLead.findUniqueOrThrow({
       where: { id: lead.id },
       include: { conversation: true },
     });
-  }
-  it("faz quatro perguntas, pede confirmação e recebe iniciante de qualquer região", async () => {
-    const lead = await ready();
-    expect(lead.status).toBe("PRE_CADASTRO");
-    expect(lead.conversation?.state).toBe("CONFIRMATION");
-    expect(lead.availabilityDays).toEqual([
-      "Segunda a sexta de manhã",
-      "Sábado",
-    ]);
-    const summary = await prisma.outboxMessage.findMany({
-      where: { recipient: lead.phoneE164! },
-      orderBy: { createdAt: "desc" },
-    });
-    expect(summary[0]?.payload).toMatchObject({
-      text: expect.stringContaining("Caucaia e Centro"),
-    });
-    const { result, message } = await answer(lead.phoneE164!, "1");
-    expect(result).toMatchObject({ completed: true, triageTarget: "TRIAGEM" });
-    expect(
-      (
-        await prisma.recruitmentLead.findUniqueOrThrow({
-          where: { id: lead.id },
-        })
-      ).status
-    ).toBe("TRIAGEM");
+    expect(active).toMatchObject({ status: "ATIVA", fullName: "Maria Silva" });
+    expect(active.proposalsAcceptedAt).not.toBeNull();
+    expect(active.conversation?.state).toBe("COMPLETED");
     expect(
       await processRecruitmentAnswer(prisma, {
         text: "1",
         inboundMessageId: message.id,
       })
     ).toMatchObject({ reason: "DUPLICATE_INBOUND" });
-    expect(
-      await prisma.outboxMessage.count({
-        where: {
-          idempotencyKey: `recruitment:${lead.conversation!.id}:completed`,
-        },
-      })
-    ).toBe(1);
+    const done = await prisma.outboxMessage.findFirstOrThrow({
+      where: {
+        idempotencyKey: `recruitment:${active.conversation!.id}:consent:${message.id}`,
+      },
+    });
+    expect(done.payload).toMatchObject({
+      text: expect.stringContaining("Cadastro concluído"),
+    });
   });
-  it.each([
-    ["1", "Mariana Souza", "fullName", "Mariana Souza"],
-    ["2", "Maracanaú", "serviceRegions", "Maracanaú"],
-    ["3", "2", "hasInformalExperience", true],
-    ["4", "4", "availabilityDays", ["Domingo"]],
-  ] as const)(
-    "corrige só o campo %s e volta ao resumo",
-    async (choice, value, field, expected) => {
-      const lead = await ready();
-      await answer(lead.phoneE164!, "2");
-      await answer(lead.phoneE164!, choice);
-      await answer(lead.phoneE164!, value);
-      const updated = await prisma.recruitmentLead.findUniqueOrThrow({
-        where: { id: lead.id },
-        include: { conversation: true },
-      });
-      expect(updated[field]).toEqual(expected);
-      expect(updated.conversation?.state).toBe("CONFIRMATION");
-      if (field !== "fullName") expect(updated.fullName).toBe("Maria Silva");
-      await answer(lead.phoneE164!, "menu");
-      const texts = await prisma.outboxMessage.findMany({
-        where: { recipient: lead.phoneE164! },
-        orderBy: { createdAt: "desc" },
-      });
-      expect(texts[0]?.payload).toMatchObject({
-        text: expect.stringContaining("Confira seu cadastro"),
-      });
-    }
-  );
+  it("quem não aceita receber propostas fica pausada e sem aceite", async () => {
+    const { lead } = await start();
+    await answer(lead.phoneE164!, "Joana Lima");
+    expect((await answer(lead.phoneE164!, "não quero")).result).toMatchObject({
+      completed: true,
+      accepted: false,
+    });
+    const paused = await prisma.recruitmentLead.findUniqueOrThrow({ where: { id: lead.id } });
+    expect(paused.status).toBe("PAUSADA");
+    expect(paused.proposalsAcceptedAt).toBeNull();
+  });
+  it("não trata dúvida como aceite", async () => {
+    const { lead } = await start();
+    await answer(lead.phoneE164!, "Bia Souza");
+    expect((await answer(lead.phoneE164!, "acho que sim")).result).toMatchObject({
+      reason: "INVALID_ANSWER",
+    });
+    expect(
+      (await prisma.recruitmentLead.findUniqueOrThrow({ where: { id: lead.id } })).proposalsAcceptedAt
+    ).toBeNull();
+  });
+  it("conversa parada numa pergunta antiga grava a resposta e segue para o aceite", async () => {
+    const { lead } = await start();
+    await answer(lead.phoneE164!, "Carla Dias");
+    await prisma.recruitmentConversation.update({
+      where: { leadId: lead.id },
+      data: { state: "AVAILABILITY", lastQuestionKey: "AVAILABILITY" },
+    });
+    expect((await answer(lead.phoneE164!, "1 e 3")).result).toMatchObject({
+      state: "PROPOSAL_CONSENT",
+    });
+    expect(
+      (await prisma.recruitmentLead.findUniqueOrThrow({ where: { id: lead.id } })).availabilityDays
+    ).toEqual(["Segunda a sexta de manhã", "Sábado"]);
+  });
   it("não grava saudações e após duas falhas preserva pergunta para retomada", async () => {
     const { lead } = await start();
     await answer(lead.phoneE164!, "bom dia");
@@ -145,7 +145,7 @@ describe("cadastro e análise simplificados", () => {
     expect(paused.conversation?.state).toBe("MANUAL_REVIEW");
     await resumeRecruitmentConversation(prisma, { leadId: lead.id, actor });
     expect((await answer(lead.phoneE164!, "Ana Silva")).result).toMatchObject({
-      state: "REGIONS",
+      state: "PROPOSAL_CONSENT",
     });
   });
   it("resgata a pergunta antiga de cobertura sem classificar por região", async () => {
@@ -274,8 +274,7 @@ describe("cadastro e análise simplificados", () => {
     ).toBe(1);
   });
   it("decisões administrativas exigem motivo e detectam abas antigas sem duplicar avisos", async () => {
-    const lead = await ready();
-    await answer(lead.phoneE164!, "1");
+    const lead = await legacyTriage();
     const current = await prisma.recruitmentLead.findUniqueOrThrow({
       where: { id: lead.id },
     });
@@ -308,8 +307,7 @@ describe("cadastro e análise simplificados", () => {
     });
   });
   it("percorre análise/documentos, repete pedido em etapa antiga e mantém aprovação no atendimento", async () => {
-    const lead = await ready();
-    await answer(lead.phoneE164!, "1");
+    const lead = await legacyTriage();
     async function decide(
       action: "ANALYZE" | "REQUEST_DOCUMENT" | "CONTACT",
       reason?: string

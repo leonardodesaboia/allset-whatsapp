@@ -83,7 +83,8 @@ const envSchema = z
     // Intervalo mínimo global entre envios pelo número de WhatsApp.
     WHATSAPP_MESSAGE_INTERVAL_SECONDS: z.preprocess(
       (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
-      z.coerce.number().int().min(1).max(300).default(30)
+      // 0 desliga o intervalo (somente testes automatizados).
+      z.coerce.number().int().min(0).max(300).default(30)
     ),
     WORKER_CONCURRENCY_RECEIVED_AUDIO: positiveIntegerEnv(2),
     RECRUITMENT_REENGAGEMENT_AFTER_HOURS: positiveIntegerEnv(24),

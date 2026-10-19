@@ -8,6 +8,15 @@ import { dispatchNextOutboxMessage } from "./dispatch-outbox.usecase";
 import { enqueueOutboundMessage } from "./enqueue-outbound-message.usecase";
 import { processInboundEvent } from "./process-inbound-event.usecase";
 import { getNextOutboxDispatchAt } from "./next-outbox-dispatch-at.usecase";
+import { env } from "../../env";
+
+/** Liga o intervalo real só durante o teste que o verifica. */
+async function withWhatsAppInterval(seconds: number, run: () => Promise<void>) {
+  const settings = env as { WHATSAPP_MESSAGE_INTERVAL_SECONDS: number };
+  const previous = settings.WHATSAPP_MESSAGE_INTERVAL_SECONDS;
+  settings.WHATSAPP_MESSAGE_INTERVAL_SECONDS = seconds;
+  try { await run(); } finally { settings.WHATSAPP_MESSAGE_INTERVAL_SECONDS = previous; }
+}
 
 describe("mensageria genérica", () => {
   let prisma: PrismaClient; let stop: () => Promise<void>;
@@ -16,7 +25,7 @@ describe("mensageria genérica", () => {
   it("despacha uma outbox pendente e registra sucesso", async () => { const queued = await enqueueOutboundMessage(prisma, { provider: "mock", recipient: "+5585", payload: textPayload("Olá"), idempotencyKey: `outbox-${Date.now()}`, actor: "test" }); const mock = new MockMessagingAdapter(); const sent = await dispatchNextOutboxMessage(prisma, new StaticMessagingGatewayRegistry([["mock", mock]])); expect(sent?.id).toBe(queued.id); expect(sent?.status).toBe("SENT"); expect(mock.sent).toHaveLength(1); });
   it("mantém falha recuperável", async () => { await enqueueOutboundMessage(prisma, { provider: "mock", recipient: "+5585", payload: textPayload("Falha"), idempotencyKey: `outbox-failure-${Date.now()}`, actor: "test" }); const mock = new MockMessagingAdapter(); mock.failNext(); const failed = await dispatchNextOutboxMessage(prisma, new StaticMessagingGatewayRegistry([["mock", mock]])); expect(failed?.status).toBe("FAILED"); expect(failed?.attempts).toBe(1); expect(failed?.lastError).toContain("Falha simulada"); });
   it("trata inbound repetido de forma idempotente", async () => { const input = { provider: "mock", externalId: `event-${Date.now()}`, sender: "+5585", recipient: "+5511", payload: textPayload("Oi") }; const first = await processInboundEvent(prisma, input); const second = await processInboundEvent(prisma, input); expect(first.duplicate).toBe(false); expect(second.duplicate).toBe(true); expect(second.message.id).toBe(first.message.id); });
-  it("compartilha o intervalo de 30s entre despachos concorrentes e mantém a fila", async () => {
+  it("compartilha o intervalo de 30s entre despachos concorrentes e mantém a fila", () => withWhatsAppInterval(30, async () => {
     await prisma.outboxMessage.deleteMany();
     for (let i = 0; i < 3; i++) await enqueueOutboundMessage(prisma, {
       provider: "evolution", recipient: `+558599990000${i}`, payload: textPayload("Proposta"),
@@ -29,20 +38,20 @@ describe("mensageria genérica", () => {
     expect(gateway.sent).toHaveLength(1);
     expect(gateway.sent[0]?.recipient).toBe("+5585999900001");
     expect(await prisma.outboxMessage.count({ where: { status: "PENDING" } })).toBe(2);
-    const throttle = await prisma.messagingDispatchThrottle.findUniqueOrThrow({ where: { provider: "evolution" } });
+    const throttle = await prisma.messagingDispatchThrottle.findUniqueOrThrow({ where: { provider: "whatsapp" } });
     expect(throttle.nextSendAt.getTime() - Date.now()).toBeGreaterThan(25_000);
     expect(await dispatchNextOutboxMessage(prisma, registry)).toBeNull();
-    await prisma.messagingDispatchThrottle.update({ where: { provider: "evolution" }, data: { nextSendAt: new Date(0) } });
+    await prisma.messagingDispatchThrottle.update({ where: { provider: "whatsapp" }, data: { nextSendAt: new Date(0) } });
     expect((await dispatchNextOutboxMessage(prisma, registry))?.status).toBe("SENT");
     expect(gateway.sent).toHaveLength(2);
-  });
+  }));
 
   it("não deixa uma lease futura bloquear mensagens prontas", async () => {
     await prisma.outboxMessage.deleteMany();
     const now = Date.now();
     const throttleAt = new Date(now + 30_000);
     const leaseAt = new Date(now + 300_000);
-    await prisma.messagingDispatchThrottle.upsert({ where: { provider: "evolution" }, create: { provider: "evolution", nextSendAt: throttleAt }, update: { nextSendAt: throttleAt } });
+    await prisma.messagingDispatchThrottle.upsert({ where: { provider: "whatsapp" }, create: { provider: "whatsapp", nextSendAt: throttleAt }, update: { nextSendAt: throttleAt } });
     await prisma.outboxMessage.create({ data: {
       provider: "evolution", recipient: "+5585999900001", type: "TEXT", payload: { ...textPayload("Em envio") },
       idempotencyKey: "stuck-lease", status: "SENDING", availableAt: new Date(now - 60_000), leaseExpiresAt: leaseAt,

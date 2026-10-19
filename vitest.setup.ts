@@ -11,3 +11,6 @@ dotenv.config({
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/allset_test";
 process.env.BETTER_AUTH_SECRET ??= "test-secret-with-at-least-thirty-two-characters";
 process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
+// Sem o intervalo de 30s entre envios do WhatsApp: as suítes despacham várias
+// mensagens seguidas. O teste específico do intervalo o liga explicitamente.
+process.env.WHATSAPP_MESSAGE_INTERVAL_SECONDS = "0";

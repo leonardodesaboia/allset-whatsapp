@@ -104,7 +104,8 @@ export async function dispatchNextOutboxMessage(
   try {
     // The provider lease above serializes this section, so reading and moving
     // the throttle needs no extra lock.
-    const throttled = WHATSAPP_PROVIDERS.has(provider);
+    const throttled =
+      env.WHATSAPP_MESSAGE_INTERVAL_SECONDS > 0 && WHATSAPP_PROVIDERS.has(provider);
     if (throttled) {
       await prisma.messagingDispatchThrottle.createMany({
         data: [{ provider: WHATSAPP_THROTTLE_KEY, nextSendAt: now }],

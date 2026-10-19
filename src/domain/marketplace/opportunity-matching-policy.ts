@@ -1,7 +1,7 @@
 const ELIGIBLE_STATUSES = new Set(["ATIVA", "PREFERENCIAL"]);
 
 /** Only active professionals may receive or accept opportunities. */
-export function isLeadStatusEligible(status: string): boolean {
+function isLeadStatusEligible(status: string): boolean {
   return ELIGIBLE_STATUSES.has(status);
 }
 
