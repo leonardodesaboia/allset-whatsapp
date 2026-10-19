@@ -21,14 +21,16 @@ export function BookingMatchingActions(props: {
   const [payment, setPayment] = useState(props.professionalPaymentCents == null ? "" : (props.professionalPaymentCents / 100).toFixed(2));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const ready = Boolean(props.neighborhood?.trim() && props.professionalPaymentCents && props.professionalPaymentCents > 0);
+  // O valor estimado é opcional: cliente e profissional combinam o valor direto.
+  const ready = Boolean(props.neighborhood?.trim());
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     const match = /^(\d{1,6})(?:[.,](\d{1,2}))?$/.exec(payment.trim());
-    if (!match) { setError("Informe o valor estimado em reais, com até duas casas decimais."); return; }
-    const cents = Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+    if (payment.trim() && !match) { setError("Informe o valor estimado em reais, com até duas casas decimais, ou deixe em branco."); return; }
+    const cents = match ? Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0")) : null;
+    if (cents === 0) { setError("Deixe o valor em branco ou informe um valor maior que zero."); return; }
     setSaving(true);
     try {
       const result = await prepareBookingMatchingAction({ bookingId: props.bookingId, neighborhood, professionalPaymentCents: cents });
@@ -48,7 +50,7 @@ export function BookingMatchingActions(props: {
         setPayment(props.professionalPaymentCents == null ? "" : (props.professionalPaymentCents / 100).toFixed(2));
         setError(null); setOpen(true);
       }}>
-      {ready ? "Editar bairro e valor estimado" : "Informar bairro e valor estimado"}
+      {ready ? "Editar dados da oportunidade" : "Informar bairro"}
     </button>
     {ready && <ActionFeedbackForm action={async () => dispatchOpportunityAction(props.bookingId)}>
       <button type="submit" className="text-xs font-medium text-blue-700 hover:text-blue-900">
@@ -62,8 +64,8 @@ export function BookingMatchingActions(props: {
         <label className="block space-y-1 text-sm">Bairro
           <Input value={neighborhood} onChange={(event) => setNeighborhood(event.target.value)} required minLength={2} maxLength={120} data-autofocus disabled={saving} />
         </label>
-        <label className="block space-y-1 text-sm">Valor estimado (R$) — o valor final é combinado direto
-          <Input value={payment} onChange={(event) => setPayment(event.target.value)} required inputMode="decimal" placeholder="Ex.: 100,00" disabled={saving} />
+        <label className="block space-y-1 text-sm">Valor estimado (R$, opcional) — o valor final é combinado direto
+          <Input value={payment} onChange={(event) => setPayment(event.target.value)} inputMode="decimal" placeholder="Deixe em branco para não mostrar valor" disabled={saving} />
         </label>
         <p className="text-xs text-slate-500">Após salvar, envie a oportunidade pelo botão de matching.</p>
         {error && <p role="alert" className="text-xs text-red-600">{error}</p>}

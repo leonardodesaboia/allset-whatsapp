@@ -8,7 +8,6 @@ export const CUSTOMER_ADMIN_STEPS = [
   "PROPERTY_CHARACTERISTICS",
   "SCHEDULE_DATE",
   "SCHEDULE_TIME",
-  "QUOTE_ACCEPTANCE",
   "ADDRESS",
   "NEIGHBORHOOD",
   "FINAL_CONFIRMATION",
@@ -31,5 +30,5 @@ export function customerResumeStep(input: {
   if (!["PAUSED", "MANUAL_REVIEW"].includes(input.state)) return null;
   if (isCustomerAdminStep(input.lastQuestionKey)) return input.lastQuestionKey;
   // Review overwrites lastQuestionKey. Recollect the address without approving coverage.
-  return input.hasBooking ? "ADDRESS" : "PROPERTY_CHARACTERISTICS";
+  return input.hasBooking ? "ADDRESS" : "NAME";
 }

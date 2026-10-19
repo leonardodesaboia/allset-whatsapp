@@ -49,6 +49,7 @@ export interface CustomerContactInput {
   addressReference?: string | null;
   propertyLabel: string | null;
   estimatedValueCents: number | null;
+  serviceDetails?: string | null;
 }
 
 /** Sent to the professional on acceptance: everything needed to combine directly with the customer. */
@@ -64,6 +65,7 @@ export function formatProfessionalContactMessage(input: CustomerContactInput): s
     input.addressReference ? `Referência: ${input.addressReference}` : null,
     `🗓️ Dia e horário: ${schedule(input.scheduledAt)}`,
     input.propertyLabel ? `🏠 Imóvel: ${input.propertyLabel}` : null,
+    input.serviceDetails ? `📝 Detalhes: ${input.serviceDetails}` : null,
     input.estimatedValueCents != null && input.estimatedValueCents > 0
       ? `💰 Valor estimado: ${reais(input.estimatedValueCents)} (combine o valor final direto com o cliente)`
       : null,

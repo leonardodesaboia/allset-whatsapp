@@ -43,4 +43,18 @@ describe("troca de contatos", () => {
     expect(text).toContain("R$ 150,00");
     expect(text).toContain("combine o valor final direto");
   });
+
+  it("profissional recebe a descrição do serviço informada pelo cliente", () => {
+    const text = formatProfessionalContactMessage({
+      customerName: "Ana Souza",
+      customerPhoneE164: "+5585900001111",
+      scheduledAt,
+      address: "Rua A, 10, Aldeota",
+      propertyLabel: null,
+      estimatedValueCents: null,
+      serviceDetails: "Casa 3 quartos, tenho os produtos",
+    });
+    expect(text).toContain("📝 Detalhes: Casa 3 quartos, tenho os produtos");
+    expect(text).not.toContain("Valor estimado");
+  });
 });

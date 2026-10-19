@@ -189,6 +189,11 @@ export default async function BookingsPage({
                         {booking.totalCents > 0 && (
                           <p className="text-xs text-slate-500 mt-0.5">{formatBRL(booking.totalCents)}</p>
                         )}
+                        {booking.customerNotes && (
+                          <p className="text-xs text-slate-500 mt-0.5 max-w-64 whitespace-pre-line">
+                            {booking.customerNotes}
+                          </p>
+                        )}
                         {booking.assignedProfessionalLead && (
                           <Link
                             href={`/admin/recruitment/${booking.assignedProfessionalLead.id}`}
@@ -311,6 +316,11 @@ export default async function BookingsPage({
                       {booking.service.name}
                       {booking.totalCents > 0 && ` · ${formatBRL(booking.totalCents)}`}
                     </p>
+                    {booking.customerNotes && (
+                      <p className="text-xs text-slate-500 whitespace-pre-line">
+                        {booking.customerNotes}
+                      </p>
+                    )}
                     <p className="text-xs text-slate-400">atualizado {formatRelative(booking.updatedAt, now)}</p>
                     {booking.customerConversation && (
                       <Link

@@ -1,15 +1,18 @@
-import {
+import type {
+  Booking,
+  CustomerBookingConversation,
   Prisma,
-  type Booking,
-  type CustomerBookingConversation,
-  type PrismaClient,
-  type PropertyPricingTier,
+  PrismaClient,
 } from "@prisma/client";
 import {
+  CUSTOMER_QUESTIONS,
   parseCustomerChoice,
+  SERVICE_DETAILS_PROMPT,
   type CustomerConversationState,
 } from "../../domain/customer/customer-conversation-definition";
 import {
+  CUSTOMER_SCHEDULE_EARLIEST_HOUR,
+  CUSTOMER_SCHEDULE_LATEST_HOUR,
   customerScheduleDateChoices,
   interpretScheduleReply,
   parseScheduleTimeChoice,
@@ -24,8 +27,8 @@ import { notifyOpportunityInTransaction } from "../marketplace/notify-opportunit
 import { enqueueCustomerQuestion } from "./customer-question-outbox";
 import {
   customerBookingDetails,
+  customerBookingInProgressText,
   customerBookingSummary,
-  estimatedValueText,
   formatScheduleForCustomer,
 } from "../../domain/customer/customer-booking-summary";
 import { supersedeCustomerPrompts } from "./supersede-customer-prompts";
@@ -39,42 +42,18 @@ import {
 import type { BookingStatus } from "../../domain/booking/booking-status";
 import { ALLOWED_TRANSITIONS } from "../../domain/booking/booking-state-machine";
 
-function pricingTierText(tiers: readonly PropertyPricingTier[]): string {
-  return [
-    "Qual opção descreve melhor o seu imóvel?",
-    "",
-    ...tiers.map((tier, index) => `${index + 1} — ${tier.label}`),
-  ].join("\n");
-}
-
-/** Confirms what was understood (day, time, estimated value) before moving on. */
-function scheduleConfirmationText(booking: {
-  scheduledAt: Date | null;
-  totalCents: number;
-  durationMinutes: number | null;
-}): string {
-  return [
-    booking.scheduledAt
-      ? `Entendi: ${formatScheduleForCustomer(booking.scheduledAt)}.`
-      : "Confira o dia e horário:",
-    "",
-    estimatedValueText(booking.totalCents),
-    `Duração prevista: ${booking.durationMinutes ?? 180} minutos`,
-    "",
-    "Está correto?",
-    "",
-    "1 — Confirmar",
-    "2 — Alterar dia ou horário",
-  ].join("\n");
-}
+/*
+ * Fluxo curto do contratante: nome (só na primeira vez) → dia e horário →
+ * endereço (bairro só se não der para ler do endereço) → descrição livre do
+ * serviço → resumo → envio às profissionais. Tipo de imóvel, valor e
+ * pagamento são combinados direto entre cliente e profissional.
+ */
 
 function scheduleDateText(prefix?: string): string {
   return [
     ...(prefix ? [prefix, ""] : []),
     "Para qual dia e horário você precisa?",
-    "Ex.: amanhã às 14h.",
-    "",
-    "Horários disponíveis: 8h, 9h, 13h ou 14h.",
+    "Ex.: amanhã às 14h, sábado 9h ou 25/10 às 8h30.",
     "",
     "Se preferir, escolha primeiro o dia:",
     ...customerScheduleDateChoices().map(
@@ -92,27 +71,70 @@ function scheduleTimeText(isoDate?: string | null, prefix?: string): string {
     day
       ? `Para ${day}, qual horário você prefere?`
       : "Qual horário você prefere?",
-    "",
-    "1 — 08:00",
-    "2 — 09:00",
-    "3 — 13:00",
-    "4 — 14:00",
+    "Ex.: 9h ou 14h30.",
   ].join("\n");
 }
 
 function unavailableTimeText(hour: number, minute: number): string {
   const label =
     minute === 0 ? `${hour}h` : `${hour}h${String(minute).padStart(2, "0")}`;
-  return `Não atendemos às ${label}. Os horários disponíveis são 8h, 9h, 13h ou 14h.`;
+  return `Não dá para marcar às ${label}. Escolha um horário entre ${CUSTOMER_SCHEDULE_EARLIEST_HOUR}h e ${CUSTOMER_SCHEDULE_LATEST_HOUR}h.`;
+}
+
+/** Pedidos do fluxo anterior que pararam na confirmação do horário. */
+function legacyScheduleConfirmationText(scheduledAt: Date): string {
+  return [
+    `Entendi: ${formatScheduleForCustomer(scheduledAt)}.`,
+    "",
+    "Está correto?",
+    "",
+    "1 — Confirmar",
+    "2 — Alterar dia ou horário",
+  ].join("\n");
 }
 
 const ADDRESS_PROMPT =
-  "Agora envie o endereço completo do atendimento (rua, número e bairro).";
+  "Qual é o endereço completo do atendimento? (rua, número, complemento e bairro)";
 
-function asInputJson(
-  value: Prisma.JsonValue
-): Prisma.InputJsonValue | Prisma.JsonNullValueInput {
-  return value === null ? Prisma.JsonNull : (value as Prisma.InputJsonValue);
+const NEW_REQUEST_COMMANDS = [
+  "NOVO",
+  "NOVO PEDIDO",
+  "OUTRO",
+  "OUTRO PEDIDO",
+  "MENU",
+];
+
+// Pedidos já enviados que ainda fazem sentido acompanhar pela conversa.
+const IN_PROGRESS_BOOKING_STATUSES: readonly string[] = [
+  "AWAITING_CUSTOMER_CONFIRMATION",
+  "REVIEW_REQUIRED",
+  "MATCHING",
+  "PROFESSIONAL_ASSIGNED",
+  "SCHEDULED",
+  "PROFESSIONAL_CONFIRMED",
+  "PROFESSIONAL_EN_ROUTE",
+  "IN_PROGRESS",
+  "AWAITING_COMPLETION_CONFIRMATION",
+  "ISSUE_OPEN",
+];
+
+function withPrefix(text: string, prefix?: string): string {
+  return prefix ? `${prefix}\n\n${text}` : text;
+}
+
+function firstName(fullName: string): string {
+  return fullName.trim().split(/\s+/)[0] ?? fullName.trim();
+}
+
+function editSelectionText(): string {
+  const question = CUSTOMER_QUESTIONS.EDIT_SELECTION;
+  return [
+    question?.text ?? "O que você quer alterar?",
+    "",
+    ...(question?.choices ?? []).map(
+      (choice, index) => `${index + 1} — ${choice.label}`
+    ),
+  ].join("\n");
 }
 
 async function enqueueQuestion(
@@ -148,15 +170,6 @@ async function enqueueManualReviewNotice(
     idempotencyKey: `customer-booking:${conversation.id}:manual-review:v${conversation.version}:${conversation.updatedAt.getTime()}`,
     correlationId: conversation.id,
     actor: "system:customer-conversation",
-  });
-}
-
-async function activePricingTiers(
-  tx: Prisma.TransactionClient
-): Promise<PropertyPricingTier[]> {
-  return tx.propertyPricingTier.findMany({
-    where: { isActive: true },
-    orderBy: [{ sortOrder: "asc" }, { label: "asc" }],
   });
 }
 
@@ -229,17 +242,6 @@ async function resendCurrentQuestion(
   state: CustomerConversationState,
   actor = "system:customer-conversation"
 ): Promise<void> {
-  if (state === "PROPERTY_CHARACTERISTICS") {
-    await enqueueQuestion(
-      tx,
-      conversation,
-      recipient,
-      state,
-      pricingTierText(await activePricingTiers(tx)),
-      actor
-    );
-    return;
-  }
   if (state === "SCHEDULE_DATE") {
     await enqueueQuestion(
       tx,
@@ -272,7 +274,7 @@ async function resendCurrentQuestion(
         conversation,
         recipient,
         state,
-        scheduleConfirmationText(booking),
+        legacyScheduleConfirmationText(booking.scheduledAt),
         actor
       );
       return;
@@ -321,6 +323,170 @@ async function resendCurrentQuestion(
   await enqueueQuestion(tx, conversation, recipient, state, undefined, actor);
 }
 
+/** Moves the conversation to `state` and asks its question. */
+async function askStep(
+  tx: Prisma.TransactionClient,
+  conversation: CustomerBookingConversation,
+  recipient: string,
+  state: CustomerConversationState,
+  text: string,
+  extraData: Prisma.CustomerBookingConversationUpdateInput = {}
+) {
+  const updated = await tx.customerBookingConversation.update({
+    where: { id: conversation.id },
+    data: {
+      ...extraData,
+      state,
+      lastQuestionKey: state,
+      misunderstandingCount: 0,
+      misunderstandingState: null,
+      lastInboundAt: new Date(),
+      version: { increment: 1 },
+    },
+  });
+  await enqueueQuestion(tx, updated, recipient, state, text);
+  return { advanced: true as const, state, reason: undefined };
+}
+
+/**
+ * Asks the first piece of information the booking still lacks, or shows the
+ * summary once everything is known. Editing a field just clears it and calls
+ * this again, so the customer comes straight back to the summary.
+ */
+async function advanceToNextStep(
+  tx: Prisma.TransactionClient,
+  conversation: CustomerBookingConversation,
+  recipient: string,
+  bookingId: string,
+  options: { prefix?: string } = {}
+) {
+  const booking = await tx.booking.findUniqueOrThrow({
+    where: { id: bookingId },
+  });
+  if (!booking.scheduledAt)
+    return askStep(
+      tx,
+      conversation,
+      recipient,
+      "SCHEDULE_DATE",
+      scheduleDateText(options.prefix),
+      {
+        pendingScheduleDate: null,
+      }
+    );
+  if (!booking.addressLine1)
+    return askStep(
+      tx,
+      conversation,
+      recipient,
+      "ADDRESS",
+      withPrefix(ADDRESS_PROMPT, options.prefix)
+    );
+  const neighborhood =
+    booking.neighborhood ?? extractNeighborhood(booking.addressLine1);
+  if (!neighborhood)
+    return askStep(
+      tx,
+      conversation,
+      recipient,
+      "NEIGHBORHOOD",
+      withPrefix(
+        CUSTOMER_QUESTIONS.NEIGHBORHOOD?.text ??
+          "Qual é o bairro do atendimento?",
+        options.prefix
+      )
+    );
+  const withNeighborhood = booking.neighborhood
+    ? booking
+    : await tx.booking.update({
+        where: { id: booking.id },
+        data: { neighborhood },
+      });
+  if (!withNeighborhood.customerNotes)
+    return askStep(
+      tx,
+      conversation,
+      recipient,
+      "PROPERTY_CHARACTERISTICS",
+      withPrefix(SERVICE_DETAILS_PROMPT, options.prefix)
+    );
+  return askStep(
+    tx,
+    conversation,
+    recipient,
+    "FINAL_CONFIRMATION",
+    withPrefix(customerBookingSummary(withNeighborhood), options.prefix)
+  );
+}
+
+/** Creates the request the conversation fills in, then asks its first step. */
+async function startBookingSteps(
+  tx: Prisma.TransactionClient,
+  conversation: CustomerBookingConversation,
+  customerId: string,
+  recipient: string,
+  options: { prefix?: string } = {}
+) {
+  const service = await tx.serviceDefinition.findFirst({
+    where: { isActive: true },
+    orderBy: { code: "asc" },
+  });
+  if (!service) {
+    const updated = await tx.customerBookingConversation.update({
+      where: { id: conversation.id },
+      data: {
+        state: "MANUAL_REVIEW",
+        lastQuestionKey: "MANUAL_REVIEW",
+        lastInboundAt: new Date(),
+        version: { increment: 1 },
+      },
+    });
+    await enqueueManualReviewNotice(tx, updated, recipient);
+    return {
+      advanced: false as const,
+      reason: "SERVICE_NOT_CONFIGURED" as const,
+    };
+  }
+  const booking = await tx.booking.create({
+    data: { customerId, serviceId: service.id, requestedAt: new Date() },
+  });
+  const collecting = await transitionBookingStatusInTransaction(tx, {
+    bookingId: booking.id,
+    targetStatus: "COLLECTING_DATA",
+    actor: "system:customer-conversation",
+  });
+  if (!collecting.ok) throw collecting.error;
+  const linked = await tx.customerBookingConversation.update({
+    where: { id: conversation.id },
+    data: { bookingId: booking.id },
+  });
+  return advanceToNextStep(tx, linked, recipient, booking.id, options);
+}
+
+/** A request being edited goes back to COLLECTING_DATA while it has not reached matching. */
+async function reopenBookingForEdit(
+  tx: Prisma.TransactionClient,
+  bookingId: string,
+  reason: string
+): Promise<void> {
+  const booking = await tx.booking.findUniqueOrThrow({
+    where: { id: bookingId },
+  });
+  if (
+    !["QUOTED", "QUOTE_ACCEPTED", "AWAITING_CUSTOMER_CONFIRMATION"].includes(
+      booking.status
+    )
+  )
+    return;
+  const collecting = await transitionBookingStatusInTransaction(tx, {
+    bookingId,
+    targetStatus: "COLLECTING_DATA",
+    actor: "customer:whatsapp",
+    reason,
+  });
+  if (!collecting.ok) throw collecting.error;
+}
+
 /**
  * Hands the booking to matching: the opportunity is offered to professionals
  * in the same transaction that closes the customer conversation. There is no
@@ -331,27 +497,16 @@ async function sendBookingToMatching(
   conversation: CustomerBookingConversation,
   recipient: string,
   booking: Booking,
-  neighborhood: string,
-  options: { prefix?: string } = {}
+  neighborhood: string
 ) {
   const actor = "system:customer-conversation";
   // Bring bookings that are still collecting data to the state matching expects.
-  let status = booking.status as BookingStatus;
-  if (status === "COLLECTING_DATA") {
-    const quoted = await transitionBookingStatusInTransaction(tx, {
-      bookingId: booking.id,
-      targetStatus: "QUOTED",
-      actor,
-    });
-    if (!quoted.ok) throw quoted.error;
-    status = "QUOTED";
-  }
-  if (status === "QUOTED") {
+  if (booking.status === "COLLECTING_DATA" || booking.status === "QUOTED") {
     const confirmed = await transitionBookingStatusInTransaction(tx, {
       bookingId: booking.id,
       targetStatus: "AWAITING_CUSTOMER_CONFIRMATION",
       actor,
-      reason: "Pedido completo; segue direto para as profissionais",
+      reason: "Cliente confirmou o pedido; segue direto para as profissionais",
     });
     if (!confirmed.ok) throw confirmed.error;
   }
@@ -362,9 +517,6 @@ async function sendBookingToMatching(
       // Sem validação de cobertura: o endereço é registrado e o pedido segue.
       coverageValidatedAt: booking.coverageValidatedAt ?? new Date(),
       outsideCoverageArea: false,
-      professionalPaymentCents:
-        booking.professionalPaymentCents ??
-        (booking.totalCents > 0 ? booking.totalCents : null),
     },
   });
   const result = await notifyOpportunityInTransaction(tx, {
@@ -387,12 +539,11 @@ async function sendBookingToMatching(
       recipient,
       payload: textPayload(
         [
-          ...(options.prefix ? [options.prefix, ""] : []),
           "Pronto! Enviamos o seu pedido para as profissionais disponíveis:",
           "",
           ...customerBookingDetails(prepared),
           "",
-          "Assim que uma delas aceitar, você recebe aqui o nome e o WhatsApp dela para combinarem direto o horário e o valor.",
+          "Assim que uma delas aceitar, você recebe aqui o nome e o WhatsApp dela para combinarem direto os detalhes e o valor.",
           "A AllSet apenas conecta vocês; não há cobrança pela plataforma.",
         ].join("\n")
       ),
@@ -402,7 +553,7 @@ async function sendBookingToMatching(
     });
   }
   return {
-    advanced: true,
+    advanced: true as const,
     state: "COMPLETED" as const,
     bookingId: booking.id,
     dispatched: result.dispatched,
@@ -410,55 +561,50 @@ async function sendBookingToMatching(
   };
 }
 
-/**
- * After the address is known: ask the bairro only when it cannot be read from
- * the address, otherwise go straight to matching.
- */
-async function continueAfterAddress(
+/** Final "Confirmar e enviar": re-checks the request before it goes out. */
+async function confirmBooking(
   tx: Prisma.TransactionClient,
   conversation: CustomerBookingConversation,
   recipient: string,
-  bookingId: string,
-  options: { prefix?: string } = {}
+  bookingId: string
 ) {
   const booking = await tx.booking.findUniqueOrThrow({
     where: { id: bookingId },
   });
+  // A conversa pode ter ficado parada: nunca envie um horário que já passou.
+  if (booking.scheduledAt && booking.scheduledAt <= new Date()) {
+    await tx.booking.update({
+      where: { id: booking.id },
+      data: { scheduledAt: null },
+    });
+    return advanceToNextStep(tx, conversation, recipient, booking.id, {
+      prefix: "O horário escolhido já passou.",
+    });
+  }
   const neighborhood =
     booking.neighborhood ??
     (booking.addressLine1
       ? extractNeighborhood(booking.addressLine1)
       : undefined);
-  if (!neighborhood) {
-    const updated = await tx.customerBookingConversation.update({
-      where: { id: conversation.id },
-      data: {
-        state: "NEIGHBORHOOD",
-        lastQuestionKey: "NEIGHBORHOOD",
-        lastInboundAt: new Date(),
-        version: { increment: 1 },
-      },
-    });
-    await enqueueQuestion(tx, updated, recipient, "NEIGHBORHOOD");
-    return {
-      advanced: true,
-      state: "NEIGHBORHOOD" as const,
-      reason: undefined,
-    };
-  }
+  if (
+    !booking.scheduledAt ||
+    !booking.addressLine1 ||
+    !neighborhood ||
+    !booking.customerNotes
+  )
+    return advanceToNextStep(tx, conversation, recipient, booking.id);
   return sendBookingToMatching(
     tx,
     conversation,
     recipient,
     booking,
-    neighborhood,
-    options
+    neighborhood
   );
 }
 
 /**
- * Stores a day/time the customer asked for and asks them to confirm exactly
- * what was understood. Anything not understood or in the past is asked again.
+ * Stores a day/time the customer asked for. Anything in the past or invalid
+ * is asked again; otherwise the flow moves on to what is still missing.
  */
 async function proposeSchedule(
   tx: Prisma.TransactionClient,
@@ -467,8 +613,9 @@ async function proposeSchedule(
   date: string,
   time: string
 ) {
-  const retry = (prefix: string) =>
-    recordInvalidAnswer(
+  const scheduledAt = scheduledAtFromFortalezaLocal(date, time);
+  if (!scheduledAt || scheduledAt <= new Date() || !conversation.bookingId) {
+    return recordInvalidAnswer(
       tx,
       conversation,
       recipient,
@@ -479,7 +626,7 @@ async function proposeSchedule(
           updated,
           recipient,
           "SCHEDULE_DATE",
-          scheduleDateText(prefix)
+          scheduleDateText("Esse dia e horário já passaram ou são inválidos.")
         ),
       {
         pendingScheduleDate: null,
@@ -487,81 +634,20 @@ async function proposeSchedule(
         lastQuestionKey: "SCHEDULE_DATE",
       }
     );
-  const scheduledAt = scheduledAtFromFortalezaLocal(date, time);
-  if (!scheduledAt || scheduledAt <= new Date() || !conversation.bookingId) {
-    return retry(
-      "Esse dia e horário não estão disponíveis (já passaram ou são inválidos)."
-    );
   }
-  const booking = await tx.booking.findUnique({
+  await tx.booking.update({
     where: { id: conversation.bookingId },
-    include: { propertyPricingTier: true },
+    data: { scheduledAt },
   });
-  if (!booking?.propertyPricingTier) {
-    if (booking) {
-      const review = await transitionBookingStatusInTransaction(tx, {
-        bookingId: booking.id,
-        targetStatus: "REVIEW_REQUIRED",
-        actor: "system:customer-conversation",
-        reason: "Configuração de preço removida durante o agendamento",
-      });
-      if (!review.ok) throw review.error;
-    }
-    const updated = await tx.customerBookingConversation.update({
-      where: { id: conversation.id },
-      data: {
-        state: "MANUAL_REVIEW",
-        lastQuestionKey: "MANUAL_REVIEW",
-        lastInboundAt: new Date(),
-      },
-    });
-    await enqueueOutboundMessage(tx, {
-      provider: updated.provider,
-      recipient,
-      payload: textPayload(
-        "Houve uma atualização nos serviços disponíveis. Nossa equipe entrará em contato para concluir seu agendamento."
-      ),
-      idempotencyKey: `customer-booking:${updated.id}:booking-misconfigured:${updated.updatedAt.getTime()}`,
-      correlationId: updated.id,
-      actor: "system:customer-conversation",
-    });
-    return { advanced: false, reason: "BOOKING_NOT_CONFIGURED" as const };
-  }
-  const withSchedule = await tx.booking.update({
-    where: { id: booking.id },
-    data: { scheduledAt, quotedAt: new Date() },
-  });
-  if (booking.status !== "QUOTED") {
-    const quoted = await transitionBookingStatusInTransaction(tx, {
-      bookingId: booking.id,
-      targetStatus: "QUOTED",
-      actor: "system:customer-conversation",
-    });
-    if (!quoted.ok) throw quoted.error;
-  }
-  const updated = await tx.customerBookingConversation.update({
-    where: { id: conversation.id },
-    data: {
-      pendingScheduleDate: null,
-      state: "QUOTE_ACCEPTANCE",
-      lastQuestionKey: "QUOTE_ACCEPTANCE",
-      lastInboundAt: new Date(),
-      version: { increment: 1 },
-    },
-  });
-  await enqueueQuestion(
+  return advanceToNextStep(
     tx,
-    updated,
+    conversation,
     recipient,
-    "QUOTE_ACCEPTANCE",
-    scheduleConfirmationText(withSchedule)
+    conversation.bookingId,
+    {
+      prefix: `Anotado: ${formatScheduleForCustomer(scheduledAt)}.`,
+    }
   );
-  return {
-    advanced: true,
-    state: "QUOTE_ACCEPTANCE" as const,
-    bookingId: booking.id,
-    reason: undefined,
-  };
 }
 
 const adminControlSchema = z.object({
@@ -615,15 +701,10 @@ export async function controlCustomerConversation(
               : "INTRODUCTION";
 
       // Validate prerequisites before writing anything. Never fabricate customer consent.
-      if (
-        target === "PROPERTY_CHARACTERISTICS" &&
-        !(await activePricingTiers(tx)).length
-      )
-        return err("Configure as opções de preço antes de retomar esta etapa.");
       const needsBooking = [
+        "PROPERTY_CHARACTERISTICS",
         "SCHEDULE_DATE",
         "SCHEDULE_TIME",
-        "QUOTE_ACCEPTANCE",
         "ADDRESS",
         "NEIGHBORHOOD",
         "FINAL_CONFIRMATION",
@@ -631,17 +712,15 @@ export async function controlCustomerConversation(
       ].includes(target);
       if (needsBooking && !booking)
         return err(
-          "Esta etapa exige um pedido. Colete primeiro as características do imóvel."
+          "Esta etapa exige um pedido. Retome pela etapa NAME ou reinicie a conversa."
         );
       if (target === "SCHEDULE_TIME" && !current.pendingScheduleDate)
         return err("Escolha primeiro uma data na etapa SCHEDULE_DATE.");
       if (
-        ["QUOTE_ACCEPTANCE", "FINAL_CONFIRMATION", "EDIT_SELECTION"].includes(
-          target
-        ) &&
-        (!booking?.propertyPricingTierId || !booking.scheduledAt)
+        ["FINAL_CONFIRMATION", "EDIT_SELECTION"].includes(target) &&
+        !booking?.scheduledAt
       )
-        return err("Esta etapa exige imóvel e horário definidos.");
+        return err("Esta etapa exige dia e horário definidos.");
       if (
         ["FINAL_CONFIRMATION", "EDIT_SELECTION"].includes(target) &&
         !booking?.addressLine1
@@ -669,7 +748,6 @@ export async function controlCustomerConversation(
           ].includes(target)
         )
           bookingTarget = "COLLECTING_DATA";
-        if (target === "QUOTE_ACCEPTANCE") bookingTarget = "QUOTED";
         if (
           target === "ADDRESS" &&
           !["COLLECTING_DATA", "QUOTE_ACCEPTED", "REVIEW_REQUIRED"].includes(
@@ -829,8 +907,7 @@ export async function startCustomerBookingConversation(
       where: { phoneE164: input.phoneE164 },
       create: {
         role: "CUSTOMER",
-        // O telefone identifica o cliente no fluxo curto; o nome pode ser
-        // confirmado pela equipe quando realmente for necessário.
+        // O telefone identifica o cliente até ele informar o nome.
         fullName: input.phoneE164,
         phoneE164: input.phoneE164,
       },
@@ -866,46 +943,39 @@ export async function startCustomerBookingConversation(
       },
       orderBy: { updatedAt: "desc" },
     });
-    // A customer who still has no real name was never asked for one. Returning
-    // customers (name already collected) skip straight to pricing as before.
-    const needsName = !active && customer.fullName === input.phoneE164;
-    const tiers = active || needsName ? [] : await activePricingTiers(tx);
-    const initialState: CustomerConversationState = needsName
-      ? "NAME"
-      : tiers.length
-        ? "PROPERTY_CHARACTERISTICS"
-        : "MANUAL_REVIEW";
-    const conversation =
-      active ??
-      (await tx.customerBookingConversation.create({
-        data: {
-          customerId: customer.id,
-          provider: input.provider,
-          state: initialState,
-          lastQuestionKey: initialState,
-          lastInboundAt: new Date(),
-        },
-      }));
+    if (active) return { started: true as const, conversation: active };
 
-    if (!active && needsName)
+    // A customer who still has no real name was never asked for one.
+    const needsName = customer.fullName === input.phoneE164;
+    const conversation = await tx.customerBookingConversation.create({
+      data: {
+        customerId: customer.id,
+        provider: input.provider,
+        state: needsName ? "NAME" : "SCHEDULE_DATE",
+        lastQuestionKey: needsName ? "NAME" : "SCHEDULE_DATE",
+        lastInboundAt: new Date(),
+      },
+    });
+    if (needsName) {
       await enqueueQuestion(tx, conversation, customer.phoneE164, "NAME");
-    if (!active && !needsName && tiers.length)
-      await enqueueQuestion(
-        tx,
-        conversation,
-        customer.phoneE164,
-        "PROPERTY_CHARACTERISTICS",
-        pricingTierText(tiers)
-      );
-    if (!active && !needsName && !tiers.length) {
-      await enqueueManualReviewNotice(tx, conversation, customer.phoneE164);
-      return {
-        started: true as const,
-        conversation,
-        reason: "PRICING_NOT_CONFIGURED" as const,
-      };
+      return { started: true as const, conversation };
     }
-    return { started: true as const, conversation };
+    const result = await startBookingSteps(
+      tx,
+      conversation,
+      customer.id,
+      customer.phoneE164,
+      {
+        prefix: `Olá, ${firstName(customer.fullName)}! Vamos montar seu pedido.`,
+      }
+    );
+    return {
+      started: true as const,
+      conversation,
+      ...(result.reason === "SERVICE_NOT_CONFIGURED"
+        ? { reason: "SERVICE_NOT_CONFIGURED" as const }
+        : {}),
+    };
   });
 }
 
@@ -989,6 +1059,57 @@ export async function processCustomerBookingAnswer(
         }
         return { advanced: false, reason: "CONVERSATION_PAUSED" as const };
       }
+      // Um "obrigado" depois de enviar o pedido não deve abrir outro pedido:
+      // responde com a situação atual e só recomeça quando o cliente pedir.
+      if (
+        latest?.state === "COMPLETED" &&
+        latest.bookingId &&
+        !NEW_REQUEST_COMMANDS.includes(normalizedText)
+      ) {
+        const sent = await tx.booking.findUnique({
+          where: { id: latest.bookingId },
+          include: {
+            assignedProfessionalLead: {
+              select: { fullName: true, phoneE164: true },
+            },
+          },
+        });
+        if (
+          sent?.scheduledAt &&
+          sent.scheduledAt.getTime() > Date.now() - 24 * 60 * 60 * 1000 &&
+          IN_PROGRESS_BOOKING_STATUSES.includes(sent.status)
+        ) {
+          const claimed = await tx.inboundMessage.updateMany({
+            where: { id: inbound.id, processedAt: null },
+            data: { processedAt: new Date() },
+          });
+          if (!claimed.count)
+            return { advanced: false, reason: "DUPLICATE_INBOUND" as const };
+          await enqueueOutboundMessage(tx, {
+            provider: inbound.provider,
+            recipient: customer.phoneE164,
+            payload: textPayload(
+              customerBookingInProgressText({
+                scheduledAt: sent.scheduledAt,
+                // AWAITING_CUSTOMER_CONFIRMATION: no eligible professional yet;
+                // REVIEW_REQUIRED: the offer expired without acceptance.
+                offered: ![
+                  "AWAITING_CUSTOMER_CONFIRMATION",
+                  "REVIEW_REQUIRED",
+                ].includes(sent.status),
+                professionalName:
+                  sent.assignedProfessionalLead?.fullName ?? null,
+                professionalPhoneE164:
+                  sent.assignedProfessionalLead?.phoneE164 ?? null,
+              })
+            ),
+            idempotencyKey: `customer-booking:${latest.id}:in-progress:${inbound.id}`,
+            correlationId: latest.id,
+            actor: "system:customer-conversation",
+          });
+          return { advanced: false, reason: "BOOKING_IN_PROGRESS" as const };
+        }
+      }
       return { advanced: false, reason: "CONVERSATION_NOT_ACTIVE" as const };
     }
 
@@ -1067,22 +1188,30 @@ export async function processCustomerBookingAnswer(
       return { advanced: false, reason: "STOPPED" as const };
     }
 
-    // Conversas que pararam em revisão de cobertura antes de a validação
-    // deixar de existir: no próximo contato do cliente seguem para o matching.
+    // Conversas paradas em revisão (fluxo antigo com cobertura, ou serviço não
+    // configurado): no próximo contato, retomam pelo que ainda falta.
     if (current === "MANUAL_REVIEW") {
-      const stuck = conversation.bookingId
-        ? await tx.booking.findUnique({ where: { id: conversation.bookingId } })
-        : null;
+      if (!conversation.bookingId)
+        return startBookingSteps(
+          tx,
+          conversation,
+          customer.id,
+          customer.phoneE164
+        );
+      const stuck = await tx.booking.findUnique({
+        where: { id: conversation.bookingId },
+      });
       if (
-        stuck?.addressLine1 &&
-        stuck.scheduledAt &&
+        stuck &&
         [
+          "COLLECTING_DATA",
+          "QUOTED",
+          "QUOTE_ACCEPTED",
           "REVIEW_REQUIRED",
           "AWAITING_CUSTOMER_CONFIRMATION",
-          "QUOTE_ACCEPTED",
         ].includes(stuck.status)
       ) {
-        return continueAfterAddress(
+        return advanceToNextStep(
           tx,
           conversation,
           customer.phoneE164,
@@ -1105,18 +1234,17 @@ export async function processCustomerBookingAnswer(
       });
       return { advanced: false, reason: "MANUAL_REVIEW" as const };
     }
-    // Pedidos que aguardavam pagamento: a plataforma não cobra mais, então
-    // seguem direto para as profissionais.
+    // Pedidos que aguardavam pagamento: a plataforma não cobra mais.
     if (current === "AWAITING_PAYMENT") {
       if (conversation.bookingId) {
-        return continueAfterAddress(
+        return advanceToNextStep(
           tx,
           conversation,
           customer.phoneE164,
           conversation.bookingId,
           {
             prefix:
-              "Não é mais necessário pagamento pela AllSet. Seu pedido segue direto para as profissionais.",
+              "Não é mais necessário pagamento pela AllSet. Seu pedido vai direto para as profissionais.",
           }
         );
       }
@@ -1150,17 +1278,23 @@ export async function processCustomerBookingAnswer(
         await enqueueQuestion(tx, updated, customer.phoneE164, "INTRODUCTION");
         return { advanced: false, reason: "INVALID_ANSWER" as const };
       }
-      const updated = await tx.customerBookingConversation.update({
-        where: { id: conversation.id },
-        data: {
-          state: "NAME",
-          lastQuestionKey: "NAME",
-          lastInboundAt: new Date(),
-          version: { increment: 1 },
-        },
-      });
-      await enqueueQuestion(tx, updated, customer.phoneE164, "NAME");
-      return { advanced: true, state: "NAME" as const };
+      if (customer.fullName === customer.phoneE164) {
+        return askStep(
+          tx,
+          conversation,
+          customer.phoneE164,
+          "NAME",
+          CUSTOMER_QUESTIONS.NAME?.text ?? "Qual é o seu nome?"
+        );
+      }
+      return conversation.bookingId
+        ? advanceToNextStep(
+            tx,
+            conversation,
+            customer.phoneE164,
+            conversation.bookingId
+          )
+        : startBookingSteps(tx, conversation, customer.id, customer.phoneE164);
     }
 
     if (current === "NAME") {
@@ -1178,66 +1312,33 @@ export async function processCustomerBookingAnswer(
         where: { id: customer.id },
         data: { fullName: name },
       });
-      const tiers = await activePricingTiers(tx);
-      const nextState: CustomerConversationState = tiers.length
-        ? "PROPERTY_CHARACTERISTICS"
-        : "MANUAL_REVIEW";
-      const updated = await tx.customerBookingConversation.update({
-        where: { id: conversation.id },
-        data: {
-          state: nextState,
-          lastQuestionKey: nextState,
-          lastInboundAt: new Date(),
-          version: { increment: 1 },
-        },
-      });
-      if (!tiers.length) {
-        await enqueueManualReviewNotice(tx, updated, customer.phoneE164);
-        return { advanced: false, reason: "PRICING_NOT_CONFIGURED" as const };
-      }
-      await enqueueQuestion(
-        tx,
-        updated,
-        customer.phoneE164,
-        nextState,
-        pricingTierText(tiers)
-      );
-      return { advanced: true, state: nextState };
+      const prefix = `Prazer, ${firstName(name)}!`;
+      return conversation.bookingId
+        ? advanceToNextStep(
+            tx,
+            conversation,
+            customer.phoneE164,
+            conversation.bookingId,
+            { prefix }
+          )
+        : startBookingSteps(tx, conversation, customer.id, customer.phoneE164, {
+            prefix,
+          });
     }
 
+    // Conversas do fluxo antigo sem pedido criado (paradas na escolha do
+    // imóvel) começam o pedido pelo dia e horário.
+    if (!conversation.bookingId)
+      return startBookingSteps(
+        tx,
+        conversation,
+        customer.id,
+        customer.phoneE164
+      );
+
     if (current === "PROPERTY_CHARACTERISTICS") {
-      const tiers = await activePricingTiers(tx);
-      const numericChoice = Number(input.text.trim());
-      const normalizedTier = input.text
-        .trim()
-        .normalize("NFD")
-        .replace(/\p{Diacritic}/gu, "")
-        .toUpperCase()
-        .replace(/\bUM\b/g, "1")
-        .replace(/\bDOIS\b/g, "2")
-        .replace(/\bTRES\b/g, "3")
-        .replace(/\bQUATRO\b/g, "4");
-      const matchingTiers = tiers.filter((item) => {
-        const label = item.label
-          .normalize("NFD")
-          .replace(/\p{Diacritic}/gu, "")
-          .toUpperCase()
-          .replace(/\bUM\b/g, "1")
-          .replace(/\bDOIS\b/g, "2")
-          .replace(/\bTRES\b/g, "3")
-          .replace(/\bQUATRO\b/g, "4");
-        return (
-          label === normalizedTier ||
-          label.includes(normalizedTier) ||
-          normalizedTier.includes(label)
-        );
-      });
-      const tier = Number.isInteger(numericChoice)
-        ? tiers[numericChoice - 1]
-        : matchingTiers.length === 1
-          ? matchingTiers[0]
-          : undefined;
-      if (!tier) {
+      const details = input.text.trim();
+      if (details.length < 3 || details.length > 1000) {
         return recordInvalidAnswer(
           tx,
           conversation,
@@ -1248,93 +1349,26 @@ export async function processCustomerBookingAnswer(
               tx,
               updated,
               customer.phoneE164,
-              current,
-              pricingTierText(tiers)
+              "PROPERTY_CHARACTERISTICS",
+              SERVICE_DETAILS_PROMPT
             )
         );
       }
-      const service = await tx.serviceDefinition.findFirst({
-        where: { isActive: true },
-        orderBy: { code: "asc" },
+      await tx.booking.update({
+        where: { id: conversation.bookingId },
+        data: { customerNotes: details },
       });
-      if (!service) {
-        const updated = await tx.customerBookingConversation.update({
-          where: { id: conversation.id },
-          data: {
-            state: "MANUAL_REVIEW",
-            lastQuestionKey: "MANUAL_REVIEW",
-            lastInboundAt: new Date(),
-          },
-        });
-        await enqueueManualReviewNotice(tx, updated, customer.phoneE164);
-        return { advanced: false, reason: "SERVICE_NOT_CONFIGURED" as const };
-      }
-      const booking = conversation.bookingId
-        ? await tx.booking.update({
-            where: { id: conversation.bookingId },
-            data: {
-              propertyPricingTierId: tier.id,
-              propertyCharacteristics: asInputJson(tier.characteristics),
-              durationMinutes: tier.durationMinutes,
-              totalCents: tier.priceCents,
-              requestedAt: new Date(),
-              scheduledAt: null,
-              addressLine1: null,
-              addressLine2: null,
-              addressReference: null,
-              coverageValidatedAt: null,
-              outsideCoverageArea: false,
-              neighborhood: null,
-              professionalPaymentCents: null,
-            },
-          })
-        : await tx.booking.create({
-            data: {
-              customerId: customer.id,
-              serviceId: service.id,
-              propertyPricingTierId: tier.id,
-              propertyCharacteristics: asInputJson(tier.characteristics),
-              durationMinutes: tier.durationMinutes,
-              totalCents: tier.priceCents,
-              requestedAt: new Date(),
-            },
-          });
-      if (!conversation.bookingId) {
-        const collecting = await transitionBookingStatusInTransaction(tx, {
-          bookingId: booking.id,
-          targetStatus: "COLLECTING_DATA",
-          actor: "system:customer-conversation",
-        });
-        if (!collecting.ok) throw collecting.error;
-      }
-      const updated = await tx.customerBookingConversation.update({
-        where: { id: conversation.id },
-        data: {
-          bookingId: booking.id,
-          pendingScheduleDate: null,
-          state: "SCHEDULE_DATE",
-          lastQuestionKey: "SCHEDULE_DATE",
-          lastInboundAt: new Date(),
-          version: { increment: 1 },
-        },
-      });
-      await enqueueQuestion(
+      return advanceToNextStep(
         tx,
-        updated,
+        conversation,
         customer.phoneE164,
-        "SCHEDULE_DATE",
-        scheduleDateText()
+        conversation.bookingId
       );
-      return {
-        advanced: true,
-        state: "SCHEDULE_DATE" as const,
-        bookingId: booking.id,
-      };
     }
 
     if (current === "SCHEDULE_DATE") {
       const understood = interpretScheduleReply(input.text);
-      if (understood.status === "slot" && conversation.bookingId) {
+      if (understood.status === "slot") {
         return proposeSchedule(
           tx,
           conversation,
@@ -1343,33 +1377,21 @@ export async function processCustomerBookingAnswer(
           understood.time
         );
       }
-      if (understood.status === "date_only" && conversation.bookingId) {
-        const updated = await tx.customerBookingConversation.update({
-          where: { id: conversation.id },
-          data: {
-            pendingScheduleDate: understood.date,
-            state: "SCHEDULE_TIME",
-            lastQuestionKey: "SCHEDULE_TIME",
-            misunderstandingCount: 0,
-            misunderstandingState: null,
-            lastInboundAt: new Date(),
-            version: { increment: 1 },
-          },
-        });
-        await enqueueQuestion(
+      if (understood.status === "date_only") {
+        return askStep(
           tx,
-          updated,
+          conversation,
           customer.phoneE164,
           "SCHEDULE_TIME",
-          scheduleTimeText(understood.date)
+          scheduleTimeText(understood.date),
+          { pendingScheduleDate: understood.date }
         );
-        return { advanced: true, state: "SCHEDULE_TIME" as const };
       }
       const prefix =
         understood.status === "time_unavailable"
           ? unavailableTimeText(understood.hour, understood.minute)
           : understood.status === "time_only"
-            ? `Entendi o horário das ${Number(understood.time.slice(0, 2))}h, mas preciso saber o dia.`
+            ? `Entendi o horário (${understood.time}), mas preciso saber o dia.`
             : "Não consegui entender o dia e o horário.";
       return recordInvalidAnswer(
         tx,
@@ -1388,20 +1410,13 @@ export async function processCustomerBookingAnswer(
     }
 
     if (current === "SCHEDULE_TIME") {
-      if (!conversation.pendingScheduleDate || !conversation.bookingId) {
-        return recordInvalidAnswer(
+      if (!conversation.pendingScheduleDate) {
+        return askStep(
           tx,
           conversation,
           customer.phoneE164,
-          "SCHEDULE_TIME",
-          (updated) =>
-            enqueueQuestion(
-              tx,
-              updated,
-              customer.phoneE164,
-              "SCHEDULE_TIME",
-              scheduleTimeText(updated.pendingScheduleDate)
-            )
+          "SCHEDULE_DATE",
+          scheduleDateText()
         );
       }
       // A reply that carries its own day ("amanhã 14h") wins; otherwise the
@@ -1449,143 +1464,55 @@ export async function processCustomerBookingAnswer(
       );
     }
 
+    // Fluxo anterior: confirmação do horário antes do endereço.
     if (current === "QUOTE_ACCEPTANCE") {
-      const answer = parseCustomerChoice(current, input.text);
-      if (answer === "CHANGE") {
-        if (!conversation.bookingId)
-          return { advanced: false, reason: "INVALID_ANSWER" as const };
-        const collecting = await transitionBookingStatusInTransaction(tx, {
-          bookingId: conversation.bookingId,
-          targetStatus: "COLLECTING_DATA",
-          actor: "customer:whatsapp",
-          reason: "Cliente solicitou alteração de dia ou horário",
-        });
-        if (!collecting.ok) throw collecting.error;
+      if (parseCustomerChoice("FINAL_CONFIRMATION", input.text) === "CHANGE") {
+        await reopenBookingForEdit(
+          tx,
+          conversation.bookingId,
+          "Cliente solicitou alteração de dia ou horário"
+        );
         await tx.booking.update({
           where: { id: conversation.bookingId },
           data: { scheduledAt: null },
         });
-        const updated = await tx.customerBookingConversation.update({
-          where: { id: conversation.id },
-          data: {
-            pendingScheduleDate: null,
-            state: "SCHEDULE_DATE",
-            lastQuestionKey: "SCHEDULE_DATE",
-            misunderstandingCount: 0,
-            misunderstandingState: null,
-            lastInboundAt: new Date(),
-            version: { increment: 1 },
-          },
-        });
-        await enqueueQuestion(
-          tx,
-          updated,
-          customer.phoneE164,
-          "SCHEDULE_DATE",
-          scheduleDateText()
-        );
-        return { advanced: true, state: "SCHEDULE_DATE" as const };
       }
-      if (answer !== "ACCEPT" || !conversation.bookingId) {
-        const booking = conversation.bookingId
-          ? await tx.booking.findUnique({
-              where: { id: conversation.bookingId },
-            })
-          : null;
-        return recordInvalidAnswer(
-          tx,
-          conversation,
-          customer.phoneE164,
-          "QUOTE_ACCEPTANCE",
-          (updated) =>
-            enqueueQuestion(
-              tx,
-              updated,
-              customer.phoneE164,
-              "QUOTE_ACCEPTANCE",
-              booking?.scheduledAt
-                ? scheduleConfirmationText(booking)
-                : undefined
-            )
-        );
-      }
-      const pending = await tx.booking.findUniqueOrThrow({
-        where: { id: conversation.bookingId },
-      });
-      if (pending.status === "QUOTED") {
-        const accepted = await transitionBookingStatusInTransaction(tx, {
-          bookingId: conversation.bookingId,
-          targetStatus: "QUOTE_ACCEPTED",
-          actor: "customer:whatsapp",
-        });
-        if (!accepted.ok) throw accepted.error;
-      }
-      // Customers editing only the schedule already gave the address.
-      if (pending.addressLine1) {
-        return continueAfterAddress(
-          tx,
-          conversation,
-          customer.phoneE164,
-          conversation.bookingId
-        );
-      }
-      const updated = await tx.customerBookingConversation.update({
-        where: { id: conversation.id },
-        data: {
-          state: "ADDRESS",
-          lastQuestionKey: "ADDRESS",
-          misunderstandingCount: 0,
-          misunderstandingState: null,
-          lastInboundAt: new Date(),
-          version: { increment: 1 },
-        },
-      });
-      await enqueueCustomerQuestion(tx, {
-        conversationId: updated.id,
-        provider: updated.provider,
-        recipient: customer.phoneE164,
-        state: "ADDRESS",
-        text: ADDRESS_PROMPT,
-        idempotencyKey: `customer-booking:${updated.id}:ADDRESS:${updated.updatedAt.getTime()}`,
-      });
-      return { advanced: true, state: "ADDRESS" as const };
+      return advanceToNextStep(
+        tx,
+        conversation,
+        customer.phoneE164,
+        conversation.bookingId
+      );
     }
 
     if (current === "ADDRESS") {
       const address = input.text.trim();
-      if (
-        address.length < 8 ||
-        address.length > 500 ||
-        !conversation.bookingId
-      ) {
+      if (address.length < 8 || address.length > 500) {
         return recordInvalidAnswer(
           tx,
           conversation,
           customer.phoneE164,
           "ADDRESS",
           (updated) =>
-            enqueueCustomerQuestion(tx, {
-              conversationId: updated.id,
-              provider: updated.provider,
-              recipient: customer.phoneE164,
-              state: "ADDRESS",
-              text: `Não consegui ler o endereço. ${ADDRESS_PROMPT}`,
-              idempotencyKey: `customer-booking:${updated.id}:ADDRESS:retry:${updated.updatedAt.getTime()}`,
-            })
+            enqueueQuestion(
+              tx,
+              updated,
+              customer.phoneE164,
+              "ADDRESS",
+              `Não consegui ler o endereço. ${ADDRESS_PROMPT}`
+            )
         );
       }
-      // O endereço é guardado no pedido, sem etapa de validação de cobertura:
-      // o pedido segue direto para as profissionais.
+      // O endereço completo só é enviado à profissional que aceitar; as
+      // demais veem apenas o bairro.
       await tx.booking.update({
         where: { id: conversation.bookingId },
         data: {
           addressLine1: address,
-          coverageValidatedAt: new Date(),
-          outsideCoverageArea: false,
           neighborhood: extractNeighborhood(address) ?? null,
         },
       });
-      return continueAfterAddress(
+      return advanceToNextStep(
         tx,
         conversation,
         customer.phoneE164,
@@ -1595,11 +1522,7 @@ export async function processCustomerBookingAnswer(
 
     if (current === "NEIGHBORHOOD") {
       const neighborhood = input.text.trim();
-      if (
-        neighborhood.length < 2 ||
-        neighborhood.length > 120 ||
-        !conversation.bookingId
-      ) {
+      if (neighborhood.length < 2 || neighborhood.length > 120) {
         return recordInvalidAnswer(
           tx,
           conversation,
@@ -1613,7 +1536,7 @@ export async function processCustomerBookingAnswer(
         where: { id: conversation.bookingId },
         data: { neighborhood },
       });
-      return continueAfterAddress(
+      return advanceToNextStep(
         tx,
         conversation,
         customer.phoneE164,
@@ -1623,25 +1546,14 @@ export async function processCustomerBookingAnswer(
 
     if (current === "FINAL_CONFIRMATION") {
       const answer = parseCustomerChoice(current, input.text);
-      if (!conversation.bookingId)
-        return { advanced: false, reason: "INVALID_ANSWER" as const };
       if (answer === "CHANGE") {
-        const updated = await tx.customerBookingConversation.update({
-          where: { id: conversation.id },
-          data: {
-            state: "EDIT_SELECTION",
-            lastQuestionKey: "EDIT_SELECTION",
-            lastInboundAt: new Date(),
-            version: { increment: 1 },
-          },
-        });
-        await enqueueQuestion(
+        return askStep(
           tx,
-          updated,
+          conversation,
           customer.phoneE164,
-          "EDIT_SELECTION"
+          "EDIT_SELECTION",
+          editSelectionText()
         );
-        return { advanced: true, state: "EDIT_SELECTION" as const };
       }
       if (answer !== "CONFIRM") {
         return recordInvalidAnswer(
@@ -1658,7 +1570,7 @@ export async function processCustomerBookingAnswer(
             )
         );
       }
-      return continueAfterAddress(
+      return confirmBooking(
         tx,
         conversation,
         customer.phoneE164,
@@ -1668,7 +1580,7 @@ export async function processCustomerBookingAnswer(
 
     if (current === "EDIT_SELECTION") {
       const choice = parseCustomerChoice(current, input.text);
-      if (!conversation.bookingId || !choice) {
+      if (!choice) {
         return recordInvalidAnswer(
           tx,
           conversation,
@@ -1678,68 +1590,26 @@ export async function processCustomerBookingAnswer(
             enqueueQuestion(tx, updated, customer.phoneE164, "EDIT_SELECTION")
         );
       }
-      const collecting = await transitionBookingStatusInTransaction(tx, {
-        bookingId: conversation.bookingId,
-        targetStatus: "COLLECTING_DATA",
-        actor: "customer:whatsapp",
-        reason: `Cliente solicitou alteração de ${choice.toLowerCase()}`,
-      });
-      if (!collecting.ok) throw collecting.error;
-      if (choice === "PROPERTY") {
-        const updated = await tx.customerBookingConversation.update({
-          where: { id: conversation.id },
-          data: {
-            state: "PROPERTY_CHARACTERISTICS",
-            lastQuestionKey: "PROPERTY_CHARACTERISTICS",
-            lastInboundAt: new Date(),
-            version: { increment: 1 },
-          },
-        });
-        await enqueueQuestion(
-          tx,
-          updated,
-          customer.phoneE164,
-          "PROPERTY_CHARACTERISTICS",
-          pricingTierText(await activePricingTiers(tx))
-        );
-        return { advanced: true, state: "PROPERTY_CHARACTERISTICS" as const };
-      }
-      if (choice === "SCHEDULE") {
-        const updated = await tx.customerBookingConversation.update({
-          where: { id: conversation.id },
-          data: {
-            state: "SCHEDULE_DATE",
-            lastQuestionKey: "SCHEDULE_DATE",
-            lastInboundAt: new Date(),
-            version: { increment: 1 },
-          },
-        });
-        await enqueueQuestion(
-          tx,
-          updated,
-          customer.phoneE164,
-          "SCHEDULE_DATE",
-          scheduleDateText()
-        );
-        return { advanced: true, state: "SCHEDULE_DATE" as const };
-      }
-      const updated = await tx.customerBookingConversation.update({
-        where: { id: conversation.id },
-        data: {
-          state: "ADDRESS",
-          lastQuestionKey: "ADDRESS",
-          lastInboundAt: new Date(),
-          version: { increment: 1 },
-        },
-      });
-      await enqueueQuestion(
+      await reopenBookingForEdit(
         tx,
-        updated,
-        customer.phoneE164,
-        "ADDRESS",
-        "Envie o novo endereço completo (rua, número e bairro)."
+        conversation.bookingId,
+        `Cliente solicitou alteração de ${choice.toLowerCase()}`
       );
-      return { advanced: true, state: "ADDRESS" as const };
+      await tx.booking.update({
+        where: { id: conversation.bookingId },
+        data:
+          choice === "SCHEDULE"
+            ? { scheduledAt: null }
+            : choice === "ADDRESS"
+              ? { addressLine1: null, neighborhood: null }
+              : { customerNotes: null },
+      });
+      return advanceToNextStep(
+        tx,
+        conversation,
+        customer.phoneE164,
+        conversation.bookingId
+      );
     }
 
     return { advanced: false, reason: "CONVERSATION_NOT_ACTIVE" as const };

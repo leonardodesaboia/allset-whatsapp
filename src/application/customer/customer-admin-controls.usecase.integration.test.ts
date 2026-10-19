@@ -121,7 +121,9 @@ describe("customer administrative controls", () => {
       where: { correlationId: c.id },
     });
     expect(message.status).toBe("PENDING");
-    expect(message.payload).toMatchObject({ text: "Qual é o seu nome?" });
+    expect(message.payload).toMatchObject({
+      text: expect.stringContaining("Qual é o seu nome?"),
+    });
     const audit = await prisma.auditLog.findMany({
       where: { entityId: c.id },
       orderBy: { createdAt: "asc" },
@@ -150,7 +152,7 @@ describe("customer administrative controls", () => {
             where: { id: c.id },
           })
         ).state
-      ).toBe(hasBooking ? "ADDRESS" : "PROPERTY_CHARACTERISTICS");
+      ).toBe(hasBooking ? "ADDRESS" : "NAME");
       if (c.bookingId)
         expect(
           (
@@ -253,7 +255,7 @@ describe("customer administrative controls", () => {
         expectedVersion: 0,
         actor,
         action: "step",
-        step: "QUOTE_ACCEPTANCE",
+        step: "FINAL_CONFIRMATION",
       })
     ).rejects.toThrow("outbox unavailable");
     expect(
@@ -279,7 +281,7 @@ describe("customer administrative controls", () => {
   it("returns a Result error and rolls back when the booking version claim loses", async () => {
     const c = await make("PAUSED", "COLLECTING_DATA");
     const concurrent = prisma.$extends({ query: { booking: { async updateMany() { return { count: 0 }; } } } });
-    const result = await controlCustomerConversation(concurrent as unknown as PrismaClient, { conversationId: c.id, expectedVersion: 0, actor, action: "step", step: "QUOTE_ACCEPTANCE" });
+    const result = await controlCustomerConversation(concurrent as unknown as PrismaClient, { conversationId: c.id, expectedVersion: 0, actor, action: "step", step: "FINAL_CONFIRMATION" });
     expect(result.ok).toBe(false);
     expect(await prisma.customerBookingConversation.findUniqueOrThrow({ where: { id: c.id } })).toMatchObject({ state: "PAUSED", version: 0 });
     expect(await prisma.auditLog.count({ where: { entityId: c.id } })).toBe(0);
@@ -316,7 +318,7 @@ describe("customer administrative controls", () => {
   });
   it.each([
     "SCHEDULE_DATE",
-    "QUOTE_ACCEPTANCE",
+    "PROPERTY_CHARACTERISTICS",
     "ADDRESS",
     "FINAL_CONFIRMATION",
     "EDIT_SELECTION",

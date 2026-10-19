@@ -15,18 +15,12 @@ export type CustomerScheduleDateChoice = {
   label: string;
 };
 
-export type CustomerScheduleTimeChoice = {
-  value: string;
-  label: string;
-};
-
-export const CUSTOMER_SCHEDULE_TIME_CHOICES: readonly CustomerScheduleTimeChoice[] =
-  [
-    { value: "08:00", label: "08:00" },
-    { value: "09:00", label: "09:00" },
-    { value: "13:00", label: "13:00" },
-    { value: "14:00", label: "14:00" },
-  ];
+/**
+ * The customer picks any time; the professional decides whether she can make
+ * it. The window only rejects obvious mistakes such as "3h" (madrugada).
+ */
+export const CUSTOMER_SCHEDULE_EARLIEST_HOUR = 6;
+export const CUSTOMER_SCHEDULE_LATEST_HOUR = 22;
 
 function fortalezaDateParts(date: Date): {
   year: number;
@@ -126,7 +120,7 @@ type ClockTime = { hour: number; minute: number };
  */
 function parseClockTime(text: string): ClockTime | undefined {
   const clock = text.match(
-    /(?<![\d/:.])(\d{1,2})(?:\s*(?:h|hs|hr|hrs|hora|horas)\b\s*(\d{2})?|:(\d{2}))(?![\d/])/
+    /(?<![\d/:.])(\d{1,2})(?:\s*(?:h|hs|hr|hrs|hora|horas)(?![a-z])\s*(\d{2})?|:(\d{2}))(?![\d/])/
   );
   if (clock)
     return {
@@ -154,23 +148,19 @@ function parseClockTime(text: string): ClockTime | undefined {
 }
 
 function slotTime(clock: ClockTime): string | undefined {
-  if (clock.minute !== 0) return undefined;
-  const time = `${String(clock.hour).padStart(2, "0")}:00`;
-  return CUSTOMER_SCHEDULE_TIME_CHOICES.some((choice) => choice.value === time)
-    ? time
-    : undefined;
+  const minutes = clock.hour * 60 + clock.minute;
+  if (
+    clock.minute > 59 ||
+    minutes < CUSTOMER_SCHEDULE_EARLIEST_HOUR * 60 ||
+    minutes > CUSTOMER_SCHEDULE_LATEST_HOUR * 60
+  )
+    return undefined;
+  return `${String(clock.hour).padStart(2, "0")}:${String(clock.minute).padStart(2, "0")}`;
 }
 
-/** Time-step answer: an option index ("3") or a free time such as "14h". */
+/** Time-step answer: a free time such as "14h", "14:30" or "2 da tarde". */
 export function parseScheduleTimeChoice(text: string): string | undefined {
-  const trimmed = text.trim();
-  if (/^\d+$/.test(trimmed)) {
-    const indexed = CUSTOMER_SCHEDULE_TIME_CHOICES[Number(trimmed) - 1]?.value;
-    if (indexed) return indexed;
-  }
-  if (CUSTOMER_SCHEDULE_TIME_CHOICES.some((choice) => choice.value === trimmed))
-    return trimmed;
-  const clock = parseClockTime(normalizeScheduleText(trimmed));
+  const clock = parseClockTime(normalizeScheduleText(text));
   return clock ? slotTime(clock) : undefined;
 }
 

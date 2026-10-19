@@ -29,4 +29,17 @@ describe("formatOpportunityMessage", () => {
     expect(msg).toContain("*SIM A1B2C3D4E5*");
     expect(msg).toContain("*NAO A1B2C3D4E5*");
   });
+
+  it("inclui a descrição do cliente e omite duração e valor quando não informados", () => {
+    const msg = formatOpportunityMessage({
+      ...opportunity,
+      durationMinutes: null,
+      paymentCents: null,
+      serviceDetails: "Apto 2 quartos, limpeza pesada",
+    });
+    expect(msg).toContain("Detalhes: Apto 2 quartos, limpeza pesada");
+    expect(msg).not.toContain("Duracao");
+    expect(msg).not.toContain("Valor estimado");
+    expect(msg).toContain("combine direto com o cliente");
+  });
 });

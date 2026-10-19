@@ -6,7 +6,8 @@ import { recordAuditLog } from "../audit/record-audit-log.usecase";
 const inputSchema = z.object({
   bookingId: z.string().uuid(),
   neighborhood: z.string().trim().min(2).max(120),
-  professionalPaymentCents: z.number().int().positive().max(10_000_000),
+  // Opcional: o valor é combinado direto entre cliente e profissional.
+  professionalPaymentCents: z.number().int().positive().max(10_000_000).nullable().optional(),
   actor: z.string().trim().min(1).max(160),
 });
 
@@ -30,14 +31,14 @@ export async function prepareBookingMatching(
       where: { id: booking.id, version: booking.version, status: booking.status },
       data: {
         neighborhood: input.neighborhood,
-        professionalPaymentCents: input.professionalPaymentCents,
+        professionalPaymentCents: input.professionalPaymentCents ?? null,
         version: { increment: 1 },
       },
     });
     if (!updated.count) throw new DomainError("O pedido foi alterado. Atualize o painel e tente novamente.", "BOOKING_CONFLICT");
     await recordAuditLog(tx, {
       actor: input.actor, action: "BOOKING_MATCHING_PREPARED", entityType: "Booking", entityId: booking.id,
-      metadata: { neighborhood: input.neighborhood, professionalPaymentCents: input.professionalPaymentCents },
+      metadata: { neighborhood: input.neighborhood, professionalPaymentCents: input.professionalPaymentCents ?? null },
     });
     return { bookingId: booking.id };
   });
