@@ -62,7 +62,7 @@ export default async function RecruitmentPage({
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-xl font-bold text-slate-900">Profissionais</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Funil de recrutamento</p>
+          <p className="text-sm text-slate-500 mt-0.5">Cadastro pelo WhatsApp e recebimento de propostas</p>
         </div>
         <NewLeadForm />
       </div>

@@ -1,4 +1,11 @@
+import {
+  isUncertainReply,
+  parseBinaryReply,
+  parseConversationCommand,
+} from "../shared/conversation-language";
+
 export type ConversationState =
+  | "PROPOSAL_CONSENT"
   | "REGIONS"
   | "EXPERIENCE_KIND"
   | "CONFIRMATION"
@@ -25,7 +32,12 @@ export const QUESTIONS: Partial<Record<ConversationState, QuestionDefinition>> =
   {
     INTRODUCTION: {
       key: "INTRODUCTION",
-      text: "Olá! 👋 A AllSet apresenta oportunidades de limpeza pelo WhatsApp. Você escolhe se quer aceitar e combina diretamente com o cliente. Não cobramos para receber oportunidades. São só 4 perguntas, cerca de 2 minutos.",
+      text: "Olá! 👋 A AllSet conecta profissionais de limpeza a contratantes. Cadastre seu nome e aceite receber propostas de trabalho por aqui. Quem aceitar primeiro fica com o serviço. Você combina o valor e o pagamento diretamente com o contratante e não paga para receber propostas.",
+    },
+    PROPOSAL_CONSENT: {
+      key: "PROPOSAL_CONSENT",
+      text: "Você aceita receber propostas de trabalho da AllSet por este WhatsApp? Os pedidos são enviados às profissionais cadastradas e quem aceitar primeiro fica com o serviço. O valor é combinado diretamente com o contratante, fora da AllSet.\n1 — Sim, aceito receber propostas\n2 — Não quero receber\n\nPara parar de receber, envie PARAR a qualquer momento.",
+      options: ["SIM", "NAO"],
     },
     REGIONS: {
       key: "REGIONS",
@@ -188,6 +200,13 @@ export function parseAnswer(
     )
   )
     return undefined;
+  if (state === "PROPOSAL_CONSENT") {
+    if (isUncertainReply(value)) return undefined;
+    if (normalized === "1") return "SIM";
+    if (normalized === "2") return "NAO";
+    const reply = parseBinaryReply(value, "CONSENT");
+    return reply === "YES" ? "SIM" : reply === "NO" ? "NAO" : undefined;
+  }
   if (state === "EXPERIENCE_KIND") {
     if (["1", "FORMAL"].includes(normalized)) return "FORMAL";
     if (["2", "DIARISTA"].includes(normalized)) return "DIARISTA";
@@ -295,7 +314,13 @@ export function parseAnswer(
 export function globalCommand(
   value: string
 ): "HELP" | "PHONE" | "STOP" | "MENU" | "MISUNDERSTOOD" | undefined {
+  // Frases naturais ("não quero mais receber propostas", "me liga") primeiro;
+  // a lista fixa abaixo continua valendo para as formas curtas já conhecidas.
   const text = normalizeAnswer(value);
+  const natural = parseConversationCommand(value);
+  // "preciso de ajuda para limpar a cozinha" is an answer, not a request for
+  // support: natural-language HELP only counts in short messages.
+  if (natural && (natural !== "HELP" || text.split(" ").length <= 4)) return natural;
   if (
     [
       "AJUDA",

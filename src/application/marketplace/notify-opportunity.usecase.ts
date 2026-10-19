@@ -15,6 +15,38 @@ export type NotifyOpportunityResult = {
   opportunityId?: string;
 };
 
+/**
+ * Recovers confirmed requests that found no eligible professional: runs from
+ * the dispatch worker and the marketplace cron, and as soon as a professional
+ * accepts proposals.
+ */
+export async function retryConfirmedBookings(prisma: PrismaClient) {
+  const subscribers = await prisma.recruitmentLead.count({
+    where: {
+      status: { in: ["ATIVA", "PREFERENCIAL"] },
+      proposalsAcceptedAt: { not: null },
+      phoneE164: { not: null },
+    },
+  });
+  if (!subscribers) return { dispatched: 0 };
+  const pending = await prisma.booking.findMany({
+    where: {
+      status: "AWAITING_CUSTOMER_CONFIRMATION",
+      confirmedAt: { not: null },
+      scheduledAt: { gt: new Date() },
+    },
+    orderBy: { confirmedAt: "asc" },
+    take: 25,
+    select: { id: true },
+  });
+  let dispatched = 0;
+  for (const booking of pending) {
+    if ((await notifyOpportunity(prisma, { bookingId: booking.id, actor: "system:marketplace-retry" })).dispatched)
+      dispatched += 1;
+  }
+  return { dispatched };
+}
+
 export async function notifyOpportunity(
   prisma: PrismaClient,
   input: { bookingId: string; now?: Date; actor?: string }
@@ -37,6 +69,7 @@ export async function notifyOpportunityInTransaction(
     now.getTime() + env.OPPORTUNITY_EXPIRY_HOURS * 60 * 60 * 1000
   );
 
+  await tx.$queryRaw`SELECT id FROM "Booking" WHERE id = ${input.bookingId} FOR UPDATE`;
   const booking = await tx.booking.findUnique({
     where: { id: input.bookingId },
     include: {
@@ -45,6 +78,9 @@ export async function notifyOpportunityInTransaction(
     },
   });
   if (!booking) throw new Error(`Booking ${input.bookingId} não encontrado`);
+  // Already handed to matching (retries from cron, worker and admin overlap).
+  if (booking.status === "MATCHING" || booking.assignedProfessionalLeadId)
+    return { notified: 0, dispatched: true };
   // Sem pagamento pela plataforma: o valor é opcional (pedidos antigos com
   // faixa de imóvel ainda o mostram); o valor final é combinado direto.
   const estimatedValueCents =
@@ -53,38 +89,22 @@ export async function notifyOpportunityInTransaction(
     throw new Error("Booking precisa de scheduledAt e neighborhood");
   }
 
-  const opportunityInfo = {
-    neighborhood: booking.neighborhood,
-    scheduledAt: booking.scheduledAt,
-    durationMinutes: booking.durationMinutes ?? 180,
-  };
-
   const candidates = await tx.recruitmentLead.findMany({
     where: {
       status: { in: ["ATIVA", "PREFERENCIAL"] },
       phoneE164: { not: null },
+      proposalsAcceptedAt: { not: null },
     },
     select: {
       id: true,
       status: true,
-      neighborhood: true,
-      canServeInitialArea: true,
-      availabilityDays: true,
+      proposalsAcceptedAt: true,
       phoneE164: true,
       conversation: { select: { provider: true } },
-      opportunityResponses: {
-        where: { response: "ACCEPTED" },
-        include: { opportunity: { select: { scheduledAt: true } } },
-      },
     },
   });
 
-  const eligible = candidates.filter((lead) => {
-    const acceptedSlotDates = lead.opportunityResponses.map(
-      (r) => r.opportunity.scheduledAt
-    );
-    return isEligibleForOpportunity(lead, opportunityInfo, acceptedSlotDates);
-  });
+  const eligible = candidates.filter(isEligibleForOpportunity);
 
   // A booking in MATCHING without a recipient is operationally invisible: no
   // professional can accept it and the admin has no reliable recovery path.
@@ -140,8 +160,7 @@ export async function notifyOpportunityInTransaction(
       neighborhood: booking.neighborhood,
       scheduledAt: booking.scheduledAt,
       durationMinutes: booking.durationMinutes ?? 180,
-      // 0 = sem valor estimado; o valor é combinado direto com o cliente.
-      paymentCents: estimatedValueCents ?? 0,
+      paymentCents: estimatedValueCents,
       expiresAt,
       status: "OPEN",
     },
@@ -168,6 +187,8 @@ export async function notifyOpportunityInTransaction(
       provider: lead.conversation?.provider ?? env.MESSAGING_DEFAULT_PROVIDER,
       recipient: lead.phoneE164!,
       payload: { version: 1, type: "TEXT", text: messageText },
+      // Propostas saem depois das respostas de conversa já na fila.
+      priority: -1,
       idempotencyKey: `opportunity:${opportunity.id}:${lead.id}:offer`,
       correlationId: opportunity.id,
       actor,

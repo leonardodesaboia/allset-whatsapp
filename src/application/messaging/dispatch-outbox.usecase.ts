@@ -4,6 +4,10 @@ import type { MessagingGatewayRegistry } from "../../domain/ports/messaging-gate
 import type { OutboundMessagePayload } from "../../domain/messaging/message";
 import { recordAuditLog } from "../audit/record-audit-log.usecase";
 import { ProviderAuthenticationError } from "../../domain/messaging/provider-authentication-error";
+import { env } from "../../env";
+import { isRetiredPaymentMessage } from "../../domain/messaging/retired-payment-message";
+import { prepareOpportunityDelivery } from "../marketplace/prepare-opportunity-delivery.usecase";
+import { isEligibleForOpportunity } from "../../domain/marketplace/opportunity-matching-policy";
 
 const maxAttempts = 8;
 // A API pode demorar em redes móveis. Uma lease mais longa reduz a
@@ -12,6 +16,13 @@ const maxAttempts = 8;
 const leaseMs = 5 * 60_000;
 const retryDelayMs = (attempt: number) =>
   Math.min(3_600_000, 30_000 * 2 ** Math.min(Math.max(attempt - 1, 0), 10));
+/**
+ * Gateways that deliver through the production WhatsApp number. They share one
+ * global minimum interval (WHATSAPP_MESSAGE_INTERVAL_SECONDS) across webhooks,
+ * workers, crons and replicas; other providers (mock, tests) are not throttled.
+ */
+const WHATSAPP_PROVIDERS = new Set(["evolution", "whatsmiau"]);
+export const WHATSAPP_THROTTLE_KEY = "whatsapp";
 const safeError = (error: unknown) =>
   (error instanceof Error
     ? error.message
@@ -41,9 +52,31 @@ export async function dispatchNextOutboxMessage(
         { status: "SENDING", leaseExpiresAt: { lte: now } },
       ],
     },
-    orderBy: { createdAt: "asc" },
+    // Respostas e confirmações não esperam atrás de toda a lista de propostas.
+    orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
   });
   if (!candidate) return null;
+  if (isRetiredPaymentMessage(candidate.idempotencyKey)) {
+    const cancelled = await prisma.outboxMessage.updateMany({
+      where: { id: candidate.id, status: candidate.status, attempts: candidate.attempts },
+      data: { status: "CANCELLED", leaseExpiresAt: null, lastError: "Cobrança pela plataforma desativada" },
+    });
+    return cancelled.count ? prisma.outboxMessage.findUnique({ where: { id: candidate.id } }) : null;
+  }
+  if (candidate.idempotencyKey.endsWith(":offer") && candidate.correlationId) {
+    // Ofertas encerradas ou para quem retirou o aceite não chegam a gastar envio.
+    const [opportunity, lead] = await Promise.all([
+      prisma.serviceOpportunity.findUnique({ where: { id: candidate.correlationId }, select: { status: true } }),
+      prisma.recruitmentLead.findUnique({ where: { phoneE164: candidate.recipient } }),
+    ]);
+    if (!opportunity || opportunity.status !== "OPEN" || !lead || !isEligibleForOpportunity(lead)) {
+      const cancelled = await prisma.outboxMessage.updateMany({
+        where: { id: candidate.id, status: candidate.status, attempts: candidate.attempts },
+        data: { status: "CANCELLED", leaseExpiresAt: null, lastError: "Proposta encerrada ou profissional indisponível" },
+      });
+      return cancelled.count ? prisma.outboxMessage.findUnique({ where: { id: candidate.id } }) : null;
+    }
+  }
   const attempt = candidate.attempts + 1;
   const leaseExpiresAt = new Date(Date.now() + leaseMs);
 
@@ -69,6 +102,19 @@ export async function dispatchNextOutboxMessage(
   if (!providerClaim.count) return null;
 
   try {
+    // The provider lease above serializes this section, so reading and moving
+    // the throttle needs no extra lock.
+    const throttled = WHATSAPP_PROVIDERS.has(provider);
+    if (throttled) {
+      await prisma.messagingDispatchThrottle.createMany({
+        data: [{ provider: WHATSAPP_THROTTLE_KEY, nextSendAt: now }],
+        skipDuplicates: true,
+      });
+      const throttle = await prisma.messagingDispatchThrottle.findUniqueOrThrow({
+        where: { provider: WHATSAPP_THROTTLE_KEY },
+      });
+      if (throttle.nextSendAt > new Date()) return null;
+    }
     const claimed = await prisma.outboxMessage.updateMany({
       where: {
         id: candidate.id,
@@ -85,6 +131,12 @@ export async function dispatchNextOutboxMessage(
       },
     });
     if (!claimed.count) return null;
+    // Failures also consume the interval: a retry storm must not burst sends.
+    if (throttled)
+      await prisma.messagingDispatchThrottle.update({
+        where: { provider: WHATSAPP_THROTTLE_KEY },
+        data: { nextSendAt: new Date(Date.now() + env.WHATSAPP_MESSAGE_INTERVAL_SECONDS * 1000) },
+      });
 
     const gateway = registry.get(candidate.provider);
     if (!gateway) {
@@ -110,9 +162,21 @@ export async function dispatchNextOutboxMessage(
     }
 
     try {
+      let payload = candidate.payload as unknown as OutboundMessagePayload;
+      if (candidate.idempotencyKey.endsWith(":offer") && candidate.correlationId) {
+        // Local público e prazo são definidos no envio, inclusive em retries.
+        const prepared = await prepareOpportunityDelivery(prisma, {
+          ...candidate,
+          status: "SENDING",
+          attempts: attempt,
+          leaseExpiresAt,
+        });
+        if (!prepared) return await prisma.outboxMessage.findUnique({ where: { id: candidate.id } });
+        payload = prepared;
+      }
       const sent = await gateway.send({
         recipient: candidate.recipient,
-        payload: candidate.payload as unknown as OutboundMessagePayload,
+        payload,
         idempotencyKey: candidate.idempotencyKey,
         ...(candidate.correlationId
           ? { correlationId: candidate.correlationId }

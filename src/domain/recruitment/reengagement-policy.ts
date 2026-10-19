@@ -8,6 +8,7 @@ export interface ReengagementCandidate {
 const activeStates = new Set([
   "CHANNEL_PREFERENCE",
   "NAME",
+  "PROPOSAL_CONSENT",
   "NEIGHBORHOOD",
   "PROFESSIONAL_EXPERIENCE",
   "EXPERIENCE_DURATION",

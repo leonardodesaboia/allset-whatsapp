@@ -27,10 +27,19 @@ export async function expireOpportunities(
   let expired = 0;
   for (const candidate of candidates) {
     const didExpire = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "ServiceOpportunity" WHERE id = ${candidate.id} FOR UPDATE`;
+      const current = await tx.serviceOpportunity.findUnique({ where: { id: candidate.id } });
+      if (!current || current.status !== "OPEN" || current.expiresAt > now) return false;
+      // O prazo de uma proposta ainda na fila só começa no envio.
+      const queued = await tx.outboxMessage.count({ where: {
+        correlationId: candidate.id, idempotencyKey: { endsWith: ":offer" },
+        status: { in: ["PENDING", "FAILED", "SENDING"] },
+      } });
+      if (queued) return false;
       // Claiming with the current status prevents an expiry job from overwriting
       // a concurrent first acceptance.
       const claimed = await tx.serviceOpportunity.updateMany({
-        where: { id: candidate.id, status: "OPEN" },
+        where: { id: candidate.id, status: "OPEN", expiresAt: { lte: now } },
         data: { status: "EXPIRED" },
       });
       if (!claimed.count) return false;

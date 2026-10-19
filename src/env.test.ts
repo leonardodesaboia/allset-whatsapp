@@ -41,6 +41,7 @@ describe("parseEnv", () => {
       NODE_ENV: "test",
     });
     expect(result.DATABASE_URL).toContain("postgresql://");
+    expect(result.WHATSAPP_MESSAGE_INTERVAL_SECONDS).toBe(30);
   });
 
   it("aceita DATABASE_URL com esquema postgres:// (ex.: Testcontainers)", () => {

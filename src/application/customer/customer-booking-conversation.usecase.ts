@@ -514,6 +514,9 @@ async function sendBookingToMatching(
     where: { id: booking.id },
     data: {
       neighborhood,
+      // Marca a confirmação do cliente: sem profissional elegível agora, o
+      // pedido é distribuído automaticamente quando alguém se inscrever.
+      confirmedAt: booking.confirmedAt ?? new Date(),
       // Sem validação de cobertura: o endereço é registrado e o pedido segue.
       coverageValidatedAt: booking.coverageValidatedAt ?? new Date(),
       outsideCoverageArea: false,
