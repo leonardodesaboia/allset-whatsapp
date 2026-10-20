@@ -481,12 +481,13 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
     expect((await sentTexts(sender)).some((text) => /não poderá mais atender/.test(text))).toBe(true);
   });
 
-  // TODO: a reabertura após expirar ainda não acontece neste cenário (conversa fica COMPLETED); investigar expire-opportunities.
-  it.skip("when nobody accepts in time, the customer can send the request again", async () => {
+  it("when nobody accepts in time, the customer can send the request again", async () => {
     await registerProfessional();
     const sender = await customerWithRequestSent();
     const conv = await conversation(sender);
     const opportunity = await prisma.serviceOpportunity.findFirstOrThrow({ where: { bookingId: conv.bookingId! } });
+    // O prazo só corre depois que a proposta sai da fila.
+    await drainOutbox();
     await prisma.serviceOpportunity.update({ where: { id: opportunity.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
     await expireOpportunities(prisma, { opportunityId: opportunity.id });
     const reopened = await conversation(sender);
