@@ -6,6 +6,7 @@ import { enqueueOutboundMessage } from "./enqueue-outbound-message.usecase";
 import { contactIntentPrompt } from "../../domain/customer/contact-intent";
 import { textPayload } from "../../domain/messaging/message";
 import { requestProfessionalSupport } from "../recruitment/request-professional-support.usecase";
+import { processProfessionalMenu } from "../recruitment/professional-menu.usecase";
 import { globalCommand } from "../../domain/recruitment/conversation-definition";
 import type { RecruitmentStatus } from "../../domain/recruitment/recruitment-status";
 
@@ -191,6 +192,12 @@ export async function processContactConversationText(
       });
       if (!claimed) return { routed: "recruitment" as const, duplicate: true };
       return { routed: "recruitment" as const, ack: true, status: lead.status };
+    }
+
+    // Profissional já cadastrada: PARAR retira o aceite, MENU pede o aceite de
+    // novo e qualquer outra mensagem recebe a situação do cadastro.
+    if (lead.proposalsAcceptedAt || (lead.fullName && (lead.conversation?.state === "COMPLETED" || lead.status === "ATIVA" || lead.status === "PREFERENCIAL"))) {
+      return { routed: "recruitment" as const, result: await processProfessionalMenu(prisma, { ...input, leadId: lead.id }) };
     }
 
     if (lead.status === "LEAD" || lead.status === "PRE_CADASTRO") {

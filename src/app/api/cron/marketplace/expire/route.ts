@@ -3,6 +3,7 @@ import { compareSecret } from "@/infrastructure/auth/compare-secret";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { env } from "@/env";
 import { logger } from "@/infrastructure/observability/logger";
+import { retryConfirmedBookings } from "@/application/marketplace/notify-opportunity.usecase";
 
 export const runtime = "nodejs";
 
@@ -12,7 +13,8 @@ export async function GET(request: Request) {
   if (!compareSecret(env.CRON_SECRET, supplied)) return Response.json({ ok: false, error: "UNAUTHORIZED" }, { status: 401 });
   try {
     const result = await expireOpportunities(prisma);
-    return Response.json({ ok: true, ...result });
+    const retried = await retryConfirmedBookings(prisma);
+    return Response.json({ ok: true, ...result, retried: retried.dispatched });
   } catch (error) {
     logger.error({ err: error }, "Falha ao expirar oportunidades no cron");
     return Response.json({ ok: false, error: "OPPORTUNITY_EXPIRATION_FAILED" }, { status: 500 });

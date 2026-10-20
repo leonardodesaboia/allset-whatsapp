@@ -68,7 +68,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ id
                 </span>
               </div>
             </div>
-            <p className="text-xs text-slate-500">Bairro: {opportunity.neighborhood}</p>
+            <p className="text-xs text-slate-500">Local: {opportunity.neighborhood}</p>
           </CardHeader>
           <CardContent className="px-0 pb-0">
             <table className="w-full text-sm">
@@ -76,7 +76,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ id
                 <tr className="border-t border-slate-100 bg-slate-50">
                   <th className="text-left px-5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Profissional</th>
                   <th className="text-left px-5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Bairro</th>
-                  <th className="text-left px-5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Enviado</th>
+                  <th className="text-left px-5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Na fila desde</th>
                   <th className="text-left px-5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Resposta</th>
                   <th className="text-left px-5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">Respondido em</th>
                 </tr>

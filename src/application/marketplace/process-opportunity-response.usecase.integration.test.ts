@@ -45,16 +45,17 @@ describe("processOpportunityResponse", () => {
       },
     });
     const lead1 = await prisma.recruitmentLead.create({
-      data: { origin: "WHATSAPP", status: "ATIVA", phoneE164: `+558531${ts}`, fullName: "Ana" },
+      data: { origin: "WHATSAPP", status: "ATIVA", phoneE164: `+558531${ts}`, fullName: "Ana", proposalsAcceptedAt: new Date() },
     });
     const lead2 = await prisma.recruitmentLead.create({
-      data: { origin: "WHATSAPP", status: "ATIVA", phoneE164: `+558532${ts}`, fullName: "Bia" },
+      data: { origin: "WHATSAPP", status: "ATIVA", phoneE164: `+558532${ts}`, fullName: "Bia", proposalsAcceptedAt: new Date() },
     });
     const response1 = await prisma.opportunityResponse.create({
-      data: { opportunityId: opportunity.id, leadId: lead1.id },
+      // expiresAt marks an offer that was delivered (set when it is sent).
+      data: { opportunityId: opportunity.id, leadId: lead1.id, expiresAt: new Date(Date.now() + 3_600_000) },
     });
     const response2 = await prisma.opportunityResponse.create({
-      data: { opportunityId: opportunity.id, leadId: lead2.id },
+      data: { opportunityId: opportunity.id, leadId: lead2.id, expiresAt: new Date(Date.now() + 3_600_000) },
     });
     const makeInbound = (phone: string, text: string, suffix: string) =>
       prisma.inboundMessage.create({
@@ -166,7 +167,7 @@ describe("processOpportunityResponse", () => {
     })).resolves.toEqual({ outcome: "ACCEPTED" });
   });
 
-  it("recusa o aceite de quem já aceitou outro pedido no mesmo dia", async () => {
+  it("aceita outro pedido no mesmo dia: a profissional decide quantos consegue fazer", async () => {
     const scene = await seedScene();
     const first = await scene.makeInbound(scene.lead1.phoneE164!, "sim", "first");
     await processOpportunityResponse(prisma, { responseId: scene.response1.id, text: "SIM", inboundMessageId: first.id });
@@ -174,9 +175,8 @@ describe("processOpportunityResponse", () => {
     const second = await secondOfferForSameLead(scene, new Date("2026-08-10T16:00:00.000Z"));
     await expect(processOpportunityResponse(prisma, {
       responseId: second.response.id, text: "SIM", inboundMessageId: (await second.inbound("conflict")).id,
-    })).resolves.toEqual({ outcome: "NOT_ELIGIBLE" });
-    expect((await prisma.serviceOpportunity.findUniqueOrThrow({ where: { id: second.opportunity.id } })).status).toBe("OPEN");
-    expect((await prisma.booking.findUniqueOrThrow({ where: { id: second.booking.id } })).status).toBe("MATCHING");
+    })).resolves.toEqual({ outcome: "ACCEPTED" });
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: second.booking.id } })).status).toBe("PROFESSIONAL_ASSIGNED");
   });
 
   it("aceita outro pedido em dia diferente", async () => {
@@ -189,7 +189,7 @@ describe("processOpportunityResponse", () => {
     })).resolves.toEqual({ outcome: "ACCEPTED" });
   });
 
-  it("em corrida, a mesma profissional só fecha um dos dois pedidos do mesmo horário", async () => {
+  it("em corrida, aceites simultâneos da mesma profissional em pedidos diferentes não se bloqueiam", async () => {
     for (let round = 0; round < 3; round++) {
       const scene = await seedScene();
       const second = await secondOfferForSameLead(scene, new Date("2026-08-10T13:00:00.000Z"));
@@ -199,11 +199,11 @@ describe("processOpportunityResponse", () => {
         processOpportunityResponse(prisma, { responseId: scene.response1.id, text: "SIM", inboundMessageId: firstInbound.id }),
         processOpportunityResponse(prisma, { responseId: second.response.id, text: "SIM", inboundMessageId: secondInbound.id }),
       ]);
-      expect(results.map((result) => result.outcome).sort()).toEqual(["ACCEPTED", "NOT_ELIGIBLE"]);
+      expect(results.map((result) => result.outcome)).toEqual(["ACCEPTED", "ACCEPTED"]);
       const assigned = await prisma.booking.count({
         where: { id: { in: [scene.booking.id, second.booking.id] }, assignedProfessionalLeadId: scene.lead1.id },
       });
-      expect(assigned).toBe(1);
+      expect(assigned).toBe(2);
     }
   });
 });

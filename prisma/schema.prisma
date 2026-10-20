@@ -135,6 +135,7 @@ enum OutboundMessageStatus {
   SENT
   FAILED
   DEAD_LETTER
+  CANCELLED
 }
 
 enum ServiceOpportunityStatus {
@@ -158,6 +159,7 @@ enum RecruitmentConversationState {
   INTRODUCTION
   CHANNEL_PREFERENCE
   NAME
+  PROPOSAL_CONSENT
   NEIGHBORHOOD
   PROFESSIONAL_EXPERIENCE
   EXPERIENCE_DURATION
@@ -271,6 +273,7 @@ model OutboxMessage {
   recipient      String
   type           String
   payload        Json
+  priority       Int                   @default(0)
   status         OutboundMessageStatus @default(PENDING)
   attempts       Int                   @default(0)
   availableAt    DateTime              @default(now())
@@ -300,12 +303,19 @@ model MessagingProviderState {
   updatedAt      DateTime @default(now()) @updatedAt
 }
 
+// Limite compartilhado por webhook, cron e workers, inclusive em múltiplas réplicas.
+model MessagingDispatchThrottle {
+  provider   String   @id
+  nextSendAt DateTime
+}
+
 model RecruitmentLead {
   id                          String                   @id @default(uuid())
   status                      RecruitmentStatus        @default(LEAD)
   version                     Int                      @default(0)
   phoneE164                   String?
   fullName                    String?
+  proposalsAcceptedAt         DateTime?
   serviceRegions              String?
   neighborhood                String?
   origin                      LeadOrigin
@@ -757,6 +767,7 @@ model Booking {
   addressReference         String?
   customerNotes            String?
   requestedAt              DateTime?
+  confirmedAt              DateTime?
   quotedAt                 DateTime?
   coverageValidatedAt      DateTime?
   outsideCoverageArea      Boolean       @default(false)
@@ -844,7 +855,7 @@ model ServiceOpportunity {
   neighborhood    String
   scheduledAt     DateTime
   durationMinutes Int                      @default(180)
-  paymentCents    Int
+  paymentCents    Int?
   status          ServiceOpportunityStatus @default(OPEN)
   expiresAt       DateTime
   createdAt       DateTime                 @default(now())
@@ -865,6 +876,7 @@ model OpportunityResponse {
   respondedAt   DateTime?
   response      OpportunityResponseValue?
   responseToken String?
+  expiresAt     DateTime?
 
   @@unique([opportunityId, leadId])
   @@unique([responseToken])

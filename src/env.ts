@@ -80,6 +80,12 @@ const envSchema = z
       .max(64)
       .default("allset:development"),
     WORKER_CONCURRENCY_MESSAGE_DISPATCH: positiveIntegerEnv(3),
+    // Intervalo mínimo global entre envios pelo número de WhatsApp.
+    WHATSAPP_MESSAGE_INTERVAL_SECONDS: z.preprocess(
+      (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+      // 0 desliga o intervalo (somente testes automatizados).
+      z.coerce.number().int().min(0).max(300).default(30)
+    ),
     WORKER_CONCURRENCY_RECEIVED_AUDIO: positiveIntegerEnv(2),
     RECRUITMENT_REENGAGEMENT_AFTER_HOURS: positiveIntegerEnv(24),
     RECRUITMENT_REENGAGEMENT_MAX_ATTEMPTS: positiveIntegerEnv(2),

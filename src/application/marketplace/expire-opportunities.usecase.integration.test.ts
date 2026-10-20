@@ -54,6 +54,7 @@ describe("expireOpportunities", () => {
         fullName: "Profissional",
         neighborhood,
         canServeInitialArea: "TALVEZ",
+        proposalsAcceptedAt: new Date(),
       },
     });
     const opportunity = await prisma.serviceOpportunity.create({

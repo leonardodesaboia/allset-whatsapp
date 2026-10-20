@@ -33,4 +33,13 @@ describe("parseOpportunityReply", () => {
   it("não aceita opção desconhecida", () => {
     expect(parseOpportunityReply("3")).toBeNull();
   });
+  it("entende frases naturais preservando o código e a intenção", () => {
+    expect(parseOpportunityReply("Pode contar comigo! a1b2c3d4e5")).toEqual({ response: "ACCEPTED", responseToken: "A1B2C3D4E5" });
+    expect(parseOpportunityReply("Pode contar comigo! a1b2c3d4e5 ✅")).toEqual({ response: "ACCEPTED", responseToken: "A1B2C3D4E5" });
+    expect(parseOpportunityReply("não vou conseguir A1B2C3D4E5")).toEqual({ response: "DECLINED", responseToken: "A1B2C3D4E5" });
+    expect(parseOpportunityReply("não posso ir infelizmente")).toEqual({ response: "DECLINED", responseToken: null });
+    expect(parseOpportunityReply("1?")).toBeNull();
+    expect(parseOpportunityReply("aceito se for amanhã A1B2C3D4E5")).toBeNull();
+    expect(parseOpportunityReply("preciso de ajuda sim")).toBeNull();
+  });
 });

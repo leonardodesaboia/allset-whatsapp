@@ -5,19 +5,14 @@ import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.us
 import { enqueueRecruitmentQuestion } from "./recruitment-question-outbox";
 import { transitionLeadStatusInTransaction } from "./transition-lead-status.usecase";
 
+/**
+ * Cadastro simples: nome e aceite de propostas. Conversas paradas em perguntas
+ * do fluxo anterior gravam a resposta e seguem direto para o aceite.
+ */
 function nextState(state: ConversationState, answer: string): ConversationState {
   if (state === "CHANNEL_PREFERENCE") return answer === "PHONE" ? "PAUSED" : "NAME";
-  if (state === "NAME") return "REGIONS";
-  if (state === "REGIONS") return "EXPERIENCE_KIND";
-  if (state === "EXPERIENCE_KIND") return "AVAILABILITY";
-  if (state === "AVAILABILITY") return "CONFIRMATION";
-  if (state === "CONFIRMATION") return answer === "CONFIRM" ? "COMPLETED" : "EDIT_SELECTION";
-  if (state === "EDIT_SELECTION") return answer as ConversationState;
-  // Preserve answers from legacy questions, then join the new route.
-  if (state === "NEIGHBORHOOD") return "PROFESSIONAL_EXPERIENCE";
-  if (state === "PROFESSIONAL_EXPERIENCE") return answer === "SIM" ? "REGIONS" : "INFORMAL_EXPERIENCE";
-  if (state === "EXPERIENCE_DURATION" || state === "INFORMAL_EXPERIENCE" || state === "SERVICE_AREA") return "REGIONS";
-  return "NAME";
+  if (state === "EDIT_SELECTION" && answer === "NAME") return "NAME";
+  return "PROPOSAL_CONSENT";
 }
 
 async function enqueueQuestion(tx: Prisma.TransactionClient, conversation: RecruitmentConversation, recipient: string, state: ConversationState) {
@@ -75,10 +70,18 @@ export async function startRecruitmentConversation(
         lastQuestionKey: "NAME",
         lastInboundAt: new Date(),
       },
-      update: { lastInboundAt: new Date() },
+      update: {
+        lastInboundAt: new Date(),
+        // Quem já tem nome e ainda não aceitou propostas vai direto ao aceite.
+        ...(!lead.proposalsAcceptedAt && lead.fullName && !["SUSPENSA", "REPROVADA", "DESISTIU"].includes(lead.status)
+          ? { state: "PROPOSAL_CONSENT", lastQuestionKey: "PROPOSAL_CONSENT", automationPausedAt: null }
+          : {}),
+      },
     });
 
-    if (conversation.state === "NAME") {
+    if (conversation.state === "PROPOSAL_CONSENT") {
+      await enqueueQuestion(tx, conversation, input.phoneE164, "PROPOSAL_CONSENT");
+    } else if (conversation.state === "NAME") {
       await enqueueOutboundMessage(tx, {
         provider: conversation.provider,
         recipient: input.phoneE164,
@@ -369,7 +372,51 @@ export async function processRecruitmentAnswer(
       return { advanced: true, completed: false, state: "PAUSED" as const };
     }
 
-    const next = conversation.editingAnswer && current !== "EDIT_SELECTION" ? "CONFIRMATION" : nextState(current, answer);
+    if (current === "PROPOSAL_CONSENT") {
+      const accepted = answer === "SIM";
+      await tx.recruitmentLead.update({
+        where: { id: lead.id },
+        data: { proposalsAcceptedAt: accepted ? new Date() : null, nextAction: null, nextActionAt: null, lastInteractionAt: new Date() },
+      });
+      if (accepted && lead.status !== "ATIVA" && lead.status !== "PREFERENCIAL") {
+        const transition = await transitionLeadStatusInTransaction(tx, {
+          leadId: lead.id,
+          targetStatus: "ATIVA",
+          actor: "system:conversation",
+          reason: "Cadastro simples concluído com aceite de propostas pelo WhatsApp",
+        });
+        if (!transition.ok) throw transition.error;
+      } else if (!accepted && lead.status !== "PAUSADA") {
+        await transitionStatus(tx, lead.id, "PAUSADA", "Não aceitou receber propostas");
+      }
+      await tx.recruitmentConversation.update({
+        where: { id: conversation.id },
+        data: { state: "COMPLETED", lastQuestionKey: "PROPOSAL_CONSENT", editingAnswer: false, lastInboundAt: new Date(), misunderstandingCount: 0 },
+      });
+      await tx.leadEvent.create({
+        data: {
+          leadId: lead.id,
+          type: accepted ? "PROPOSALS_ACCEPTED" : "PROPOSALS_DECLINED",
+          description: accepted ? "Aceitou receber propostas pelo WhatsApp" : "Recusou receber propostas",
+          actor: "system:conversation",
+        },
+      });
+      await enqueueOutboundMessage(tx, {
+        provider: conversation.provider,
+        recipient: phoneE164,
+        payload: textPayload(
+          accepted
+            ? "✅ Cadastro concluído! Você vai receber as propostas por aqui. Quem aceitar primeiro fica com o serviço, e o valor é combinado direto com o contratante. Para deixar de receber, envie PARAR. Para suporte, envie AJUDA."
+            : "Tudo bem! Você não vai receber propostas. Se mudar de ideia, envie MENU."
+        ),
+        idempotencyKey: `recruitment:${conversation.id}:consent:${input.inboundMessageId}`,
+        correlationId: conversation.id,
+        actor: "system:conversation",
+      });
+      return { advanced: true, completed: true, accepted };
+    }
+
+    const next = nextState(current, answer);
     const data: Prisma.RecruitmentLeadUpdateInput = { lastInteractionAt: new Date() };
     if (current === "NAME") data.fullName = input.text.trim();
     if (current === "REGIONS") data.serviceRegions = input.text.trim();
@@ -384,28 +431,8 @@ export async function processRecruitmentAnswer(
 
     const updated = await tx.recruitmentConversation.update({
       where: { id: conversation.id },
-      data: { state: next, lastQuestionKey: next, editingAnswer: current === "EDIT_SELECTION", lastInboundAt: new Date(), misunderstandingCount: 0 },
+      data: { state: next, lastQuestionKey: next, editingAnswer: false, lastInboundAt: new Date(), misunderstandingCount: 0 },
     });
-
-    if (next === "COMPLETED") {
-      await transitionStatus(tx, lead.id, "TRIAGEM");
-      const triageTarget = "TRIAGEM" as const;
-      await tx.recruitmentLead.update({
-        where: { id: lead.id },
-        data: { nextAction: "Analisar cadastro e solicitar documentos", nextActionAt: new Date() },
-      });
-      const completionText = "✅ Cadastro recebido! Nossa equipe vai analisar suas informações e falar com você por aqui sobre os próximos passos e documentos. O cadastro ainda não significa aprovação.";
-      await enqueueOutboundMessage(tx, {
-        provider: conversation.provider,
-        recipient: phoneE164,
-        payload: textPayload(completionText),
-        idempotencyKey: `recruitment:${conversation.id}:completed`,
-        correlationId: conversation.id,
-        actor: "system:conversation",
-      });
-
-      return { advanced: true, completed: true, triageTarget };
-    }
 
     await enqueueQuestion(tx, updated, phoneE164, next);
     return { advanced: true, completed: false, state: next };

@@ -103,6 +103,21 @@ const NEW_REQUEST_COMMANDS = [
   "OUTRO PEDIDO",
   "MENU",
 ];
+const CANCEL_COMMANDS = ["CANCELAR", "CANCELA", "CANCELAR PEDIDO", "CANCELAR O PEDIDO"];
+const HELP_COMMANDS = ["AJUDA", "HELP", "FALAR COM ALGUEM", "LIGACAO", "LIGAR"];
+
+// Depois disso o pedido já foi distribuído: encerrar a conversa não o cancela.
+const DISPATCHED_BOOKING_STATUSES: readonly string[] = [
+  "MATCHING",
+  "PROFESSIONAL_ASSIGNED",
+  "SCHEDULED",
+  "PROFESSIONAL_CONFIRMED",
+  "PROFESSIONAL_EN_ROUTE",
+  "IN_PROGRESS",
+  "AWAITING_COMPLETION_CONFIRMATION",
+  "ISSUE_OPEN",
+  "COMPLETED",
+];
 
 // Pedidos já enviados que ainda fazem sentido acompanhar pela conversa.
 const IN_PROGRESS_BOOKING_STATUSES: readonly string[] = [
@@ -323,6 +338,62 @@ async function resendCurrentQuestion(
   await enqueueQuestion(tx, conversation, recipient, state, undefined, actor);
 }
 
+/**
+ * Customer cancels the request: closes any open offer, stops offers still in
+ * the queue and tells the assigned professional, if there is one.
+ */
+async function cancelBookingByCustomer(
+  tx: Prisma.TransactionClient,
+  bookingId: string
+): Promise<boolean> {
+  const booking = await tx.booking.findUniqueOrThrow({
+    where: { id: bookingId },
+    include: {
+      assignedProfessionalLead: {
+        select: { phoneE164: true, conversation: { select: { provider: true } } },
+      },
+      opportunities: { where: { status: "OPEN" }, select: { id: true } },
+    },
+  });
+  if (!ALLOWED_TRANSITIONS[booking.status].includes("CANCELLED")) return false;
+  const cancelled = await transitionBookingStatusInTransaction(tx, {
+    bookingId,
+    targetStatus: "CANCELLED",
+    actor: "customer:whatsapp",
+    reason: "Cancelado pelo cliente pelo WhatsApp",
+  });
+  if (!cancelled.ok) throw cancelled.error;
+  const openIds = booking.opportunities.map((opportunity) => opportunity.id);
+  if (openIds.length) {
+    await tx.serviceOpportunity.updateMany({
+      where: { id: { in: openIds }, status: "OPEN" },
+      data: { status: "CANCELLED" },
+    });
+    await tx.outboxMessage.updateMany({
+      where: {
+        correlationId: { in: openIds },
+        idempotencyKey: { endsWith: ":offer" },
+        status: { in: ["PENDING", "FAILED"] },
+      },
+      data: { status: "CANCELLED", lastError: "Pedido cancelado pelo cliente" },
+    });
+  }
+  const professional = booking.assignedProfessionalLead;
+  if (professional?.phoneE164 && booking.scheduledAt) {
+    await enqueueOutboundMessage(tx, {
+      provider: professional.conversation?.provider ?? "whatsmiau",
+      recipient: professional.phoneE164,
+      payload: textPayload(
+        `O contratante cancelou o pedido de ${formatScheduleForCustomer(booking.scheduledAt)}. Avisaremos quando surgir uma nova proposta.`
+      ),
+      idempotencyKey: `customer-booking:${booking.id}:cancelled:professional`,
+      correlationId: booking.id,
+      actor: "system:customer-conversation",
+    });
+  }
+  return true;
+}
+
 /** Moves the conversation to `state` and asks its question. */
 async function askStep(
   tx: Prisma.TransactionClient,
@@ -514,6 +585,9 @@ async function sendBookingToMatching(
     where: { id: booking.id },
     data: {
       neighborhood,
+      // Marca a confirmação do cliente: sem profissional elegível agora, o
+      // pedido é distribuído automaticamente quando alguém se inscrever.
+      confirmedAt: booking.confirmedAt ?? new Date(),
       // Sem validação de cobertura: o endereço é registrado e o pedido segue.
       coverageValidatedAt: booking.coverageValidatedAt ?? new Date(),
       outsideCoverageArea: false,
@@ -685,7 +759,11 @@ export async function controlCustomerConversation(
       const booking = current.booking;
       let target: CustomerConversationState;
       if (input.action === "resume") {
-        const step = customerResumeStep({ ...current, hasBooking: !!booking });
+        // Pausada por AJUDA depois do envio: retomar volta a "pedido enviado".
+        const step =
+          current.state === "PAUSED" && current.lastQuestionKey === "COMPLETED"
+            ? ("COMPLETED" as const)
+            : customerResumeStep({ ...current, hasBooking: !!booking });
         if (!step) return err("Esta conversa não está pausada ou em revisão.");
         target = step;
       } else if (input.action === "step") {
@@ -731,7 +809,8 @@ export async function controlCustomerConversation(
       if (
         booking &&
         ["restart", "close"].includes(input.action) &&
-        booking.status !== "CANCELLED"
+        booking.status !== "CANCELLED" &&
+        !DISPATCHED_BOOKING_STATUSES.includes(booking.status)
       )
         bookingTarget = "CANCELLED";
       else if (
@@ -1059,6 +1138,51 @@ export async function processCustomerBookingAnswer(
         }
         return { advanced: false, reason: "CONVERSATION_PAUSED" as const };
       }
+      // Pedido já enviado: CANCELAR cancela; AJUDA chama a equipe.
+      if (
+        latest?.state === "COMPLETED" &&
+        latest.bookingId &&
+        (CANCEL_COMMANDS.includes(normalizedText) || HELP_COMMANDS.includes(normalizedText))
+      ) {
+        const claimed = await tx.inboundMessage.updateMany({
+          where: { id: inbound.id, processedAt: null },
+          data: { processedAt: new Date() },
+        });
+        if (!claimed.count)
+          return { advanced: false, reason: "DUPLICATE_INBOUND" as const };
+        if (CANCEL_COMMANDS.includes(normalizedText)) {
+          const done = await cancelBookingByCustomer(tx, latest.bookingId);
+          await enqueueOutboundMessage(tx, {
+            provider: inbound.provider,
+            recipient: customer.phoneE164,
+            payload: textPayload(
+              done
+                ? "Pedido cancelado. Se precisar de outra limpeza, é só responder NOVO."
+                : "Este pedido já foi concluído ou cancelado. Para fazer um novo, responda NOVO."
+            ),
+            idempotencyKey: `customer-booking:${latest.id}:cancel:${inbound.id}`,
+            correlationId: latest.id,
+            actor: "system:customer-conversation",
+          });
+          return { advanced: false, reason: done ? ("BOOKING_CANCELLED" as const) : ("BOOKING_NOT_CANCELLABLE" as const) };
+        }
+        // lastQuestionKey stays COMPLETED: resuming returns to "request sent".
+        await tx.customerBookingConversation.update({
+          where: { id: latest.id },
+          data: { state: "PAUSED", automationPausedAt: new Date(), lastInboundAt: new Date(), version: { increment: 1 } },
+        });
+        await enqueueOutboundMessage(tx, {
+          provider: inbound.provider,
+          recipient: customer.phoneE164,
+          payload: textPayload(
+            "Certo. Uma pessoa da AllSet vai continuar seu atendimento por aqui. Se puder, conte em uma mensagem como podemos ajudar."
+          ),
+          idempotencyKey: `customer-booking:${latest.id}:help-after-sent:${inbound.id}`,
+          correlationId: latest.id,
+          actor: "system:customer-conversation",
+        });
+        return { advanced: false, reason: "HUMAN_HELP_REQUESTED" as const };
+      }
       // Um "obrigado" depois de enviar o pedido não deve abrir outro pedido:
       // responde com a situação atual e só recomeça quando o cliente pedir.
       if (
@@ -1164,6 +1288,22 @@ export async function processCustomerBookingAnswer(
         actor: "system:customer-conversation",
       });
       return { advanced: false, reason: "HUMAN_HELP_REQUESTED" as const };
+    }
+    if (CANCEL_COMMANDS.includes(normalizedText)) {
+      if (conversation.bookingId) await cancelBookingByCustomer(tx, conversation.bookingId);
+      const updated = await tx.customerBookingConversation.update({
+        where: { id: conversation.id },
+        data: { state: "COMPLETED", lastQuestionKey: "COMPLETED", lastInboundAt: new Date(), version: { increment: 1 } },
+      });
+      await enqueueOutboundMessage(tx, {
+        provider: updated.provider,
+        recipient: customer.phoneE164,
+        payload: textPayload("Pedido cancelado. Se precisar de uma limpeza, é só responder NOVO."),
+        idempotencyKey: `customer-booking:${updated.id}:cancelled:${inbound.id}`,
+        correlationId: updated.id,
+        actor: "system:customer-conversation",
+      });
+      return { advanced: false, reason: "BOOKING_CANCELLED" as const };
     }
     if (["PARAR", "STOP"].includes(normalizedText)) {
       const updated = await tx.customerBookingConversation.update({

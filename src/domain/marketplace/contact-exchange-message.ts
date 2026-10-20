@@ -37,6 +37,7 @@ export function formatCustomerContactMessage(input: ProfessionalContactInput): s
     "",
     "Fale direto com ela para combinar os detalhes e o valor do serviço.",
     "A AllSet apenas conecta vocês; o combinado é feito direto entre as partes.",
+    "Se precisar cancelar, responda CANCELAR.",
   ].join("\n");
 }
 
@@ -71,6 +72,7 @@ export function formatProfessionalContactMessage(input: CustomerContactInput): s
       : null,
     "",
     "A AllSet apenas conecta vocês; o combinado é feito direto entre as partes.",
+    "Se não puder mais atender, responda DESISTO.",
   ]
     .filter((line): line is string => line !== null)
     .join("\n");

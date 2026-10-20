@@ -200,6 +200,7 @@ export default async function LeadProfilePage({
   const latestDecision = lead.validationDecisions[0];
   const overdue = lead.nextActionAt != null && lead.nextActionAt < new Date();
   const status = lead.status;
+  const simpleRegistration = recruitmentConversation?.lastQuestionKey === "PROPOSAL_CONSENT" || Boolean(lead.proposalsAcceptedAt);
 
   // Sections visible based on current stage
   const showInterviews =
@@ -209,7 +210,7 @@ export default async function LeadProfilePage({
   const showAssessments =
     lead.assessments.length > 0;
   const showDocuments =
-    reachedStage(status, "DOCUMENTACAO") || lead.documents.length > 0;
+    (!simpleRegistration && reachedStage(status, "DOCUMENTACAO")) || lead.documents.length > 0;
   const showOnboarding =
     status === "ONBOARDING" || lead.onboardingProgress.length > 0;
   const showTest =
@@ -327,6 +328,13 @@ export default async function LeadProfilePage({
           </div>
         )}
 
+      <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700">
+        {lead.proposalsAcceptedAt
+          ? `Aceitou receber propostas pelo WhatsApp em ${lead.proposalsAcceptedAt.toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })}.`
+          : simpleRegistration
+            ? "Não está recebendo propostas. O aceite pode ser feito pelo WhatsApp com MENU."
+            : "Ainda não aceitou receber propostas pelo WhatsApp: não recebe ofertas até responder Sim."}
+      </p>
       <div id="proxima-acao"><RecruitmentDecisionPanel leadId={lead.id} status={lead.status} version={lead.version} phone={lead.phoneE164} /></div>
       <Card><CardHeader><CardTitle>Respostas do cadastro</CardTitle></CardHeader><CardContent><p className="whitespace-pre-line text-sm">{registrationSummary(lead)}</p>{lead.neighborhood && <p className="mt-2 text-xs text-slate-500">Bairro de moradia (cadastro antigo): {lead.neighborhood}</p>}</CardContent></Card>
 
