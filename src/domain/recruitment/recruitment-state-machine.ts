@@ -15,7 +15,8 @@ const stage = (forward: RecruitmentStatus[]): RecruitmentStatus[] => [...new Set
 
 export const ALLOWED_TRANSITIONS: Record<RecruitmentStatus, RecruitmentStatus[]> = {
   LEAD: stage(["PRE_CADASTRO"]),
-  PRE_CADASTRO: stage(["TRIAGEM"]),
+  // Cadastro simples: nome + aceite de propostas ativa direto.
+  PRE_CADASTRO: stage(["TRIAGEM", "ATIVA"]),
   TRIAGEM: stage(["CONVERSA_PENDENTE"]),
   CONVERSA_PENDENTE: stage(["ENTREVISTA", "DOCUMENTACAO"]),
   ENTREVISTA: stage(["REFERENCIA", "DOCUMENTACAO"]),

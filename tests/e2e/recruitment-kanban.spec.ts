@@ -59,7 +59,7 @@ test("kanban permite mover lead pelo teclado", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("cadastro recebido vai à análise e permite pedir documentos com aviso", async ({
+test("cadastro pelo WhatsApp com aceite vai direto para aprovadas", async ({
   page,
   request,
 }) => {
@@ -88,50 +88,17 @@ test("cadastro recebido vai à análise e permite pedir documentos com aviso", a
     });
     expect(response.ok()).toBeTruthy();
   };
-  for (const text of ["Oi", "2", name, "Caucaia", "3", "1 e 3", "1"])
-    await webhook(text);
+  // Cadastro simples: profissional, nome e aceite de propostas.
+  for (const text of ["Oi", "2", name, "1"]) await webhook(text);
   await page.goto("/admin/recruitment");
   const card = page
-    .getByTestId("column-TRIAGEM")
+    .getByTestId("column-ATIVA")
     .locator("article", { hasText: name });
   await expect(card).toBeVisible();
   await card.getByRole("link").click();
   await expect(
-    page.getByText("Caucaia", { exact: false }).first()
-  ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Analisar cadastro", exact: true })
-    .click();
-  await expect(page.getByRole("status")).toContainText("Ação registrada");
-  await page
-    .getByRole("button", { name: "Pedir documento", exact: true })
-    .click();
-  await page
-    .getByLabel("Documento ou ajuste necessário")
-    .fill("Documento de identidade");
-  await page
-    .getByRole("button", { name: "Confirmar decisão", exact: true })
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Aprovar", exact: true })
-  ).toBeVisible();
-  await expect(
-    page.getByText("Aguardar documento: Documento de identidade", {
-      exact: false,
-    })
-  ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Reprovar com motivo", exact: true })
-    .click();
-  await page.getByLabel("Motivo da decisão").fill("Dados não confirmados");
-  await page
-    .getByRole("button", { name: "Confirmar decisão", exact: true })
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Aprovar", exact: true })
-  ).toHaveCount(0);
-  await page.goto("/admin/recruitment");
-  await expect(
-    page.getByTestId("column-REPROVADA").getByText(name)
+    page
+      .getByText("Aceitou receber propostas pelo WhatsApp", { exact: false })
+      .first()
   ).toBeVisible();
 });

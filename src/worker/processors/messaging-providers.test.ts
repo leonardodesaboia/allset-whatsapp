@@ -11,6 +11,8 @@ vi.mock("@/infrastructure/observability/logger", () => ({ logger: { info: vi.fn(
 vi.mock("@/application/messaging/process-pending-received-audio.usecase", () => ({ processPendingReceivedAudio: mocks.processAudio }));
 vi.mock("@/application/messaging/dispatch-outbox.usecase", () => ({ dispatchNextOutboxMessage: mocks.dispatch }));
 vi.mock("@/infrastructure/jobs/publish-job", () => ({ publishJobSafe: mocks.publish }));
+vi.mock("@/application/marketplace/notify-opportunity.usecase", () => ({ retryConfirmedBookings: vi.fn().mockResolvedValue({ dispatched: 0 }) }));
+vi.mock("@/application/messaging/next-outbox-dispatch-at.usecase", () => ({ getNextOutboxDispatchAt: vi.fn().mockResolvedValue(null) }));
 
 beforeEach(() => {
   vi.resetModules(); vi.clearAllMocks();

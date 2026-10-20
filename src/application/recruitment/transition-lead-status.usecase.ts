@@ -21,6 +21,10 @@ async function assertTransitionPrerequisites(
   lead: RecruitmentLead,
   target: RecruitmentStatus,
 ): Promise<Result<true, DomainError>> {
+  // O cadastro simples ativa com o aceite explícito de propostas, sem
+  // documentos, entrevista ou aprovação manual.
+  if ((target === "ATIVA" || target === "PREFERENCIAL") && lead.proposalsAcceptedAt)
+    return ok(true);
   if (target === "REFERENCIA") {
     const completedInterview = await tx.leadInterview.count({
       where: { leadId: lead.id, endedAt: { not: null }, result: "REFERENCIA" },

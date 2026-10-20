@@ -15,14 +15,35 @@ export async function routeInboundText(
 ) {
   const pendingResponses = await prisma.opportunityResponse.findMany({
     where: {
-      lead: { phoneE164: input.phoneE164 },
+      lead: {
+        phoneE164: input.phoneE164,
+        proposalsAcceptedAt: { not: null },
+        status: { in: ["ATIVA", "PREFERENCIAL"] },
+      },
       response: null,
       opportunity: { status: "OPEN" },
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
     },
     orderBy: { sentAt: "asc" },
     select: { id: true, responseToken: true },
   });
   const reply = parseOpportunityReply(input.text);
+  // Códigos de propostas encerradas também recebem uma resposta contextual.
+  if (reply?.responseToken && !pendingResponses.some((response) => response.responseToken === reply.responseToken)) {
+    const previous = await prisma.opportunityResponse.findFirst({
+      where: { lead: { phoneE164: input.phoneE164 }, responseToken: reply.responseToken },
+      select: { id: true },
+    });
+    if (previous)
+      return {
+        routed: "opportunity" as const,
+        result: await processOpportunityResponse(prisma, {
+          responseId: previous.id,
+          text: input.text,
+          inboundMessageId: input.inboundMessageId,
+        }),
+      };
+  }
   // A pending offer must not swallow commands such as AJUDA or PARAR.
   const pendingResponse = reply?.responseToken
     ? pendingResponses.find((response) => response.responseToken === reply.responseToken)

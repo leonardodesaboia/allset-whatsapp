@@ -9,6 +9,9 @@ import { prisma } from "@/infrastructure/db/prisma-client";
 import { addLeadNote } from "@/application/recruitment/lead-notes.usecase";
 import { resumeRecruitmentConversation } from "@/application/recruitment/conversation-engine.usecase";
 import { createLeadUseCase } from "@/application/recruitment/create-lead.usecase";
+import { requestProposalConsentFromActiveProfessionals } from "@/application/recruitment/request-proposal-consent.usecase";
+import { publishJobSafe } from "@/infrastructure/jobs/publish-job";
+import { JOB_NAME } from "@/infrastructure/jobs/job-names";
 import { transitionLeadStatusUseCase } from "@/application/recruitment/transition-lead-status.usecase";
 import {
   addAssessment,
@@ -162,6 +165,19 @@ const workflowManagedStatuses = new Set<RecruitmentStatus>([
   "REFERENCIA",
   "EM_VALIDACAO",
 ]);
+/** Envia, uma única vez por profissional, o pedido de aceite de propostas. */
+export async function requestProposalConsentAction() {
+  const actor = await currentActor();
+  if (!actor) return result(false, "Sessão expirada.");
+  const { requested } = await requestProposalConsentFromActiveProfessionals(prisma, { actor });
+  await publishJobSafe({
+    name: JOB_NAME.MESSAGE_DISPATCH,
+    jobId: `proposal-consent-dispatch:${Date.now()}`,
+    payload: {},
+  });
+  revalidatePath("/admin/recruitment");
+  return requested ? result(true) : result(false, "Todas as profissionais ativas já receberam o pedido ou aceitaram.");
+}
 export async function moveLeadAction(input: {
   leadId: string;
   targetStatus: RecruitmentStatus;
