@@ -26,7 +26,6 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   const badges = {
     "/admin/recruitment": overview.leadsNeedingAttention,
     "/admin/customer-conversations": overview.conversationsPaused + overview.conversationsManualReview,
-    "/admin/documents": overview.documentsPending,
     "/admin/outbox": overview.outboxFailed + overview.outboxDeadLetter,
   };
 
@@ -58,7 +57,6 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           <NavLinkClient href="/admin/recruitment" badge={badges["/admin/recruitment"]} label="Profissionais" iconName="Users" />
           <NavLinkClient href="/admin/customer-conversations" badge={badges["/admin/customer-conversations"]} label="Conversas" iconName="MessageSquare" />
           <p className="px-2 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Operação</p>
-          <NavLinkClient href="/admin/documents" badge={badges["/admin/documents"]} label="Documentos" iconName="FileCheck" />
           <NavLinkClient href="/admin/outbox" badge={badges["/admin/outbox"]} label="Mensagens" iconName="Send" />
           <p className="px-2 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Configurações</p>
           <NavLinkClient href="/admin/settings/pricing" label="Preços" iconName="Settings" />

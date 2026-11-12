@@ -103,9 +103,8 @@ describe("notifyOpportunity", () => {
       [lead1.id, lead2.id].sort()
     );
     expect(
-      opportunity.responses.every((response) =>
-        /^[A-Z0-9]{10}$/.test(response.responseToken ?? "")
-      )
+      // Sem código: cada profissional tem uma proposta aberta por vez.
+      opportunity.responses.every((response) => response.responseToken === null)
     ).toBe(true);
 
     const outbox = await prisma.outboxMessage.findMany({

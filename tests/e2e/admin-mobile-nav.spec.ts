@@ -16,7 +16,7 @@ test("menu administrativo móvel abre, mantém foco e fecha por Escape sem overf
   await expect(dialog).toBeVisible();
   await expect(page.getByRole("button", { name: "Fechar menu" })).toBeFocused();
   await expect(dialog.getByRole("link", { name: "Profissionais" })).toBeVisible();
-  await expect(dialog.getByRole("link", { name: "Documentos" })).toBeVisible();
+  await expect(dialog.getByRole("link", { name: "Documentos" })).toHaveCount(0);
   await expect(dialog.getByRole("link", { name: "Mensagens" })).toBeVisible();
   await expect(dialog.getByRole("link", { name: "WhatsApp" })).toBeVisible();
 

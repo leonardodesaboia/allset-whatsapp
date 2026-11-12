@@ -4,7 +4,7 @@ import type { RecruitmentStatus } from "./recruitment-status";
 
 const mainStages: RecruitmentStatus[] = [
   "PRE_CADASTRO", "TRIAGEM", "CONVERSA_PENDENTE", "ENTREVISTA", "REFERENCIA",
-  "PRE_APROVADA", "DOCUMENTACAO", "ONBOARDING", "TESTE_OPERACIONAL",
+  "PRE_APROVADA", "ONBOARDING", "TESTE_OPERACIONAL",
   "EM_VALIDACAO", "ATIVA", "PREFERENCIAL",
 ];
 const commonExits: RecruitmentStatus[] = [
@@ -18,10 +18,12 @@ export const ALLOWED_TRANSITIONS: Record<RecruitmentStatus, RecruitmentStatus[]>
   // Cadastro simples: nome + aceite de propostas ativa direto.
   PRE_CADASTRO: stage(["TRIAGEM", "ATIVA"]),
   TRIAGEM: stage(["CONVERSA_PENDENTE"]),
-  CONVERSA_PENDENTE: stage(["ENTREVISTA", "DOCUMENTACAO"]),
-  ENTREVISTA: stage(["REFERENCIA", "DOCUMENTACAO"]),
-  REFERENCIA: stage(["PRE_APROVADA", "DOCUMENTACAO"]),
-  PRE_APROVADA: stage(["DOCUMENTACAO"]),
+  // Sem envio de documentos: a aprovação do admin ativa direto da análise.
+  CONVERSA_PENDENTE: stage(["ENTREVISTA", "ATIVA"]),
+  ENTREVISTA: stage(["REFERENCIA", "ATIVA"]),
+  REFERENCIA: stage(["PRE_APROVADA", "ATIVA"]),
+  PRE_APROVADA: stage(["ONBOARDING", "ATIVA"]),
+  // Etapa antiga, mantida só para quem ainda está nela.
   DOCUMENTACAO: stage(["ONBOARDING", "ATIVA"]),
   ONBOARDING: stage(["TESTE_OPERACIONAL", "ATIVA"]),
   TESTE_OPERACIONAL: stage(["EM_VALIDACAO", "ATIVA"]),

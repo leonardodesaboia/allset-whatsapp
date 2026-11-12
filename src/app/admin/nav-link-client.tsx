@@ -9,7 +9,6 @@ import {
   MessageSquare,
   Settings,
   Wifi,
-  FileCheck,
   Send,
   type LucideIcon,
 } from "lucide-react";
@@ -22,7 +21,6 @@ const ICONS: Record<string, LucideIcon> = {
   MessageSquare,
   Settings,
   Wifi,
-  FileCheck,
   Send,
 };
 

@@ -4,6 +4,7 @@ import { textPayload } from "../../domain/messaging/message";
 import { recordAuditLog } from "../audit/record-audit-log.usecase";
 import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
 import { customerBookingSummary } from "../../domain/customer/customer-booking-summary";
+import { releaseHeldOffers } from "./offer-delivery-state";
 
 /** Expires open opportunities that have not received an acceptance by their deadline. */
 export async function expireOpportunities(
@@ -61,6 +62,8 @@ export async function expireOpportunities(
         where: { opportunityId: candidate.id, response: null },
         data: { response: "EXPIRED", respondedAt: now },
       });
+      // Quem tinha esta proposta aberta recebe a próxima sem esperar.
+      await releaseHeldOffers(tx, pendingResponses.map((pending) => pending.lead.phoneE164), now);
 
       for (const pending of pendingResponses) {
         // Offers still queued never reached the professional: nothing to close.

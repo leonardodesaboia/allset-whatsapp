@@ -1,4 +1,3 @@
-import { recruitmentColumn } from "../../domain/recruitment/recruitment-pipeline";
 import type { PrismaClient } from "@prisma/client";
 import { env } from "../../env";
 import { textPayload } from "../../domain/messaging/message";
@@ -8,8 +7,9 @@ import { recordAuditLog } from "../audit/record-audit-log.usecase";
 import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
 import { transitionLeadStatusInTransaction } from "./transition-lead-status.usecase";
 
+/** Sem etapa de documentos: o admin aprova (aceite) direto da análise. */
 export type RecruitmentDecision =
-  "ANALYZE" | "REQUEST_DOCUMENT" | "APPROVE" | "REJECT" | "FUTURE" | "CONTACT";
+  "ANALYZE" | "APPROVE" | "REJECT" | "FUTURE" | "CONTACT";
 export async function recruitmentAdminDecision(
   prisma: PrismaClient,
   input: {
@@ -30,12 +30,12 @@ export async function recruitmentAdminDecision(
     );
   const reason = input.reason?.trim();
   if (
-    ["REJECT", "FUTURE", "REQUEST_DOCUMENT"].includes(input.action) &&
+    ["REJECT", "FUTURE"].includes(input.action) &&
     !reason
   )
     return err(
       new DomainError(
-        "Informe o motivo ou o documento necessário",
+        "Informe o motivo da decisão",
         "DECISION_REASON_REQUIRED"
       )
     );
@@ -56,11 +56,7 @@ export async function recruitmentAdminDecision(
           "LEAD_CONCURRENT_MODIFICATION"
         )
       );
-    if (
-      input.action === "CONTACT" ||
-      (input.action === "REQUEST_DOCUMENT" &&
-        recruitmentColumn(lead.status) === "DOCUMENTACAO")
-    ) {
+    if (input.action === "CONTACT") {
       if (!lead.phoneE164)
         return err(
           new DomainError(
@@ -73,10 +69,7 @@ export async function recruitmentAdminDecision(
         data: {
           version: { increment: 1 },
           lastInteractionAt: new Date(),
-          nextAction:
-            input.action === "CONTACT"
-              ? "Continuar atendimento pelo WhatsApp"
-              : `Aguardar documento: ${reason}`,
+          nextAction: "Continuar atendimento pelo WhatsApp",
           nextActionAt: new Date(),
         },
       });
@@ -88,7 +81,6 @@ export async function recruitmentAdminDecision(
           )
         );
       if (
-        input.action === "CONTACT" &&
         lead.conversation &&
         !["COMPLETED", "PAUSED", "MANUAL_REVIEW"].includes(
           lead.conversation.state
@@ -103,9 +95,7 @@ export async function recruitmentAdminDecision(
         provider: lead.conversation?.provider ?? env.MESSAGING_DEFAULT_PROVIDER,
         recipient: lead.phoneE164,
         payload: textPayload(
-          input.action === "CONTACT"
-            ? "Nossa equipe recebeu seu cadastro e vai continuar o atendimento com você por aqui. As perguntas automáticas estão pausadas."
-            : `Precisamos deste documento ou ajuste para continuar seu cadastro: ${reason}. Nossa equipe vai combinar por aqui como recebê-lo. Aguarde a orientação antes de enviar arquivos.`
+          "Nossa equipe recebeu seu cadastro e vai continuar o atendimento com você por aqui. As perguntas automáticas estão pausadas."
         ),
         idempotencyKey: `recruitment-admin:${lead.id}:${lead.version + 1}`,
         correlationId: lead.id,
@@ -131,7 +121,6 @@ export async function recruitmentAdminDecision(
     const targetStatus = (
       {
         ANALYZE: "CONVERSA_PENDENTE",
-        REQUEST_DOCUMENT: "DOCUMENTACAO",
         APPROVE: "ATIVA",
         REJECT: "REPROVADA",
         FUTURE: "BASE_FUTURA",
@@ -148,16 +137,8 @@ export async function recruitmentAdminDecision(
       where: { id: lead.id },
       data: {
         nextAction:
-          targetStatus === "DOCUMENTACAO"
-            ? `Aguardar documento: ${reason}`
-            : targetStatus === "CONVERSA_PENDENTE"
-              ? "Conferir cadastro e solicitar documentos"
-              : null,
-        nextActionAt: ["DOCUMENTACAO", "CONVERSA_PENDENTE"].includes(
-          targetStatus
-        )
-          ? new Date()
-          : null,
+          targetStatus === "CONVERSA_PENDENTE" ? "Conferir cadastro e aprovar" : null,
+        nextActionAt: targetStatus === "CONVERSA_PENDENTE" ? new Date() : null,
       },
     });
     return ok(true);

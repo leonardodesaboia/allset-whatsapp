@@ -468,7 +468,10 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
     const offer = await prisma.opportunityResponse.findFirstOrThrow({
       where: { opportunity: { bookingId: conv.bookingId! }, lead: { phoneE164: first.phone } },
     });
-    await receive(first.phone, `SIM ${offer.responseToken}`);
+    // A proposta precisa ter chegado antes do aceite.
+    expect(offer.expiresAt).toBeNull();
+    await drainOutbox();
+    await receive(first.phone, "SIM");
     await receive(first.phone, "desisto");
     const booking = await prisma.booking.findUniqueOrThrow({ where: { id: conv.bookingId! } });
     expect(booking.status).toBe("MATCHING");
@@ -602,6 +605,8 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
         lead: { phoneE164: professional.phone },
       },
     });
+    // Na fila ainda não há prazo individual; o prazo começa no envio.
+    expect(offer.expiresAt).toBeNull();
     const offerText = (await drainOutbox())
       .filter((item) => item.recipient === professional.phone)
       .at(-1)!.text;
@@ -612,7 +617,8 @@ describe("WhatsApp conversation flows (isolated PostgreSQL, no real messages)", 
     // O endereço completo só vai para quem aceitar.
     expect(offerText).not.toContain("Rua Teste, 123");
 
-    await receive(professional.phone, `SIM ${offer.responseToken}`);
+    expect(offerText).toContain("1 — SIM, aceito");
+    await receive(professional.phone, "SIM");
     const booking = await prisma.booking.findUniqueOrThrow({
       where: { id: conv.bookingId! },
     });

@@ -38,7 +38,7 @@ describe("recruitment progression gates", () => {
     if (stop) await stop();
   });
 
-  async function leadAt(status: "DOCUMENTACAO" | "TESTE_OPERACIONAL") {
+  async function leadAt(status: "PRE_APROVADA" | "DOCUMENTACAO" | "TESTE_OPERACIONAL") {
     sequence += 1;
     return prisma.recruitmentLead.create({
       data: {
@@ -134,31 +134,14 @@ describe("recruitment progression gates", () => {
     expect((await prisma.recruitmentLead.findUniqueOrThrow({ where: { id: lead.id } })).status).toBe("AGUARDANDO_COMPLEMENTACAO");
   });
 
-  it("blocks DOCUMENTACAO → ONBOARDING until required documents are approved and active terms are accepted", async () => {
-    const lead = await leadAt("DOCUMENTACAO");
-    const requirement = await prisma.documentRequirement.create({
+  it("blocks PRE_APROVADA → ONBOARDING only until active terms are accepted, ignoring old document requirements", async () => {
+    const lead = await leadAt("PRE_APROVADA");
+    // Requisitos antigos continuam no banco, mas não bloqueiam mais.
+    await prisma.documentRequirement.create({
       data: { key: `identity-${sequence}`, name: "Documento de identidade", required: true },
     });
     const terms = await prisma.termsVersion.create({
       data: { version: `v${sequence}`, content: "Termos obrigatórios", isActive: true },
-    });
-
-    const missingEvidence = await transitionLeadStatusUseCase(prisma, {
-      leadId: lead.id,
-      targetStatus: "ONBOARDING",
-      actor: adminEmail,
-    });
-    expect(missingEvidence).toMatchObject({ ok: false, error: { code: "REQUIRED_DOCUMENTS_NOT_APPROVED" } });
-
-    await prisma.professionalDocument.create({
-      data: {
-        leadId: lead.id,
-        requirementId: requirement.id,
-        storageKey: `documents/${lead.id}/identity.pdf`,
-        contentType: "application/pdf",
-        sizeBytes: 10,
-        status: "APPROVED",
-      },
     });
 
     const missingTerms = await transitionLeadStatusUseCase(prisma, {
@@ -241,41 +224,11 @@ describe("recruitment progression gates", () => {
     expect(outbound?.payload).toMatchObject({ text: expect.stringContaining("Cadastro concluído") });
   });
 
-  async function leadWithDuplicateIdentity() {
+  it("um cadastro antigo em DOCUMENTACAO avança sem documentos, só com os termos aceitos", async () => {
     const lead = await leadAt("DOCUMENTACAO");
-    // Isolate the required-document configuration in this disposable database.
-    await prisma.documentRequirement.updateMany({ data: { isActive: false } });
-    await prisma.documentRequirement.createMany({ data: ["identity", "proof"].map((key) => ({
-      key: `extra-${key}-${lead.id}`, name: key, required: true,
-    })) });
-    const requirements = await prisma.documentRequirement.findMany({ where: { isActive: true, required: true }, orderBy: { id: "asc" } });
-    expect(requirements).toHaveLength(2);
-    const first = requirements[0]!;
-    // The raw number of files equals the number of requirements, but all files
-    // prove the same requirement. Missing requirements must still block entry.
-    await prisma.professionalDocument.createMany({ data: requirements.map((_, index) => ({
-      leadId: lead.id, requirementId: first.id, status: "APPROVED" as const,
-      storageKey: `test/${lead.id}/duplicate-${index}`, contentType: "application/pdf", sizeBytes: 10,
-    })) });
     const terms = await prisma.termsVersion.findMany({ where: { isActive: true } });
     await prisma.termsAcceptance.createMany({ data: terms.map((term) => ({
       leadId: lead.id, termsVersionId: term.id, channel: "admin", consentId: `test:${lead.id}:${term.id}`,
-    })) });
-    return { lead, missingRequirement: requirements[1]! };
-  }
-
-  it("bloqueia duas versões aprovadas do mesmo requisito quando outro obrigatório está ausente", async () => {
-    const { lead } = await leadWithDuplicateIdentity();
-    expect(await transitionLeadStatusUseCase(prisma, { leadId: lead.id, targetStatus: "ONBOARDING", actor: adminEmail }))
-      .toMatchObject({ ok: false, error: { code: "REQUIRED_DOCUMENTS_NOT_APPROVED" } });
-    expect((await prisma.recruitmentLead.findUniqueOrThrow({ where: { id: lead.id } })).status).toBe("DOCUMENTACAO");
-  });
-
-  it("libera requisito com versão rejeitada e versão aprovada sem bloquear pelo histórico", async () => {
-    const { lead, missingRequirement } = await leadWithDuplicateIdentity();
-    await prisma.professionalDocument.createMany({ data: (["REJECTED", "APPROVED"] as const).map((status) => ({
-      leadId: lead.id, requirementId: missingRequirement.id, status,
-      storageKey: `test/${lead.id}/${missingRequirement.id}/${status}`, contentType: "application/pdf", sizeBytes: 10,
     })) });
     expect((await transitionLeadStatusUseCase(prisma, { leadId: lead.id, targetStatus: "ONBOARDING", actor: adminEmail })).ok).toBe(true);
     expect((await prisma.recruitmentLead.findUniqueOrThrow({ where: { id: lead.id } })).status).toBe("ONBOARDING");

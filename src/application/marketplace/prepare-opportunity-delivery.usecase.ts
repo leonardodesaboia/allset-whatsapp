@@ -2,14 +2,19 @@ import type { OutboxMessage, PrismaClient } from "@prisma/client";
 import { env } from "../../env";
 import { formatOpportunityMessage } from "../../domain/marketplace/opportunity-message";
 import { isEligibleForOpportunity } from "../../domain/marketplace/opportunity-matching-policy";
-import { textPayload } from "../../domain/messaging/message";
-import { randomUUID } from "node:crypto";
+import { textPayload, type TextMessagePayload } from "../../domain/messaging/message";
+
+export interface PreparedOpportunityDelivery {
+  payload: TextMessagePayload;
+  /** Gravado só quando o provider confirma o envio: antes disso a proposta não vale. */
+  delivery: { responseId: string; sentAt: Date; expiresAt: Date };
+}
 
 /** Atualiza local público e prazo no momento do envio, inclusive em retries. */
 export async function prepareOpportunityDelivery(
   prisma: PrismaClient,
   message: OutboxMessage
-) {
+): Promise<PreparedOpportunityDelivery | null> {
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "ServiceOpportunity" WHERE id = ${message.correlationId} FOR UPDATE`;
     const opportunity = await tx.serviceOpportunity.findUnique({
@@ -54,16 +59,16 @@ export async function prepareOpportunityDelivery(
       });
       return null;
     }
-    // O prazo começa no envio e nunca passa do horário do serviço.
+    // O prazo é individual, começa no envio e nunca passa do horário do serviço.
+    // A próxima proposta da mesma profissional espera esta ser respondida,
+    // encerrada ou vencer.
+    const sentAt = new Date();
     const expiresAt = new Date(
       Math.min(
-        Date.now() + env.OPPORTUNITY_EXPIRY_HOURS * 60 * 60 * 1000,
+        sentAt.getTime() + env.OPPORTUNITY_RESPONSE_MINUTES * 60 * 1000,
         opportunity.scheduledAt.getTime()
       )
     );
-    const responseToken =
-      response.responseToken ??
-      randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase();
     const payload = textPayload(
       formatOpportunityMessage({
         neighborhood:
@@ -73,7 +78,7 @@ export async function prepareOpportunityDelivery(
         paymentCents: opportunity.paymentCents,
         serviceDetails: opportunity.booking.customerNotes,
         expiresAt,
-        responseToken,
+        sentAt,
       })
     );
     const updated = await tx.outboxMessage.updateMany({
@@ -81,14 +86,10 @@ export async function prepareOpportunityDelivery(
       data: { payload: { ...payload } },
     });
     if (!updated.count) return null;
-    await tx.opportunityResponse.update({
-      where: { id: response.id },
-      data: { expiresAt, responseToken },
-    });
     await tx.serviceOpportunity.updateMany({
       where: { id: opportunity.id, expiresAt: { lt: expiresAt } },
       data: { expiresAt },
     });
-    return payload;
+    return { payload, delivery: { responseId: response.id, sentAt, expiresAt } };
   });
 }

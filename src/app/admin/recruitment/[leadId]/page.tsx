@@ -9,15 +9,12 @@ import {
   Clock,
   AlertCircle,
   CheckCircle2,
-  XCircle,
-  FileText,
   BookOpen,
   Beaker,
   ShieldCheck,
   Pin,
   Calendar,
   MessageCircle,
-  Upload,
 } from "lucide-react";
 import { prisma } from "@/infrastructure/db/prisma-client";
 import { LeadWorkflowActions } from "../lead-workflow-actions";
@@ -30,8 +27,6 @@ import { ActionFeedbackForm } from "@/components/ui/action-feedback-form";
 import { ConversationPanel } from "../conversation-panel";
 import type { ConversationMessage } from "../conversation-panel";
 import {
-  reviewDocumentAction,
-  uploadProfessionalDocumentAction,
   completeOnboardingContentAction,
   startOperationalTestAction,
   recordOperationalTestEventAction,
@@ -45,33 +40,6 @@ import {
   currentOperationalTestMilestone,
   nextOperationalTestMilestone,
 } from "@/application/recruitment/onboarding-operational-test.usecase";
-
-const PIPELINE_ORDER = [
-  "LEAD",
-  "PRE_CADASTRO",
-  "TRIAGEM",
-  "CONVERSA_PENDENTE",
-  "ENTREVISTA",
-  "REFERENCIA",
-  "PRE_APROVADA",
-  "DOCUMENTACAO",
-  "ONBOARDING",
-  "TESTE_OPERACIONAL",
-  "EM_VALIDACAO",
-  "ATIVA",
-  "PREFERENCIAL",
-] as const;
-
-function reachedStage(
-  currentStatus: string,
-  target: (typeof PIPELINE_ORDER)[number]
-): boolean {
-  const current = PIPELINE_ORDER.indexOf(
-    currentStatus as (typeof PIPELINE_ORDER)[number]
-  );
-  if (current === -1) return true; // estágios especiais (LIGACAO_SOLICITADA, etc.) — mostrar tudo
-  return current >= PIPELINE_ORDER.indexOf(target);
-}
 
 const REFERENCE_LABELS: Record<string, string> = {
   PENDING: "Pendente",
@@ -101,7 +69,6 @@ export default async function LeadProfilePage({
 
   const [
     lead,
-    requirements,
     onboardingContents,
     validationPolicy,
     activeTerms,
@@ -120,13 +87,6 @@ export default async function LeadProfilePage({
           include: { verifications: { orderBy: { createdAt: "desc" } } },
           orderBy: { createdAt: "desc" },
         },
-        documents: {
-          include: {
-            requirement: true,
-            reviews: { orderBy: { createdAt: "desc" }, take: 1 },
-          },
-          orderBy: { receivedAt: "desc" },
-        },
         termsAcceptances: true,
         onboardingProgress: { include: { content: true } },
         operationalTests: {
@@ -137,10 +97,6 @@ export default async function LeadProfilePage({
         validationServices: { orderBy: { createdAt: "desc" } },
         validationDecisions: { orderBy: { createdAt: "desc" }, take: 1 },
       },
-    }),
-    prisma.documentRequirement.findMany({
-      where: { isActive: true },
-      orderBy: { name: "asc" },
     }),
     prisma.onboardingContent.findMany({
       where: { isActive: true },
@@ -209,8 +165,6 @@ export default async function LeadProfilePage({
     status === "REFERENCIA" || lead.references.length > 0;
   const showAssessments =
     lead.assessments.length > 0;
-  const showDocuments =
-    (!simpleRegistration && reachedStage(status, "DOCUMENTACAO")) || lead.documents.length > 0;
   const showOnboarding =
     status === "ONBOARDING" || lead.onboardingProgress.length > 0;
   const showTest =
@@ -504,128 +458,8 @@ export default async function LeadProfilePage({
         </Card>
       )}
 
-      {/* Documentos */}
-      {showDocuments && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-1.5">
-              <FileText className="w-3.5 h-3.5" aria-hidden />
-              Documentos
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {requirements.length === 0 ? (
-              <p className="text-sm text-slate-400">
-                Nenhum requisito documental configurado.
-              </p>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {requirements.map((req) => {
-                  const doc = lead.documents.find(
-                    (d) => d.requirementId === req.id
-                  );
-                  return (
-                    <div
-                      key={req.id}
-                      className="py-3 flex items-start gap-3 text-sm"
-                    >
-                      <div className="flex-1">
-                        <p className="font-semibold text-slate-900">
-                          {req.name}
-                          {req.required && (
-                            <span
-                              className="ml-1 text-red-500 text-xs"
-                              aria-label="obrigatório"
-                            >
-                              *
-                            </span>
-                          )}
-                        </p>
-                        {doc ? (
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {doc.contentType} ·{" "}
-                            {(doc.sizeBytes / 1024).toFixed(0)} KB
-                            {doc.reviews[0]?.reason &&
-                              ` — ${doc.reviews[0].reason}`}
-                          </p>
-                        ) : (
-                          <p className="text-xs text-slate-400 italic mt-0.5">
-                            Não enviado
-                          </p>
-                        )}
-                      </div>
-                      {doc ? (
-                        <div className="flex items-center gap-2 shrink-0">
-                          <Badge
-                            variant={
-                              doc.status === "APPROVED"
-                                ? "success"
-                                : doc.status === "REJECTED"
-                                  ? "destructive"
-                                  : "warning"
-                            }
-                          >
-                            {doc.status === "RECEIVED"
-                              ? "Aguardando"
-                              : doc.status === "APPROVED"
-                                ? "Aprovado"
-                                : doc.status === "REJECTED"
-                                  ? "Rejeitado"
-                                  : doc.status}
-                          </Badge>
-                          {doc.status === "RECEIVED" && (
-                            <div className="flex gap-1">
-                              <ActionFeedbackForm
-                                action={async () => {
-                                  "use server";
-                                  return reviewDocumentAction({
-                                    documentId: doc.id,
-                                    leadId,
-                                    status: "APPROVED",
-                                  });
-                                }}
-                              >
-                                <ConfirmButton
-                                  message={`Aprovar "${req.name}"?`}
-                                  className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
-                                >
-                                  <CheckCircle2
-                                    className="w-3 h-3"
-                                    aria-hidden
-                                  />{" "}
-                                  Aprovar
-                                </ConfirmButton>
-                              </ActionFeedbackForm>
-                              <RejectDocumentForm
-                                documentId={doc.id}
-                                leadId={leadId}
-                                reqName={req.name}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      ) : status === "DOCUMENTACAO" ? (
-                        <UploadDocumentForm
-                          leadId={leadId}
-                          requirementId={req.id}
-                          reqName={req.name}
-                        />
-                      ) : (
-                        <XCircle
-                          className="w-4 h-4 text-slate-300 shrink-0 mt-0.5"
-                          aria-hidden
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {showDocuments && activeTerms.length > 0 && (
+      {/* Aceite dos termos: o admin registra o aceite confirmado com a profissional. */}
+      {activeTerms.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Termos ativos</CardTitle>
@@ -1055,96 +889,6 @@ export default async function LeadProfilePage({
   );
 }
 
-function RejectDocumentForm({
-  documentId,
-  leadId,
-  reqName,
-}: {
-  documentId: string;
-  leadId: string;
-  reqName: string;
-}) {
-  return (
-    <ActionFeedbackForm
-      className="inline-flex items-center gap-1"
-      action={async (data) => {
-        "use server";
-        const reason = data.get("reason") as string | null;
-        return reviewDocumentAction({
-          documentId,
-          leadId,
-          status: "REJECTED",
-          ...(reason ? { reason } : {}),
-        });
-      }}
-    >
-      <label htmlFor={`reject-reason-${documentId}`} className="sr-only">
-        Motivo da rejeição de {reqName}
-      </label>
-      <input
-        id={`reject-reason-${documentId}`}
-        name="reason"
-        placeholder="Motivo"
-        required
-        className="rounded border border-slate-300 px-2 py-0.5 text-xs w-36 focus:outline-none focus:ring-1 focus:ring-red-400"
-      />
-      <SubmitButtonRaw
-        className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-red-50 text-red-700 hover:bg-red-100 border border-red-200"
-        aria-label={`Rejeitar ${reqName}`}
-      >
-        <XCircle className="w-3 h-3" aria-hidden /> Rejeitar
-      </SubmitButtonRaw>
-    </ActionFeedbackForm>
-  );
-}
-
-/** WhatsApp-native upload isn't implemented yet (the messaging domain has no
- * IMAGE/DOCUMENT payload type) — this lets the admin register a document
- * received by another channel (call, in-person, email) in the meantime. */
-function UploadDocumentForm({
-  leadId,
-  requirementId,
-  reqName,
-}: {
-  leadId: string;
-  requirementId: string;
-  reqName: string;
-}) {
-  return (
-    <ActionFeedbackForm
-      className="flex items-center gap-1 shrink-0"
-      action={async (data) => {
-        "use server";
-        const file = data.get("file");
-        if (!(file instanceof File) || file.size === 0)
-          return { ok: false, error: "Selecione um arquivo." };
-        return uploadProfessionalDocumentAction({
-          leadId,
-          requirementId,
-          file,
-        });
-      }}
-    >
-      <label htmlFor={`upload-document-${requirementId}`} className="sr-only">
-        Enviar {reqName}
-      </label>
-      <input
-        id={`upload-document-${requirementId}`}
-        name="file"
-        type="file"
-        accept="image/jpeg,image/png,application/pdf"
-        required
-        className="text-xs w-32 sm:w-40 text-slate-600 file:mr-2 file:rounded file:border-0 file:bg-slate-100 file:px-2 file:py-0.5 file:text-xs file:font-medium"
-      />
-      <SubmitButtonRaw
-        className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200"
-        aria-label={`Enviar ${reqName}`}
-      >
-        <Upload className="w-3 h-3" aria-hidden /> Enviar
-      </SubmitButtonRaw>
-    </ActionFeedbackForm>
-  );
-}
 
 function RecordValidationServiceForm({ leadId }: { leadId: string }) {
   return (

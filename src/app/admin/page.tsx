@@ -6,7 +6,6 @@ import {
   Clock,
   XCircle,
   Star,
-  FileText,
   BookOpen,
   Beaker,
   ShieldCheck,
@@ -17,7 +16,6 @@ import {
   MessageSquare,
   PauseCircle,
   Send,
-  FileCheck,
   Megaphone,
   Wifi,
   Settings,
@@ -115,15 +113,6 @@ export default async function AdminHomePage() {
       hint: "Serão reenviadas sozinhas; verifique o erro se persistir.",
       href: "/admin/outbox",
       icon: Send,
-      tone: "amber" as const,
-    },
-    {
-      key: "docs",
-      count: overview.documentsPending,
-      label: "documentos aguardando revisão",
-      hint: "Aprove ou rejeite para liberar profissionais.",
-      href: "/admin/documents",
-      icon: FileCheck,
       tone: "amber" as const,
     },
     {
@@ -345,7 +334,7 @@ export default async function AdminHomePage() {
         </Link>
       </section>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         <SummaryCard
           href="/admin/recruitment"
           title="Profissionais no funil"
@@ -365,12 +354,6 @@ export default async function AdminHomePage() {
             overview.conversationsPaused + overview.conversationsManualReview
           }
           note="pausadas ou em revisão"
-        />
-        <SummaryCard
-          href="/admin/documents"
-          title="Documentos"
-          value={overview.documentsPending}
-          note="aguardando revisão"
         />
       </div>
 
@@ -515,7 +498,6 @@ const FUNNEL_STAGES = [
   { status: "ENTREVISTA", label: "Entrevista", icon: Mic },
   { status: "REFERENCIA", label: "Referência", icon: Users },
   { status: "PRE_APROVADA", label: "Pré-aprovada", icon: ThumbsUp },
-  { status: "DOCUMENTACAO", label: "Documentação", icon: FileText },
   { status: "ONBOARDING", label: "Onboarding", icon: BookOpen },
   { status: "TESTE_OPERACIONAL", label: "Teste operacional", icon: Beaker },
   { status: "EM_VALIDACAO", label: "Em validação", icon: ShieldCheck },

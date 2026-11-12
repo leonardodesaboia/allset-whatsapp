@@ -40,14 +40,7 @@ async function assertTransitionPrerequisites(
   }
 
   if (target === "ONBOARDING" || target === "ATIVA" || target === "PREFERENCIAL") {
-    const requirements = await tx.documentRequirement.findMany({ where: { isActive: true, required: true }, select: { id: true } });
-    const approved = requirements.length === 0 ? [] : await tx.professionalDocument.findMany({
-      where: { leadId: lead.id, requirementId: { in: requirements.map((requirement) => requirement.id) }, status: "APPROVED" },
-      select: { requirementId: true },
-      distinct: ["requirementId"],
-    });
-    if (approved.length !== requirements.length) return err(new DomainError("Todos os documentos obrigatórios precisam estar aprovados", "REQUIRED_DOCUMENTS_NOT_APPROVED"));
-
+    // Sem etapa de documentos: só o aceite dos termos ativos é exigido.
     const activeTerms = await tx.termsVersion.count({ where: { isActive: true } });
     if (activeTerms) {
       const acceptances = await tx.termsAcceptance.count({ where: { leadId: lead.id, termsVersion: { isActive: true } } });
@@ -100,7 +93,6 @@ export async function transitionLeadStatusInTransaction(tx: Prisma.TransactionCl
     await recordAuditLog(tx, { actor: input.actor, action: "LEAD_STATUS_TRANSITION", entityType: "RecruitmentLead", entityId: current.id, metadata: { from: current.status, to: input.targetStatus, override: Boolean(override), reason } });
     const notices: Partial<Record<RecruitmentStatus, string>> = {
       CONVERSA_PENDENTE: "Estamos analisando seu cadastro na AllSet. Se precisarmos de mais alguma informação, falaremos por aqui.",
-      DOCUMENTACAO: "Para continuar seu cadastro na AllSet, precisamos conferir seus documentos. Nossa equipe vai combinar por aqui como recebê-los. Aguarde a orientação antes de enviar arquivos." + (input.reason ? ` Pendência: ${input.reason.trim()}.` : ""),
       ATIVA: "Seu cadastro na AllSet foi aprovado! Você pode receber oportunidades pelo WhatsApp e escolher se quer aceitar. Ao aceitar, vocês recebem os contatos para combinar diretamente. Não há garantia de quantidade de oportunidades.",
       PREFERENCIAL: "Seu cadastro está aprovado como profissional preferencial da AllSet. Você escolhe quais oportunidades quer aceitar.",
       REPROVADA: `Após a análise, seu cadastro na AllSet não foi aprovado. Motivo: ${reason ?? ""}. Se quiser esclarecer, responda AJUDA.`,
