@@ -5,7 +5,8 @@ export const RECRUITMENT_COLUMNS = [
   { status: "PRE_CADASTRO", label: "Em cadastro" },
   { status: "TRIAGEM", label: "Cadastro recebido" },
   { status: "CONVERSA_PENDENTE", label: "Em análise" },
-  { status: "DOCUMENTACAO", label: "Documentos" },
+  // Sem envio de documentos: agrupa só cadastros antigos ainda em validação.
+  { status: "DOCUMENTACAO", label: "Em validação" },
   { status: "ATIVA", label: "Aprovadas" },
   { status: "BASE_FUTURA", label: "Base futura" },
   { status: "REPROVADA", label: "Reprovadas" },

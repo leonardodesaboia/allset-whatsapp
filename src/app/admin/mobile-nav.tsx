@@ -115,7 +115,6 @@ export function MobileNav({ admin, initials, badges = {} }: MobileNavProps) {
               <NavLinkClient href="/admin/recruitment" badge={badges["/admin/recruitment"]} label="Profissionais" iconName="Users" onClick={close} />
               <NavLinkClient href="/admin/customer-conversations" badge={badges["/admin/customer-conversations"]} label="Conversas" iconName="MessageSquare" onClick={close} />
               <p className="px-2 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Operação</p>
-              <NavLinkClient href="/admin/documents" badge={badges["/admin/documents"]} label="Documentos" iconName="FileCheck" onClick={close} />
               <NavLinkClient href="/admin/outbox" badge={badges["/admin/outbox"]} label="Mensagens" iconName="Send" onClick={close} />
               <p className="px-2 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Configurações</p>
               <NavLinkClient href="/admin/settings/pricing" label="Preços" iconName="Settings" onClick={close} />

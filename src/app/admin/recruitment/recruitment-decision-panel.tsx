@@ -7,8 +7,7 @@ import { recruitmentColumn } from "@/domain/recruitment/recruitment-pipeline";
 import { recruitmentDecisionAction } from "./actions";
 import { Button } from "@/components/ui/button";
 
-type Decision =
-  "ANALYZE" | "REQUEST_DOCUMENT" | "APPROVE" | "REJECT" | "FUTURE" | "CONTACT";
+type Decision = "ANALYZE" | "APPROVE" | "REJECT" | "FUTURE" | "CONTACT";
 export function RecruitmentDecisionPanel({
   leadId,
   status,
@@ -64,8 +63,8 @@ export function RecruitmentDecisionPanel({
     >
       <h2 className="text-sm font-semibold">Próxima ação</h2>
       <p className="text-sm">
-        Confira as respostas e os documentos antes de aprovar. As decisões
-        avisam a profissional pelo WhatsApp.
+        Confira as respostas antes de aprovar. As decisões avisam a
+        profissional pelo WhatsApp.
       </p>
       <div className="flex flex-wrap gap-2">
         {["TRIAGEM", "BASE_FUTURA"].includes(column) && (
@@ -75,19 +74,8 @@ export function RecruitmentDecisionPanel({
         )}
         {actionable && (
           <>
+            {/* Sem envio de documentos: o admin aprova direto da análise. */}
             {column !== "TRIAGEM" && (
-              <Button
-                disabled={pending}
-                variant="outline"
-                onClick={() => {
-                  setSelected("REQUEST_DOCUMENT");
-                  setReason("");
-                }}
-              >
-                Pedir documento
-              </Button>
-            )}
-            {column === "DOCUMENTACAO" && (
               <Button
                 disabled={pending}
                 variant="success"
@@ -138,14 +126,11 @@ export function RecruitmentDecisionPanel({
         >
           {selected === "APPROVE" ? (
             <p>
-              Confirmar aprovação? Todos os documentos obrigatórios precisam
-              estar aprovados e os termos ativos aceitos.
+              Confirmar aprovação? Os termos ativos precisam estar aceitos.
             </p>
           ) : (
             <label className="block text-sm">
-              {selected === "REQUEST_DOCUMENT"
-                ? "Documento ou ajuste necessário"
-                : "Motivo da decisão"}
+              Motivo da decisão
               <textarea
                 required
                 maxLength={500}

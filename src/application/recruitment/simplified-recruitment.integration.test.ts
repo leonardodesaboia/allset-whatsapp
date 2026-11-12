@@ -187,67 +187,33 @@ describe("cadastro e análise simplificados", () => {
         ?.leads.some((lead) => lead.status === "EM_VALIDACAO")
     ).toBe(true);
   });
-  it("aprovação direta e override exigem todos os documentos distintos e termos ativos", async () => {
+  it("aprovação direta e override exigem só os termos ativos, sem documentos", async () => {
     const { lead } = await start();
     await prisma.recruitmentLead.update({
       where: { id: lead.id },
-      data: { status: "DOCUMENTACAO", fullName: "Ana Silva" },
+      data: { status: "CONVERSA_PENDENTE", fullName: "Ana Silva" },
     });
-    const requirements = await Promise.all(
-      ["identity", "proof"].map((key) =>
-        prisma.documentRequirement.create({
-          data: { key, name: key, required: true },
-        })
-      )
-    );
+    // Requisitos antigos continuam no banco, mas não bloqueiam mais.
+    await prisma.documentRequirement.create({
+      data: { key: "identity", name: "identity", required: true },
+    });
     const terms = await prisma.termsVersion.create({
       data: { version: "v1", content: "Termos", isActive: true },
     });
-    const move = () =>
-      transitionLeadStatusUseCase(prisma, {
+    expect(
+      await transitionLeadStatusUseCase(prisma, {
         leadId: lead.id,
         targetStatus: "ATIVA",
         actor,
         override: { reason: "Recuperação" },
-      });
-    expect(await move()).toMatchObject({
-      ok: false,
-      error: { code: "REQUIRED_DOCUMENTS_NOT_APPROVED" },
-    });
-    for (let i = 0; i < 2; i++)
-      await prisma.professionalDocument.create({
-        data: {
-          leadId: lead.id,
-          requirementId: requirements[0]!.id,
-          status: "APPROVED",
-          storageKey: `identity-${i}`,
-          contentType: "application/pdf",
-          sizeBytes: 10,
-        },
-      });
-    expect(await move()).toMatchObject({
-      ok: false,
-      error: { code: "REQUIRED_DOCUMENTS_NOT_APPROVED" },
-    });
-    await prisma.professionalDocument.create({
-      data: {
-        leadId: lead.id,
-        requirementId: requirements[1]!.id,
-        status: "APPROVED",
-        storageKey: "proof",
-        contentType: "application/pdf",
-        sizeBytes: 10,
-      },
-    });
-    expect(await move()).toMatchObject({
-      ok: false,
-      error: { code: "ACTIVE_TERMS_NOT_ACCEPTED" },
-    });
+      })
+    ).toMatchObject({ ok: false, error: { code: "ACTIVE_TERMS_NOT_ACCEPTED" } });
+    // O admin registra o aceite dos termos confirmado com a profissional.
     await prisma.termsAcceptance.create({
       data: {
         leadId: lead.id,
         termsVersionId: terms.id,
-        channel: "WHATSAPP",
+        channel: "admin-confirmed:admin",
         consentId: randomUUID(),
       },
     });
@@ -306,12 +272,9 @@ describe("cadastro e análise simplificados", () => {
       text: expect.stringContaining("Dados não confirmados"),
     });
   });
-  it("percorre análise/documentos, repete pedido em etapa antiga e mantém aprovação no atendimento", async () => {
+  it("o admin analisa e aprova direto, sem pedir documentos, e mantém a aprovação no atendimento", async () => {
     const lead = await legacyTriage();
-    async function decide(
-      action: "ANALYZE" | "REQUEST_DOCUMENT" | "CONTACT",
-      reason?: string
-    ) {
+    async function decide(action: "ANALYZE" | "APPROVE" | "CONTACT") {
       const current = await prisma.recruitmentLead.findUniqueOrThrow({
         where: { id: lead.id },
       });
@@ -320,57 +283,36 @@ describe("cadastro e análise simplificados", () => {
         expectedVersion: current.version,
         actor,
         action,
-        ...(reason ? { reason } : {}),
       });
     }
+    const status = async () =>
+      (await prisma.recruitmentLead.findUniqueOrThrow({ where: { id: lead.id } }))
+        .status;
     expect((await decide("ANALYZE")).ok).toBe(true);
-    expect(
-      (await decide("REQUEST_DOCUMENT", "Documento de identidade")).ok
-    ).toBe(true);
-    expect(
-      (
-        await prisma.recruitmentLead.findUniqueOrThrow({
-          where: { id: lead.id },
-        })
-      ).status
-    ).toBe("DOCUMENTACAO");
-    const requests = await prisma.outboxMessage.findMany({
+    expect(await status()).toBe("CONVERSA_PENDENTE");
+    // Termos ativos de outros testes precisam do aceite registrado pelo admin.
+    for (const terms of await prisma.termsVersion.findMany({ where: { isActive: true } }))
+      await prisma.termsAcceptance.create({
+        data: {
+          leadId: lead.id,
+          termsVersionId: terms.id,
+          channel: "admin-confirmed:admin",
+          consentId: randomUUID(),
+        },
+      });
+    expect((await decide("APPROVE")).ok).toBe(true);
+    expect(await status()).toBe("ATIVA");
+    const notices = await prisma.outboxMessage.findMany({
       where: {
         recipient: lead.phoneE164!,
         idempotencyKey: { startsWith: "recruitment-decision:" },
       },
-      orderBy: { createdAt: "asc" },
     });
-    expect(requests).toHaveLength(2);
-    expect(requests[1]?.payload).toMatchObject({
-      text: expect.stringContaining("Documento de identidade"),
-    });
-    // Legacy stage remains intact when asking for a replacement document.
-    await prisma.recruitmentLead.update({
-      where: { id: lead.id },
-      data: { status: "ONBOARDING" },
-    });
+    expect(notices).toHaveLength(2);
     expect(
-      (await decide("REQUEST_DOCUMENT", "Foto legível do documento")).ok
-    ).toBe(true);
-    expect(
-      (
-        await prisma.recruitmentLead.findUniqueOrThrow({
-          where: { id: lead.id },
-        })
-      ).status
-    ).toBe("ONBOARDING");
-    await prisma.recruitmentLead.update({
-      where: { id: lead.id },
-      data: { status: "ATIVA" },
-    });
+      notices.some((notice) => JSON.stringify(notice.payload).includes("documento"))
+    ).toBe(false);
     expect((await decide("CONTACT")).ok).toBe(true);
-    expect(
-      (
-        await prisma.recruitmentLead.findUniqueOrThrow({
-          where: { id: lead.id },
-        })
-      ).status
-    ).toBe("ATIVA");
+    expect(await status()).toBe("ATIVA");
   });
 });

@@ -10,8 +10,13 @@ describe("transitionRecruitmentStatus", () => {
     for (const status of RECRUITMENT_STATUSES) expect(Object.hasOwn(ALLOWED_TRANSITIONS, status)).toBe(true);
   });
   it("aceita o caminho legado e o cadastro simples, com requisitos conferidos no caso de uso", () => {
-    const path: RecruitmentStatus[] = ["LEAD", "PRE_CADASTRO", "TRIAGEM", "CONVERSA_PENDENTE", "ENTREVISTA", "REFERENCIA", "PRE_APROVADA", "DOCUMENTACAO", "ONBOARDING", "TESTE_OPERACIONAL", "EM_VALIDACAO", "ATIVA"];
+    const path: RecruitmentStatus[] = ["LEAD", "PRE_CADASTRO", "TRIAGEM", "CONVERSA_PENDENTE", "ENTREVISTA", "REFERENCIA", "PRE_APROVADA", "ONBOARDING", "TESTE_OPERACIONAL", "EM_VALIDACAO", "ATIVA"];
     path.slice(1).forEach((to, index) => expect(transitionRecruitmentStatus(path[index]!, to).ok).toBe(true));
+    // Sem etapa de documentos: o admin aprova direto da análise; quem já estava
+    // em DOCUMENTACAO ainda pode seguir.
+    expect(transitionRecruitmentStatus("CONVERSA_PENDENTE", "ATIVA").ok).toBe(true);
+    expect(transitionRecruitmentStatus("CONVERSA_PENDENTE", "DOCUMENTACAO").ok).toBe(false);
+    expect(transitionRecruitmentStatus("DOCUMENTACAO", "ATIVA").ok).toBe(true);
     expect(transitionRecruitmentStatus("PRE_CADASTRO", "ATIVA").ok).toBe(true);
   });
   it("permite recuperação e bloqueia estados terminais", () => {

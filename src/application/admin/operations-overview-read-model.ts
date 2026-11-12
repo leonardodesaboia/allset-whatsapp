@@ -8,7 +8,6 @@ export type OperationsOverview = {
   outboxOverdue: number;
   outboxFailed: number;
   outboxDeadLetter: number;
-  documentsPending: number;
   opportunitiesWithoutResponse: number;
   leadsNeedingAttention: number;
   staleBookings: number;
@@ -28,7 +27,6 @@ export async function getOperationsOverview(
     | "booking"
     | "customerBookingConversation"
     | "outboxMessage"
-    | "professionalDocument"
     | "serviceOpportunity"
     | "recruitmentLead"
     | "propertyPricingTier"
@@ -51,7 +49,6 @@ export async function getOperationsOverview(
     outboxOverdue,
     outboxFailed,
     outboxDeadLetter,
-    documentsPending,
     opportunitiesWithoutResponse,
     leadsNeedingAttention,
     staleBookings,
@@ -76,7 +73,6 @@ export async function getOperationsOverview(
     }),
     prisma.outboxMessage.count({ where: { status: "FAILED" } }),
     prisma.outboxMessage.count({ where: { status: "DEAD_LETTER" } }),
-    prisma.professionalDocument.count({ where: { status: "RECEIVED" } }),
     prisma.serviceOpportunity.count({
       where: {
         status: "OPEN",
@@ -122,7 +118,6 @@ export async function getOperationsOverview(
     outboxOverdue,
     outboxFailed,
     outboxDeadLetter,
-    documentsPending,
     opportunitiesWithoutResponse,
     leadsNeedingAttention,
     staleBookings,

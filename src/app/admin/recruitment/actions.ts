@@ -20,12 +20,7 @@ import {
   startInterview,
   verifyReference,
 } from "@/application/recruitment/interviews-references.usecase";
-import {
-  reviewProfessionalDocument,
-  receiveProfessionalDocument,
-} from "@/application/recruitment/documents-terms.usecase";
-import { acceptTerms } from "@/application/recruitment/documents-terms.usecase";
-import { createRuntimeStorage } from "@/infrastructure/storage/storage-runtime";
+import { acceptTerms } from "@/application/recruitment/terms-acceptance.usecase";
 import {
   completeOnboardingContent,
   startOperationalTest,
@@ -140,12 +135,6 @@ const verifyReferenceSchema = z.object({
   wouldHireAgain: z
     .enum(["YES", "NO", "UNSURE"] as [string, ...string[]])
     .optional(),
-});
-const reviewDocumentSchema = z.object({
-  documentId: uuidField,
-  leadId: uuidField,
-  status: z.enum(["APPROVED", "REJECTED"]),
-  reason: optionalTrimmed(500),
 });
 const decideValidationSchema = z.object({
   leadId: uuidField,
@@ -371,85 +360,6 @@ export async function addAssessmentAction(input: {
     );
   }
 }
-export async function reviewDocumentAction(input: {
-  documentId: string;
-  leadId: string;
-  status: "APPROVED" | "REJECTED";
-  reason?: string;
-}) {
-  const actor = await currentActor();
-  if (!actor) return result(false, "Sessão expirada.");
-  const parsed = reviewDocumentSchema.safeParse(input);
-  if (!parsed.success)
-    return result(
-      false,
-      parsed.error.issues[0]?.message ?? "Dados do documento inválidos."
-    );
-  try {
-    const reviewed = await reviewProfessionalDocument(prisma, {
-      ...(parsed.data as typeof input),
-      reviewer: actor,
-    });
-    if (!reviewed.ok) return result(false, reviewed.error.message);
-    revalidatePath(`/admin/recruitment/${reviewed.value.leadId}`);
-    revalidatePath("/admin/documents");
-    revalidatePath("/admin", "layout");
-    return result(true);
-  } catch (error) {
-    return result(
-      false,
-      actionError(error, "Não foi possível revisar documento.")
-    );
-  }
-}
-
-const DOCUMENT_ERROR_MESSAGES: Record<string, string> = {
-  INVALID_DOCUMENT: "Arquivo inválido. Envie um JPEG, PNG ou PDF de até 15 MB.",
-  DOCUMENT_REQUIREMENT_NOT_FOUND:
-    "Este requisito documental não está mais ativo.",
-  LEAD_NOT_FOUND: "Profissional não encontrada.",
-  DOCUMENT_NOT_ALLOWED:
-    "A profissional ainda não está na etapa de documentação.",
-};
-
-/** Lets an admin register a document received by another channel (call,
- * in-person, email) while WhatsApp-native upload isn't implemented. */
-export async function uploadProfessionalDocumentAction(input: {
-  leadId: string;
-  requirementId: string;
-  file: File;
-}) {
-  const actor = await currentActor();
-  if (!actor) return result(false, "Sessão expirada.");
-  if (!input.file || input.file.size === 0)
-    return result(false, "Selecione um arquivo.");
-  try {
-    const data = new Uint8Array(await input.file.arrayBuffer());
-    const received = await receiveProfessionalDocument(
-      prisma,
-      createRuntimeStorage(),
-      {
-        leadId: input.leadId,
-        requirementId: input.requirementId,
-        contentType: input.file.type,
-        data,
-        actor,
-      }
-    );
-    if (!received.ok)
-      return result(
-        false,
-        DOCUMENT_ERROR_MESSAGES[received.error.code] ?? received.error.message
-      );
-    revalidatePath(`/admin/recruitment/${input.leadId}`);
-    return result(true);
-  } catch (error) {
-    return result(
-      false,
-      actionError(error, "Não foi possível enviar o documento.")
-    );
-  }
-}
 export async function confirmTermsAcceptanceAction(input: {
   leadId: string;
   termsVersionId: string;
@@ -618,10 +528,10 @@ export async function decideValidationAction(input: {
   }
 }
 
-export async function recruitmentDecisionAction(input: { leadId: string; expectedVersion: number; action: "ANALYZE" | "REQUEST_DOCUMENT" | "APPROVE" | "REJECT" | "FUTURE" | "CONTACT"; reason?: string }) {
+export async function recruitmentDecisionAction(input: { leadId: string; expectedVersion: number; action: "ANALYZE" | "APPROVE" | "REJECT" | "FUTURE" | "CONTACT"; reason?: string }) {
   const actor = await currentActor();
   if (!actor) return result(false, "Sessão expirada.");
-  const parsed = z.object({ leadId: uuidField, expectedVersion: z.number().int().min(0), action: z.enum(["ANALYZE", "REQUEST_DOCUMENT", "APPROVE", "REJECT", "FUTURE", "CONTACT"]), reason: optionalTrimmed(500) }).safeParse(input);
+  const parsed = z.object({ leadId: uuidField, expectedVersion: z.number().int().min(0), action: z.enum(["ANALYZE", "APPROVE", "REJECT", "FUTURE", "CONTACT"]), reason: optionalTrimmed(500) }).safeParse(input);
   if (!parsed.success) return result(false, "Dados da decisão inválidos.");
   const decision = await recruitmentAdminDecision(prisma, { leadId: parsed.data.leadId, expectedVersion: parsed.data.expectedVersion, action: parsed.data.action, actor, ...(parsed.data.reason !== undefined ? { reason: parsed.data.reason } : {}) });
   revalidatePath("/admin/recruitment");
