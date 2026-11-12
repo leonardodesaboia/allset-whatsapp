@@ -1,5 +1,4 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { randomUUID } from "node:crypto";
 import { env } from "../../env";
 import { isEligibleForOpportunity } from "../../domain/marketplace/opportunity-matching-policy";
 import { formatOpportunityMessage } from "../../domain/marketplace/opportunity-message";
@@ -8,6 +7,7 @@ import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.us
 import { recordAuditLog } from "../audit/record-audit-log.usecase";
 import { transitionBookingStatus } from "../../domain/booking/booking-state-machine";
 import type { BookingStatus } from "../../domain/booking/booking-status";
+import { offerIdempotencyKey } from "./offer-delivery-state";
 
 export type NotifyOpportunityResult = {
   notified: number;
@@ -18,9 +18,14 @@ export type NotifyOpportunityResult = {
 /**
  * Recovers confirmed requests that found no eligible professional: runs from
  * the dispatch worker and the marketplace cron, and as soon as a professional
- * accepts proposals.
+ * accepts proposals. Each booking is isolated: an inconsistent request must not
+ * block the others nor the outbox drain that runs after this recovery.
  */
-export async function retryConfirmedBookings(prisma: PrismaClient) {
+export async function retryConfirmedBookings(prisma: PrismaClient): Promise<{
+  dispatched: number;
+  failures: Array<{ bookingId: string; error: unknown }>;
+}> {
+  const failures: Array<{ bookingId: string; error: unknown }> = [];
   const subscribers = await prisma.recruitmentLead.count({
     where: {
       status: { in: ["ATIVA", "PREFERENCIAL"] },
@@ -28,7 +33,7 @@ export async function retryConfirmedBookings(prisma: PrismaClient) {
       phoneE164: { not: null },
     },
   });
-  if (!subscribers) return { dispatched: 0 };
+  if (!subscribers) return { dispatched: 0, failures };
   const pending = await prisma.booking.findMany({
     where: {
       status: "AWAITING_CUSTOMER_CONFIRMATION",
@@ -41,10 +46,14 @@ export async function retryConfirmedBookings(prisma: PrismaClient) {
   });
   let dispatched = 0;
   for (const booking of pending) {
-    if ((await notifyOpportunity(prisma, { bookingId: booking.id, actor: "system:marketplace-retry" })).dispatched)
-      dispatched += 1;
+    try {
+      if ((await notifyOpportunity(prisma, { bookingId: booking.id, actor: "system:marketplace-retry" })).dispatched)
+        dispatched += 1;
+    } catch (error) {
+      failures.push({ bookingId: booking.id, error });
+    }
   }
-  return { dispatched };
+  return { dispatched, failures };
 }
 
 export async function notifyOpportunity(
@@ -182,21 +191,18 @@ export async function notifyOpportunityInTransaction(
   });
 
   for (const lead of eligible) {
-    const responseToken = randomUUID()
-      .replaceAll("-", "")
-      .slice(0, 10)
-      .toUpperCase();
     await tx.opportunityResponse.create({
-      data: { opportunityId: opportunity.id, leadId: lead.id, responseToken },
+      data: { opportunityId: opportunity.id, leadId: lead.id },
     });
+    // Texto provisório: o envio regrava local e prazo individual da proposta.
     const messageText = formatOpportunityMessage({
       neighborhood: opportunity.neighborhood,
       scheduledAt: opportunity.scheduledAt,
       durationMinutes: booking.durationMinutes,
       paymentCents: opportunity.paymentCents,
       serviceDetails: booking.customerNotes,
-      expiresAt: opportunity.expiresAt,
-      responseToken,
+      expiresAt: new Date(now.getTime() + env.OPPORTUNITY_RESPONSE_MINUTES * 60 * 1000),
+      sentAt: now,
     });
     await enqueueOutboundMessage(tx, {
       provider: lead.conversation?.provider ?? env.MESSAGING_DEFAULT_PROVIDER,
@@ -204,7 +210,7 @@ export async function notifyOpportunityInTransaction(
       payload: { version: 1, type: "TEXT", text: messageText },
       // Propostas saem depois das respostas de conversa já na fila.
       priority: -1,
-      idempotencyKey: `opportunity:${opportunity.id}:${lead.id}:offer`,
+      idempotencyKey: offerIdempotencyKey(opportunity.id, lead.id),
       correlationId: opportunity.id,
       actor,
     });

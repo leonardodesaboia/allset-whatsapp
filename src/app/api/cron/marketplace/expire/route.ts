@@ -14,7 +14,9 @@ export async function GET(request: Request) {
   try {
     const result = await expireOpportunities(prisma);
     const retried = await retryConfirmedBookings(prisma);
-    return Response.json({ ok: true, ...result, retried: retried.dispatched });
+    for (const failure of retried.failures)
+      logger.error({ err: failure.error, bookingId: failure.bookingId }, "Falha ao distribuir pedido confirmado no cron");
+    return Response.json({ ok: true, ...result, retried: retried.dispatched, retryFailures: retried.failures.length });
   } catch (error) {
     logger.error({ err: error }, "Falha ao expirar oportunidades no cron");
     return Response.json({ ok: false, error: "OPPORTUNITY_EXPIRATION_FAILED" }, { status: 500 });

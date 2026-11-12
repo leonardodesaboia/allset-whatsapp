@@ -41,11 +41,11 @@ export const QUESTIONS: Partial<Record<ConversationState, QuestionDefinition>> =
     },
     REGIONS: {
       key: "REGIONS",
-      text: "Em quais bairros ou regiões você pode trabalhar? Exemplo: Centro e bairros próximos. Pode escrever ou mandar áudio.",
+      text: "Em quais bairros ou regiões você pode trabalhar? Exemplo: Centro e bairros próximos.",
     },
     EXPERIENCE_KIND: {
       key: "EXPERIENCE_KIND",
-      text: "Você já trabalhou com limpeza?\n1 — Sim, com carteira ou em empresa\n2 — Sim, como diarista\n3 — Ainda não\nPode responder com o número, texto ou áudio.",
+      text: "Você já trabalhou com limpeza?\n1 — Sim, com carteira ou em empresa\n2 — Sim, como diarista\n3 — Ainda não\nPode responder com o número ou por texto.",
       options: ["FORMAL", "DIARISTA", "NONE"],
     },
     CONFIRMATION: {
@@ -65,11 +65,11 @@ export const QUESTIONS: Partial<Record<ConversationState, QuestionDefinition>> =
     },
     NAME: {
       key: "NAME",
-      text: "Para começar, como você se chama? Exemplo: Maria Silva. Pode escrever ou mandar um áudio. Se precisar, escreva AJUDA a qualquer momento.",
+      text: "Para começar, como você se chama? Exemplo: Maria Silva. Se precisar, escreva AJUDA a qualquer momento.",
     },
     NEIGHBORHOOD: {
       key: "NEIGHBORHOOD",
-      text: "Em qual bairro você mora? Pode escrever ou mandar áudio.",
+      text: "Em qual bairro você mora?",
     },
     PROFESSIONAL_EXPERIENCE: {
       key: "PROFESSIONAL_EXPERIENCE",
@@ -78,8 +78,8 @@ export const QUESTIONS: Partial<Record<ConversationState, QuestionDefinition>> =
     },
     EXPERIENCE_DURATION: {
       key: "EXPERIENCE_DURATION",
-      text: "Há mais ou menos quanto tempo?\n1 — Menos de 1 ano\n2 — De 1 a 3 anos\n3 — Mais de 3 anos\n4 — Prefiro responder por áudio",
-      options: ["LT_1Y", "Y1_3", "GT_3Y", "BY_AUDIO"],
+      text: "Há mais ou menos quanto tempo?\n1 — Menos de 1 ano\n2 — De 1 a 3 anos\n3 — Mais de 3 anos",
+      options: ["LT_1Y", "Y1_3", "GT_3Y"],
     },
     INFORMAL_EXPERIENCE: {
       key: "INFORMAL_EXPERIENCE",
@@ -94,7 +94,7 @@ export const QUESTIONS: Partial<Record<ConversationState, QuestionDefinition>> =
     },
     AVAILABILITY: {
       key: "AVAILABILITY",
-      text: "Quando você pode trabalhar?\n1 — Segunda a sexta de manhã\n2 — Segunda a sexta à tarde\n3 — Sábado\n4 — Domingo\nPode escolher mais de uma (exemplo: 1 e 3), escrever outros dias e turnos ou mandar áudio.",
+      text: "Quando você pode trabalhar?\n1 — Segunda a sexta de manhã\n2 — Segunda a sexta à tarde\n3 — Sábado\n4 — Domingo\nPode escolher mais de uma (exemplo: 1 e 3), ou escrever outros dias e turnos.",
     },
   };
 export function normalizeAnswer(value: string): string {
@@ -289,7 +289,7 @@ export function parseAnswer(
   const numeric = {
     CHANNEL_PREFERENCE: ["WHATSAPP", "PHONE"],
     PROFESSIONAL_EXPERIENCE: ["SIM", "NAO"],
-    EXPERIENCE_DURATION: ["LT_1Y", "Y1_3", "GT_3Y", "BY_AUDIO"],
+    EXPERIENCE_DURATION: ["LT_1Y", "Y1_3", "GT_3Y"],
     INFORMAL_EXPERIENCE: ["SIM", "NAO"],
     SERVICE_AREA: ["SIM", "TALVEZ", "NAO"],
   } as const;

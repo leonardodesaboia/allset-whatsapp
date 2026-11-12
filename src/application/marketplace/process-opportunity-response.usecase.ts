@@ -9,6 +9,7 @@ import { isEligibleForOpportunity } from "../../domain/marketplace/opportunity-m
 import { parseOpportunityReply } from "../../domain/marketplace/opportunity-reply";
 import { recordAuditLog } from "../audit/record-audit-log.usecase";
 import { enqueueOutboundMessage } from "../messaging/enqueue-outbound-message.usecase";
+import { deliveredResponseIds, releaseHeldOffers } from "./offer-delivery-state";
 
 type Database = PrismaClient | Prisma.TransactionClient;
 
@@ -105,6 +106,19 @@ export async function processOpportunityResponse(
     });
     if (!claimedInbound.count) return { outcome: "DUPLICATE_INBOUND" as const };
 
+    // Uma proposta ainda na fila (ou cujo envio falhou) nunca pode ser aceita:
+    // a profissional não viu data, duração nem bairro.
+    if (!(await deliveredResponseIds(tx, [response])).has(response.id)) {
+      await enqueueText(tx, {
+        provider: inbound.provider,
+        recipient: response.lead.phoneE164,
+        text: "Não encontramos uma proposta aberta para você agora. Avisaremos quando surgir uma nova oportunidade.",
+        idempotencyKey: `opportunity:${response.id}:undelivered:${inbound.id}`,
+        correlationId: response.opportunity.id,
+      });
+      return { outcome: "NOT_FOUND" as const };
+    }
+
     if (response.response !== null || response.opportunity.status !== "OPEN") {
       return { outcome: "ALREADY_FILLED" as const };
     }
@@ -141,6 +155,8 @@ export async function processOpportunityResponse(
         data: { response: "DECLINED", respondedAt: now },
       });
       if (!declined.count) return { outcome: "ALREADY_FILLED" as const };
+      // A próxima proposta dela pode sair sem esperar o prazo desta.
+      await releaseHeldOffers(tx, [lead.phoneE164], now);
 
       await enqueueText(tx, {
         provider: inbound.provider,
@@ -322,6 +338,8 @@ export async function processOpportunityResponse(
         correlationId: opportunity.id,
       });
     }
+    // Quem tinha esta proposta aberta recebe a próxima sem esperar o prazo.
+    await releaseHeldOffers(tx, [lead.phoneE164, ...pendingResponses.map((pending) => pending.lead.phoneE164)], now);
 
     await recordAuditLog(tx, {
       actor: "system:marketplace",

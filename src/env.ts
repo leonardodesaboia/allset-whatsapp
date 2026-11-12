@@ -91,6 +91,8 @@ const envSchema = z
     RECRUITMENT_REENGAGEMENT_MAX_ATTEMPTS: positiveIntegerEnv(2),
     CUSTOMER_REENGAGEMENT_AFTER_HOURS: positiveIntegerEnv(24),
     OPPORTUNITY_EXPIRY_HOURS: positiveIntegerEnv(4),
+    // Prazo de cada profissional para responder a proposta recebida.
+    OPPORTUNITY_RESPONSE_MINUTES: positiveIntegerEnv(30),
     BOOKING_STALE_AFTER_HOURS: positiveIntegerEnv(24),
     MESSAGING_DEFAULT_PROVIDER: z
       .string()

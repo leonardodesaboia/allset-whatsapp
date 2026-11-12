@@ -24,8 +24,18 @@ export async function dispatchMessageProcessor(
 ): Promise<void> {
   const reg = getRegistry();
   // Pedidos confirmados sem profissional elegível são distribuídos assim que
-  // houver alguém inscrita.
-  await retryConfirmedBookings(prisma);
+  // houver alguém inscrita. A recuperação é secundária: uma falha nela nunca
+  // pode impedir a drenagem da outbox nem o agendamento da próxima continuação.
+  try {
+    const retried = await retryConfirmedBookings(prisma);
+    for (const failure of retried.failures)
+      logger.error(
+        { err: failure.error, bookingId: failure.bookingId },
+        "Falha ao distribuir pedido confirmado"
+      );
+  } catch (error) {
+    logger.error({ err: error }, "Falha ao recuperar pedidos confirmados");
+  }
   let dispatched = 0;
 
   while (dispatched < batchLimit) {

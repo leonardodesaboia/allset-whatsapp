@@ -141,7 +141,8 @@ describe("processOpportunityResponse", () => {
       },
     });
     const response = await prisma.opportunityResponse.create({
-      data: { opportunityId: opportunity.id, leadId: scene.lead1.id },
+      // Proposta entregue: o prazo individual é gravado no envio.
+      data: { opportunityId: opportunity.id, leadId: scene.lead1.id, expiresAt: new Date(Date.now() + 30 * 60 * 1000) },
     });
     const inbound = (suffix: string) => scene.makeInbound(scene.lead1.phoneE164!, "sim", `${ts}-${suffix}`);
     return { booking, opportunity, response, inbound };

@@ -6,7 +6,8 @@ import { recordAuditLog } from "../audit/record-audit-log.usecase";
 import { ProviderAuthenticationError } from "../../domain/messaging/provider-authentication-error";
 import { env } from "../../env";
 import { isRetiredPaymentMessage } from "../../domain/messaging/retired-payment-message";
-import { prepareOpportunityDelivery } from "../marketplace/prepare-opportunity-delivery.usecase";
+import { prepareOpportunityDelivery, type PreparedOpportunityDelivery } from "../marketplace/prepare-opportunity-delivery.usecase";
+import { findOfferBlockUntil } from "../marketplace/offer-delivery-state";
 import { isEligibleForOpportunity } from "../../domain/marketplace/opportunity-matching-policy";
 
 const maxAttempts = 8;
@@ -63,7 +64,8 @@ export async function dispatchNextOutboxMessage(
     });
     return cancelled.count ? prisma.outboxMessage.findUnique({ where: { id: candidate.id } }) : null;
   }
-  if (candidate.idempotencyKey.endsWith(":offer") && candidate.correlationId) {
+  const isOffer = candidate.idempotencyKey.endsWith(":offer");
+  if (isOffer && candidate.correlationId) {
     // Ofertas encerradas ou para quem retirou o aceite não chegam a gastar envio.
     const [opportunity, lead] = await Promise.all([
       prisma.serviceOpportunity.findUnique({ where: { id: candidate.correlationId }, select: { status: true } }),
@@ -116,6 +118,24 @@ export async function dispatchNextOutboxMessage(
       });
       if (throttle.nextSendAt > new Date()) return null;
     }
+    // Uma proposta aberta por profissional: assim SIM/NÃO nunca é ambíguo.
+    // Roda sob a lease do provider, então duas propostas não saem juntas.
+    // A proposta em espera não consome o intervalo e sai da frente da fila.
+    if (isOffer && candidate.correlationId && candidate.status !== "SENDING") {
+      const blockedUntil = await findOfferBlockUntil(prisma, {
+        recipient: candidate.recipient,
+        opportunityId: candidate.correlationId,
+        outboxId: candidate.id,
+        now,
+      });
+      if (blockedUntil) {
+        const held = await prisma.outboxMessage.updateMany({
+          where: { id: candidate.id, status: candidate.status, attempts: candidate.attempts },
+          data: { availableAt: blockedUntil },
+        });
+        return held.count ? await prisma.outboxMessage.findUnique({ where: { id: candidate.id } }) : null;
+      }
+    }
     const claimed = await prisma.outboxMessage.updateMany({
       where: {
         id: candidate.id,
@@ -164,7 +184,8 @@ export async function dispatchNextOutboxMessage(
 
     try {
       let payload = candidate.payload as unknown as OutboundMessagePayload;
-      if (candidate.idempotencyKey.endsWith(":offer") && candidate.correlationId) {
+      let offerDelivery: PreparedOpportunityDelivery["delivery"] | null = null;
+      if (isOffer && candidate.correlationId) {
         // Local público e prazo são definidos no envio, inclusive em retries.
         const prepared = await prepareOpportunityDelivery(prisma, {
           ...candidate,
@@ -173,7 +194,8 @@ export async function dispatchNextOutboxMessage(
           leaseExpiresAt,
         });
         if (!prepared) return await prisma.outboxMessage.findUnique({ where: { id: candidate.id } });
-        payload = prepared;
+        payload = prepared.payload;
+        offerDelivery = prepared.delivery;
       }
       const sent = await gateway.send({
         recipient: candidate.recipient,
@@ -200,6 +222,12 @@ export async function dispatchNextOutboxMessage(
           },
         });
         if (!completed.count) return null;
+        // Só agora a proposta passa a valer: o prazo individual marca a entrega.
+        if (offerDelivery)
+          await tx.opportunityResponse.update({
+            where: { id: offerDelivery.responseId },
+            data: { sentAt: offerDelivery.sentAt, expiresAt: offerDelivery.expiresAt },
+          });
         await tx.messagingProviderState.updateMany({
           where: { provider, leaseToken },
           data: { blockedUntil: null, lastError: null, httpStatus: null },
